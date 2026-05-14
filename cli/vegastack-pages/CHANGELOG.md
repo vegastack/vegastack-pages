@@ -1,5 +1,11 @@
 # @vegastack/pages
 
+## 0.1.12
+
+### Patch Changes
+
+- Make OAuth device verification redirect unauthenticated users with an absolute login URL so production clients do not receive an invalid relative redirect target.
+
 ## 0.1.11
 
 ### Patch Changes

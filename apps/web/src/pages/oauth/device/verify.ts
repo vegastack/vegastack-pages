@@ -51,10 +51,9 @@ export const GET: APIRoute = ({ url, cookies }) => {
   const actor = getRequestActor(cookies);
   if (!actor.user) {
     const next = `/oauth/device/verify${url.search}`;
-    return Response.redirect(
-      `/app/login?redirect_to=${encodeURIComponent(next)}`,
-      302,
-    );
+    const target = new URL("/app/login", url);
+    target.searchParams.set("redirect_to", next);
+    return Response.redirect(target.toString(), 302);
   }
   const userCode = url.searchParams.get("user_code") ?? "";
   if (!userCode) {

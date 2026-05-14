@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.12
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Make OAuth device verification redirect unauthenticated users with an absolute login URL so production clients do not receive an invalid relative redirect target.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.12
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.12
+  - @vegastack/pages-mcp@0.1.12
+  - @vegastack/pages-renderer@0.1.12
+  - @vegastack/pages-ui@0.1.12
+
 ## 0.1.11
 
 ### @vegastack/pages

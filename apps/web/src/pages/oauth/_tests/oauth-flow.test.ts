@@ -12,6 +12,7 @@ import { POST as consentPost } from "../authorize/consent";
 import { POST as tokenPost } from "../token";
 import { POST as revokePost } from "../revoke";
 import { POST as devicePost } from "../device";
+import { GET as deviceVerifyGet } from "../device/verify";
 import { GET as protectedResourceGet } from "../../.well-known/oauth-protected-resource";
 import { GET as authServerGet } from "../../.well-known/oauth-authorization-server";
 import { GET as authServerPathGet } from "../../.well-known/oauth-authorization-server/[...slug]";
@@ -795,6 +796,19 @@ describe("/mcp 401 + CORS + Host validation", () => {
 });
 
 describe("Device authorization grant", () => {
+  it("redirects unauthenticated verification to an absolute login URL", async () => {
+    const response = await deviceVerifyGet({
+      cookies: cookiesFor(null),
+      url: new URL(
+        "https://pages.example.test/oauth/device/verify?user_code=ABCD-EFGH",
+      ),
+    } as never);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://pages.example.test/app/login?redirect_to=%2Foauth%2Fdevice%2Fverify%3Fuser_code%3DABCD-EFGH",
+    );
+  });
+
   it("issues a device_code + user_code; approval lets the CLI redeem", async () => {
     const { workspace, user } = await seedWorkspaceAndUser();
     const client = await registerLocalClient(["http://127.0.0.1/callback"]);
