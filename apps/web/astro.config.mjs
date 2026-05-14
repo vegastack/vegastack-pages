@@ -56,25 +56,6 @@ export default defineConfig({
   output: "server",
   security: {
     allowedDomains: allowedDomainSources.map(toAllowedDomain),
-    csp: {
-      directives: [
-        "default-src 'self'",
-        "base-uri 'self'",
-        "object-src 'none'",
-        "frame-ancestors 'self'",
-        "form-action 'self'",
-        "img-src 'self' data: blob:",
-        "font-src 'self' data:",
-        "connect-src 'self'",
-        "frame-src 'self'",
-      ],
-      scriptDirective: {
-        resources: ["'self'"],
-      },
-      styleDirective: {
-        resources: ["'self'"],
-      },
-    },
   },
   adapter:
     target === "node"

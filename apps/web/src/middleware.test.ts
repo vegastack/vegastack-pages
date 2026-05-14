@@ -20,7 +20,16 @@ describe("security headers", () => {
     expect(csp).not.toContain("unsafe-eval");
   });
 
-  it("delegates HTML document CSP to Astro CSP hashing", () => {
+  it("leaves HTML documents without a middleware CSP and without Astro auto-CSP", () => {
+    // Astro 6's `security.csp` injects a <meta> CSP whose sha256 hashes only
+    // cover scripts/styles processed at build time. Our HTML pages also rely
+    // on `<script is:inline>` (theme + CSRF fetch wrapper in AppLayout.astro),
+    // `set:html` markdown that can carry inline styles, and runtime style
+    // injection from libraries like Sonner — none of which can be hashed
+    // ahead of time. Enabling Astro's auto-CSP therefore blocks the CSRF
+    // header injection and trips CSRF_BLOCKED on every browser mutation.
+    // Until we adopt a nonce-based HTML CSP end-to-end, both this middleware
+    // and astro.config.mjs must stay out of the HTML CSP business.
     const csp = contentSecurityPolicyForResponse({
       contentType: "text/html; charset=utf-8",
       pathname: "/p/get-started-a8f31c",
@@ -31,9 +40,9 @@ describe("security headers", () => {
     );
 
     expect(csp).toBeNull();
-    expect(config).toContain("csp:");
-    expect(config).not.toContain("unsafe-inline");
-    expect(config).not.toContain("unsafe-eval");
+    expect(config).not.toMatch(/^\s*csp:\s*\{/m);
+    expect(config).not.toContain("scriptDirective");
+    expect(config).not.toContain("styleDirective");
   });
 
   it("emits HSTS only for production HTTPS requests", () => {

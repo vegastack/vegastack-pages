@@ -2,6 +2,42 @@
 
 All notable changes to VegaStack Pages are documented here.
 
+## 0.1.5
+
+Hotfix for v0.1.4. Production was rejecting every browser mutation with
+"Cross-site browser mutations are not allowed." Root cause was Astro 6's
+`security.csp` block in `apps/web/astro.config.mjs`: it injects a
+`<meta http-equiv="Content-Security-Policy">` whose sha256 hashes only
+cover scripts/styles processed at build time, so the `<script is:inline>`
+in `AppLayout.astro` — which wraps `window.fetch` to attach the
+`x-vpg-csrf-token` header — was being blocked by CSP. With the wrapper
+never installed, POST/PUT/PATCH/DELETE requests went out without the
+CSRF header, and `middleware.ts` rejected them with `CSRF_BLOCKED`.
+
+### Fixed
+
+- Members invite, member delete, and every other browser mutation now
+  succeed. The `astro.config.mjs` `security.csp` sub-block is removed
+  so the auto-injected `<meta>` CSP is no longer emitted on HTML pages,
+  and the CSRF fetch-wrapper in `AppLayout.astro` installs cleanly.
+- Console no longer floods with "Executing inline script violates the
+  following Content Security Policy directive" and "Applying inline
+  style violates the following…" on `/p/*` and `/app/*` pages.
+
+### Changed
+
+- HTML responses now ship without a top-level CSP (matching the original
+  middleware design — `contentSecurityPolicyForResponse` has always
+  returned `null` for `text/html`). CSP enforcement on `/api/*`, `/mcp`,
+  and attachment downloads is unchanged, and the iframe-srcdoc CSP in
+  `/p/[slugId]` for HTML-page previews is unchanged. Re-enabling a
+  top-level HTML CSP later will require a nonce-based approach via
+  `Astro.csp?.insertScriptHash` (or moving inline scripts to external
+  modules) so the CSRF wrapper, theme bootstrap, and Sonner/Prism inline
+  styles continue to work.
+- `middleware.test.ts` locks in the new contract and documents the
+  reason, so the auto-CSP block can't quietly come back.
+
 ## 0.1.4
 
 Hotfix for v0.1.3. The well-known + waitUntil change shipped in v0.1.3
