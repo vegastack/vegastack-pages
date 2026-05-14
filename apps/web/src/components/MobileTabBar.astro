@@ -1,0 +1,129 @@
+---
+interface Props {
+  pageId?: string;
+  showComments?: boolean;
+  commentsBadge?: number;
+}
+
+const { pageId, showComments = false, commentsBadge = 0 } = Astro.props;
+---
+
+<nav class="vpg-mtab-bar" aria-label="Primary">
+  <button
+    type="button"
+    class="vpg-mtab-item"
+    data-vpg-sidebar-toggle
+    aria-controls="vpg-sidebar"
+    aria-label="Open navigation"
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 12h18"></path>
+      <path d="M3 6h18"></path>
+      <path d="M3 18h18"></path>
+    </svg>
+    <span class="vpg-mtab-item-label">Pages</span>
+  </button>
+
+  <button
+    type="button"
+    class="vpg-mtab-item"
+    data-vpg-open-search
+    aria-label="Search"
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="8"></circle>
+      <path d="m21 21-4.3-4.3"></path>
+    </svg>
+    <span class="vpg-mtab-item-label">Search</span>
+  </button>
+
+  <a class="vpg-mtab-item" href="/app" aria-label="Workspace home">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"
+      ></path>
+    </svg>
+    <span class="vpg-mtab-item-label">Home</span>
+  </a>
+
+  {
+    showComments && pageId ? (
+      <button
+        type="button"
+        class="vpg-mtab-item"
+        data-vpg-open-comments
+        aria-label="Open comments"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+        </svg>
+        <span class="vpg-mtab-item-label">Comments</span>
+        <span
+          class="vpg-mtab-badge vpg-mtab-badge--dot"
+          data-vpg-comments-dot
+          hidden={commentsBadge <= 0}
+          aria-hidden="true"
+        />
+      </button>
+    ) : (
+      <a class="vpg-mtab-item" href="/docs" aria-label="Docs">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+        </svg>
+        <span class="vpg-mtab-item-label">Docs</span>
+      </a>
+    )
+  }
+</nav>
+
+<script is:inline>
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const search = target.closest("[data-vpg-open-search]");
+    if (search) {
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent("vpg:open-search"));
+    }
+  });
+</script>

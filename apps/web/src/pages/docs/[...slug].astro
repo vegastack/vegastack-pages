@@ -1,0 +1,60 @@
+---
+import { render } from "astro:content";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { findAdjacent, loadDocs, docHref } from "../../lib/docs";
+
+export const prerender = true;
+
+export async function getStaticPaths() {
+  const docs = await loadDocs();
+  return docs.map((entry) => ({
+    params: { slug: entry.id },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const docs = await loadDocs();
+const { Content, headings } = await render(entry);
+const { prev, next } = findAdjacent(docs, entry.id);
+---
+
+<DocsLayout
+  title={entry.data.title}
+  description={entry.data.description}
+  category={entry.data.category}
+  currentId={entry.id}
+  headings={headings}
+  lastUpdated={entry.data.lastUpdated}
+>
+  <Content />
+
+  <nav class="prose-pagination" slot="pagination" aria-label="Doc pagination">
+    {
+      prev ? (
+        <a
+          class="prose-pagination-link prose-pagination-prev"
+          href={docHref(prev)}
+        >
+          <span class="prose-pagination-label">Previous</span>
+          <span class="prose-pagination-title">{prev.data.title}</span>
+        </a>
+      ) : (
+        <span class="prose-pagination-spacer" />
+      )
+    }
+    {
+      next ? (
+        <a
+          class="prose-pagination-link prose-pagination-next"
+          href={docHref(next)}
+        >
+          <span class="prose-pagination-label">Next</span>
+          <span class="prose-pagination-title">{next.data.title}</span>
+        </a>
+      ) : (
+        <span class="prose-pagination-spacer" />
+      )
+    }
+  </nav>
+</DocsLayout>

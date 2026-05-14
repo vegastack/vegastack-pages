@@ -1,0 +1,90 @@
+---
+type PublicPage = {
+  id: string;
+  slugId: string;
+  title: string;
+  folderPath: string | null;
+};
+
+type PublicFolder = {
+  id: string;
+  slugId: string;
+  name: string;
+  path: string;
+  parentFolderId: string | null;
+};
+
+type Props = {
+  rootFolderId: string;
+  currentPageId?: string | null;
+  currentFolderId?: string | null;
+  folders: PublicFolder[];
+  pages: PublicPage[];
+};
+
+const {
+  rootFolderId,
+  currentPageId = null,
+  currentFolderId = null,
+  folders,
+  pages,
+} = Astro.props;
+
+const root = folders.find((folder) => folder.id === rootFolderId);
+const rows: Array<
+  | { type: "folder"; depth: number; folder: PublicFolder }
+  | { type: "page"; depth: number; page: PublicPage }
+> = [];
+
+function collect(folder: PublicFolder, depth: number) {
+  rows.push({ type: "folder", depth, folder });
+  const children = folders
+    .filter((candidate) => candidate.parentFolderId === folder.id)
+    .sort((left, right) => left.name.localeCompare(right.name));
+  for (const child of children) collect(child, depth + 1);
+  for (const page of pages
+    .filter((candidate) => candidate.folderPath === folder.path)
+    .sort((left, right) => left.title.localeCompare(right.title))) {
+    rows.push({ type: "page", depth: depth + 1, page });
+  }
+}
+
+if (root) collect(root, 0);
+---
+
+{
+  root && (
+    <aside class="public-folder-sidebar" aria-label="Published folder">
+      <nav>
+        <ul>
+          {rows.map((row) => (
+            <li style={`--depth:${row.depth}`}>
+              {row.type === "folder" ? (
+                <a
+                  class:list={[
+                    "public-tree-link",
+                    "public-tree-link--folder",
+                    currentFolderId === row.folder.id && "is-current",
+                  ]}
+                  href={`/f/${row.folder.slugId}`}
+                >
+                  {row.folder.name}
+                </a>
+              ) : (
+                <a
+                  class:list={[
+                    "public-tree-link",
+                    currentPageId === row.page.id && "is-current",
+                  ]}
+                  href={`/p/${row.page.slugId}`}
+                >
+                  {row.page.title}
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </aside>
+  )
+}

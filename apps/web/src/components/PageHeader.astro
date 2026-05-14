@@ -1,0 +1,339 @@
+---
+import { ListTree, MessageSquareText } from "lucide-react";
+import { BreadcrumbCascade, type BreadcrumbSegment } from "./BreadcrumbCascade";
+import { PageActionsMenu } from "./PageActionsMenu";
+import { PageEditToggle } from "./PageEditToggle";
+import { PageStar } from "./PageStar";
+import { ShareButton } from "./ShareButton";
+import { SaveStatus } from "./SaveStatus";
+
+interface Props {
+  workspaceId: string;
+  workspaceName: string;
+  workspaceHref: string;
+  segments: BreadcrumbSegment[];
+  pageId: string;
+  resourceType?: "page" | "folder";
+  slugId: string;
+  title: string;
+  sourceType: "markdown" | "mdx" | "html";
+  canEdit: boolean;
+  canExportSource: boolean;
+  canComment: boolean;
+  canFavorite?: boolean;
+  canManageAccess?: boolean;
+  showNavigationToggle?: boolean;
+  initialFavorited?: boolean;
+  commentsBadge?: number;
+  headings?: Array<{
+    depth: number;
+    htmlId?: string;
+    slug: string;
+    text: string;
+  }>;
+  renderedHtml: string;
+  updatedAt?: string;
+}
+
+const {
+  workspaceId,
+  workspaceName,
+  workspaceHref,
+  segments,
+  pageId,
+  resourceType = "page",
+  slugId,
+  title,
+  sourceType,
+  canEdit,
+  canExportSource,
+  canComment,
+  canFavorite = true,
+  canManageAccess = false,
+  showNavigationToggle = true,
+  initialFavorited = false,
+  commentsBadge = 0,
+  headings = [],
+  renderedHtml,
+  updatedAt,
+} = Astro.props;
+
+function relativeEdit(iso?: string): string | null {
+  if (!iso) return null;
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return null;
+  const diff = Date.now() - then;
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diff < minute) return "Just now";
+  if (diff < hour) return `${Math.round(diff / minute)}m ago`;
+  if (diff < day) return `${Math.round(diff / hour)}h ago`;
+  if (diff < 30 * day) return `${Math.round(diff / day)}d ago`;
+  if (diff < 365 * day) return `${Math.round(diff / (30 * day))}mo ago`;
+  return `${Math.round(diff / (365 * day))}y ago`;
+}
+
+const edited = relativeEdit(updatedAt);
+const showEditButton = canEdit;
+const outlineItems = headings.filter(
+  (heading) => heading.depth >= 1 && heading.depth <= 3,
+);
+---
+
+<header class="vpg-shell-header" aria-label="Page header">
+  <div class="vpg-pheader-left">
+    {
+      showNavigationToggle && (
+        <button
+          type="button"
+          class="vpg-pheader-btn vpg-pheader-toggle"
+          data-vpg-sidebar-toggle
+          aria-controls="vpg-sidebar"
+          aria-expanded="false"
+          aria-label="Open workspace navigation"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 12h18" />
+            <path d="M3 6h18" />
+            <path d="M3 18h18" />
+          </svg>
+        </button>
+      )
+    }
+    <BreadcrumbCascade
+      client:load
+      workspaceName={workspaceName}
+      workspaceHref={workspaceHref}
+      segments={segments}
+    />
+  </div>
+
+  <div class="vpg-pheader-right">
+    <span
+      class="vpg-pheader-meta"
+      aria-live="polite"
+      data-vpg-pheader-save-slot
+    >
+      <SaveStatus client:only="react" />
+    </span>
+    {
+      edited && (
+        <span
+          class="vpg-pheader-meta"
+          title={updatedAt}
+          data-updated-at={updatedAt}
+          data-vpg-pheader-edited-slot
+        >
+          Edited {edited}
+        </span>
+      )
+    }
+
+    {showEditButton && <PageEditToggle client:load />}
+
+    <div
+      class="vpg-pheader-outline"
+      data-vpg-outline
+      data-empty={String(outlineItems.length === 0)}
+    >
+      <button
+        type="button"
+        class="vpg-pheader-btn vpg-pheader-outline-trigger"
+        data-vpg-outline-trigger
+        aria-expanded="false"
+        aria-label="Open outline"
+      >
+        <ListTree aria-hidden="true" />
+      </button>
+      <div class="vpg-pheader-outline-menu" data-vpg-outline-menu hidden>
+        <span class="vpg-pheader-outline-title">Outline</span>
+        <ol data-vpg-outline-list>
+          {
+            outlineItems.map((heading) => (
+              <li
+                class:list={[
+                  "docs-toc-item",
+                  `docs-toc-depth-${heading.depth}`,
+                ]}
+              >
+                <a
+                  href={`#${heading.htmlId ?? heading.slug}`}
+                  data-toc-anchor={heading.htmlId ?? heading.slug}
+                >
+                  {heading.text}
+                </a>
+              </li>
+            ))
+          }
+        </ol>
+      </div>
+    </div>
+
+    {
+      canManageAccess && (
+        <ShareButton
+          client:load
+          workspaceId={workspaceId}
+          resourceId={pageId}
+          resourceType={resourceType}
+          resourceSlugId={slugId}
+        />
+      )
+    }
+
+    {
+      canComment && (
+        <button
+          type="button"
+          class="vpg-pheader-btn vpg-pheader-comments"
+          data-vpg-open-comments
+          data-vpg-comments-trigger
+          data-has-open-comments={String(commentsBadge > 0)}
+          aria-label={
+            commentsBadge > 0
+              ? `Open comments, ${commentsBadge} open`
+              : "Open comments"
+          }
+        >
+          <MessageSquareText aria-hidden="true" />
+          <span
+            class="vpg-pheader-comment-dot"
+            data-vpg-comments-dot
+            hidden={commentsBadge <= 0}
+            aria-hidden="true"
+          />
+        </button>
+      )
+    }
+
+    {
+      canFavorite && (
+        <PageStar
+          client:load
+          workspaceId={workspaceId}
+          pageId={pageId}
+          initialFavorited={initialFavorited}
+        />
+      )
+    }
+
+    <PageActionsMenu
+      client:load
+      pageId={pageId}
+      slugId={slugId}
+      title={title}
+      sourceType={sourceType}
+      workspaceId={workspaceId}
+      canEdit={canEdit}
+      canComment={canComment}
+      canFavorite={canFavorite}
+      initialFavorited={initialFavorited}
+      canRestoreVersions={canEdit}
+      canExportSource={canExportSource}
+      renderedHtml={renderedHtml}
+    />
+  </div>
+</header>
+
+<script is:inline>
+  /* Comments toggle bridge, dispatches the event the in-page comments rail
+     listens for. */
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const btn = target.closest("[data-vpg-open-comments]");
+    if (!btn) return;
+    event.preventDefault();
+    window.dispatchEvent(new CustomEvent("vpg:open-comments", { detail: {} }));
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const outline = target.closest("[data-vpg-outline]");
+    for (const root of document.querySelectorAll("[data-vpg-outline]")) {
+      const trigger = root.querySelector("[data-vpg-outline-trigger]");
+      const menu = root.querySelector("[data-vpg-outline-menu]");
+      if (!(trigger instanceof HTMLElement) || !(menu instanceof HTMLElement)) {
+        continue;
+      }
+      if (outline === root && target.closest("[data-vpg-outline-trigger]")) {
+        const nextOpen = menu.hidden;
+        menu.hidden = !nextOpen;
+        trigger.setAttribute("aria-expanded", String(nextOpen));
+        continue;
+      }
+      if (!outline || outline !== root || target.closest("[data-toc-anchor]")) {
+        menu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+      }
+    }
+  });
+
+  function relativeEdit(iso) {
+    if (!iso) return null;
+    const then = Date.parse(iso);
+    if (Number.isNaN(then)) return null;
+    const diff = Math.max(0, Date.now() - then);
+    const minute = 60000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diff < minute) return "Just now";
+    if (diff < hour) return `${Math.round(diff / minute)}m ago`;
+    if (diff < day) return `${Math.round(diff / hour)}h ago`;
+    if (diff < 30 * day) return `${Math.round(diff / day)}d ago`;
+    if (diff < 365 * day) return `${Math.round(diff / (30 * day))}mo ago`;
+    return `${Math.round(diff / (365 * day))}y ago`;
+  }
+
+  function renderEditedSlot() {
+    const editedSlot = document.querySelector("[data-vpg-pheader-edited-slot]");
+    if (!(editedSlot instanceof HTMLElement)) return;
+    const updatedAt = editedSlot.dataset.updatedAt;
+    const edited = relativeEdit(updatedAt);
+    if (!edited) return;
+    editedSlot.textContent = `Edited ${edited}`;
+    editedSlot.title = updatedAt || "";
+  }
+
+  window.addEventListener("vpg:page-updated", (event) => {
+    const updatedAt = /** @type {CustomEvent<{ updatedAt?: string }>} */ (event)
+      .detail?.updatedAt;
+    if (!updatedAt) return;
+    const editedSlot = document.querySelector("[data-vpg-pheader-edited-slot]");
+    if (!(editedSlot instanceof HTMLElement)) return;
+    editedSlot.dataset.updatedAt = updatedAt;
+    renderEditedSlot();
+  });
+
+  window.addEventListener("vpg:comments-stats", (event) => {
+    const detail = /** @type {CustomEvent<{ open?: number }>} */ (event).detail;
+    const openCount = Number(detail?.open ?? 0);
+    const hasOpen = openCount > 0;
+    for (const dot of document.querySelectorAll("[data-vpg-comments-dot]")) {
+      if (dot instanceof HTMLElement) dot.hidden = !hasOpen;
+    }
+    for (const trigger of document.querySelectorAll(
+      "[data-vpg-comments-trigger]",
+    )) {
+      if (!(trigger instanceof HTMLElement)) continue;
+      trigger.dataset.hasOpenComments = String(hasOpen);
+      trigger.setAttribute(
+        "aria-label",
+        hasOpen ? `Open comments, ${openCount} open` : "Open comments",
+      );
+    }
+  });
+
+  renderEditedSlot();
+  window.setInterval(renderEditedSlot, 60000);
+</script>

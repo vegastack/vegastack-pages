@@ -1,0 +1,35 @@
+app:
+  name: vegastack-pages
+  base_url: http://localhost:4321
+  deployment_mode: self_hosted
+  public_url_mode: clean
+  home_mode: landing
+
+runtime:
+  target: cloudflare
+  environment: development
+
+cloudflare:
+  worker_name: vegastack-pages
+  compatibility_date: "2026-05-10"
+  d1_database_name: vegastack_pages
+  r2_bucket_name: vegastack-pages-content
+  durable_object_namespace: VEGASTACK_PAGES_EVENTS
+
+security:
+  setup_token_ttl_minutes: 30
+  version_retention_days: 30
+  session_ttl_days: 30
+  public_link_password_min_length: 8
+
+auth:
+  public_signup:
+    enabled: false
+    create_workspace_on_signup: true
+  magic_link:
+    enabled: true
+  google_oauth:
+    enabled: false
+
+email:
+  provider: none

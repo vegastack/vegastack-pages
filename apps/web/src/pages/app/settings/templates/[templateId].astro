@@ -1,0 +1,67 @@
+---
+import { templateBuilderFromMarkdown } from "@vegastack/pages-core";
+import SettingsLayout from "../../../../layouts/SettingsLayout.astro";
+import { loadSettings } from "../../../../lib/settings-data";
+import { templateService } from "../../../../lib/runtime";
+import { WorkspaceTemplateEditor } from "../../../../components/settings/WorkspaceTemplateEditor";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace } = result.context;
+const templateId = Astro.params.templateId ?? "";
+const withSource = await templateService.getTemplateWithSource(templateId);
+
+if (!withSource || withSource.template.workspaceId !== workspace.id) {
+  return new Response("Template not found", { status: 404 });
+}
+
+const { template, source } = withSource;
+---
+
+<SettingsLayout
+  title={`Edit template · ${template.name} · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="templates"
+  sectionLabel="Edit template"
+  description={`Update ${template.name}'s picker details, frontmatter prompts, and Markdown section structure.`}
+>
+  <a
+    slot="actions"
+    class="vpg-button vpg-button-ghost vpg-button-md"
+    href="/app/settings/templates"
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      width="14"
+      height="14"
+      aria-hidden="true"
+    >
+      <path d="m12 19-7-7 7-7"></path>
+      <path d="M19 12H5"></path>
+    </svg>
+    <span>Back to templates</span>
+  </a>
+
+  <WorkspaceTemplateEditor
+    client:load
+    workspaceId={workspace.id}
+    mode="edit"
+    initial={{
+      id: template.id,
+      name: template.name,
+      slug: template.slug,
+      description: template.description,
+      category: template.category,
+      sourceType: template.sourceType,
+      properties: template.properties,
+      builder: templateBuilderFromMarkdown(source),
+    }}
+  />
+</SettingsLayout>

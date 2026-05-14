@@ -1,0 +1,123 @@
+---
+import { Font } from "astro:assets";
+import "../styles/global.css";
+import "../styles/shell.css";
+import { SonnerHost } from "../components/SonnerHost";
+
+interface Props {
+  title?: string;
+  description?: string;
+  canonicalPath?: string;
+  robots?: string;
+}
+
+const {
+  title = "VegaStack Pages",
+  description = "VegaStack Pages is an open-source Agentic Knowledge Base for agent-authored pages, human review, MCP workflows, and self-hosted documentation.",
+  canonicalPath,
+  robots = "noindex",
+} = Astro.props;
+const baseUrl = (process.env.VPG_BASE_URL ?? "https://pages.vegastack.com")
+  .replace(/\/+$/, "")
+  .replace(/\/app$/, "");
+const canonicalUrl = canonicalPath
+  ? `${baseUrl}${canonicalPath.startsWith("/") ? canonicalPath : `/${canonicalPath}`}`
+  : null;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="robots" content={robots} />
+    <meta name="description" content={description} />
+    {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="VegaStack Pages" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
+    <script is:inline>
+      (() => {
+        const stored = window.localStorage.getItem("vpg-theme");
+        const theme =
+          stored === "light" || stored === "dark" || stored === "system"
+            ? stored
+            : "system";
+        if (document.documentElement.dataset.theme !== theme) {
+          document.documentElement.dataset.theme = theme;
+        }
+      })();
+    </script>
+
+    {
+      /* Astro Fonts API (astro:assets) emits the @font-face block and optimized
+        metric-matched fallback face per `fonts: [...]` in astro.config.mjs.
+        Preload only the critical Latin sans file; the variable file covers
+        every UI/prose weight while avoiding a second latin-ext preload. */
+    }
+    <Font
+      cssVariable="--font-geist"
+      preload={[{ subset: "latin", style: "normal", weight: "400" }]}
+    />
+    <Font cssVariable="--font-geist-mono" />
+
+    <script is:inline>
+      (() => {
+        const unsafe = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+        const readCookie = (name) => {
+          const prefix = `${name}=`;
+          return (
+            document.cookie
+              .split(";")
+              .map((part) => part.trim())
+              .find((part) => part.startsWith(prefix))
+              ?.slice(prefix.length) ?? ""
+          );
+        };
+        const sameOriginUrl = (input) => {
+          const value = typeof input === "string" ? input : input?.url;
+          try {
+            return (
+              new URL(value, window.location.href).origin ===
+              window.location.origin
+            );
+          } catch {
+            return false;
+          }
+        };
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (input, init = {}) => {
+          const method = String(
+            init.method ?? (input instanceof Request ? input.method : "GET"),
+          ).toUpperCase();
+          const token =
+            unsafe.has(method) && sameOriginUrl(input)
+              ? readCookie("vpg_csrf")
+              : "";
+          if (!token) return nativeFetch(input, init);
+          const headers = new Headers(
+            init.headers ??
+              (input instanceof Request ? input.headers : undefined),
+          );
+          if (!headers.has("x-vpg-csrf-token"))
+            headers.set("x-vpg-csrf-token", token);
+          return nativeFetch(input, { ...init, headers });
+        };
+      })();
+    </script>
+    <title>{title}</title>
+  </head>
+  <body>
+    <slot />
+    <SonnerHost client:load />
+  </body>
+</html>

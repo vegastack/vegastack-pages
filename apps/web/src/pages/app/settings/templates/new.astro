@@ -1,0 +1,57 @@
+---
+import { emptyTemplateBuilder } from "@vegastack/pages-core";
+import SettingsLayout from "../../../../layouts/SettingsLayout.astro";
+import { loadSettings } from "../../../../lib/settings-data";
+import { WorkspaceTemplateEditor } from "../../../../components/settings/WorkspaceTemplateEditor";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace } = result.context;
+---
+
+<SettingsLayout
+  title={`New template · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="templates"
+  sectionLabel="New template"
+  description="Create a reusable page scaffold with typed frontmatter and structured Markdown sections."
+>
+  <a
+    slot="actions"
+    class="vpg-button vpg-button-ghost vpg-button-md"
+    href="/app/settings/templates"
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      width="14"
+      height="14"
+      aria-hidden="true"
+    >
+      <path d="m12 19-7-7 7-7"></path>
+      <path d="M19 12H5"></path>
+    </svg>
+    <span>Back to templates</span>
+  </a>
+
+  <WorkspaceTemplateEditor
+    client:load
+    workspaceId={workspace.id}
+    mode="create"
+    initial={{
+      name: "",
+      slug: "",
+      description: "",
+      category: "general",
+      sourceType: "markdown",
+      properties: [],
+      builder: emptyTemplateBuilder(),
+    }}
+  />
+</SettingsLayout>

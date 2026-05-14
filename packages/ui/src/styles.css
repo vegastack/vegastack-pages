@@ -1,0 +1,637 @@
+:root,
+:root[data-theme="system"],
+:root[data-theme="light"] {
+  --vsk-bg: oklch(0.985 0 0);
+  --vsk-bg-2: oklch(0.962 0 0);
+  --vsk-surface: oklch(0.998 0 0);
+  --vsk-surface-2: oklch(0.972 0 0);
+  --vsk-surface-muted: oklch(0.956 0 0);
+  --vsk-surface-hover: oklch(0.945 0 0);
+  --vsk-sidebar: var(--vsk-bg-2);
+  --vsk-control-bg: oklch(0.99 0 0);
+  --vsk-control-bg-hover: oklch(0.972 0 0);
+  --vsk-text: oklch(0.155 0 0);
+  --vsk-muted: oklch(0.52 0 0);
+  --vsk-muted-2: oklch(0.66 0 0);
+  --vsk-border: oklch(0.895 0 0);
+  --vsk-border-strong: oklch(0.815 0 0);
+  --vsk-accent: oklch(0.205 0 0);
+  --vsk-accent-foreground: oklch(0.982 0 0);
+  --vsk-accent-soft: color-mix(in oklch, var(--vsk-accent) 7%, transparent);
+  --vsk-accent-2: oklch(0.38 0 0);
+  --vsk-danger: oklch(0.58 0.22 27);
+  --vsk-danger-soft: color-mix(in oklch, var(--vsk-danger) 10%, transparent);
+  --vsk-success: oklch(0.53 0.09 150);
+  --vsk-success-soft: color-mix(in oklch, var(--vsk-success) 12%, transparent);
+  --vsk-warning: oklch(0.72 0.12 92);
+  --vsk-warning-soft: color-mix(in oklch, var(--vsk-warning) 16%, transparent);
+  --vsk-code-bg: oklch(0.956 0 0);
+  --vsk-highlight: oklch(0.86 0.12 92);
+  --vsk-highlight-soft: color-mix(
+    in oklch,
+    var(--vsk-highlight) 38%,
+    transparent
+  );
+  --vsk-comment-tint: var(--vsk-highlight-soft);
+  --vsk-comment-tint-strong: color-mix(
+    in oklch,
+    var(--vsk-highlight) 58%,
+    transparent
+  );
+  --vsk-comment-ink: oklch(0.44 0.08 85);
+  --vsk-agent-ink: oklch(0.42 0.075 155);
+  --vsk-agent-tint: color-mix(in oklch, var(--vsk-agent-ink) 12%, transparent);
+  --vsk-agent-tint-strong: color-mix(
+    in oklch,
+    var(--vsk-agent-ink) 22%,
+    transparent
+  );
+  --vsk-ring: transparent;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  :root[data-theme="system"] {
+    --vsk-bg: oklch(0.145 0 0);
+    --vsk-bg-2: oklch(0.18 0 0);
+    --vsk-surface: oklch(0.19 0 0);
+    --vsk-surface-2: oklch(0.235 0 0);
+    --vsk-surface-muted: oklch(0.225 0 0);
+    --vsk-surface-hover: oklch(0.265 0 0);
+    --vsk-sidebar: var(--vsk-bg-2);
+    --vsk-control-bg: oklch(0.215 0 0);
+    --vsk-control-bg-hover: oklch(0.245 0 0);
+    --vsk-text: oklch(0.94 0 0);
+    --vsk-muted: oklch(0.69 0 0);
+    --vsk-muted-2: oklch(0.52 0 0);
+    --vsk-border: oklch(0.31 0 0);
+    --vsk-border-strong: oklch(0.39 0 0);
+    --vsk-accent: oklch(0.94 0 0);
+    --vsk-accent-foreground: oklch(0.16 0 0);
+    --vsk-accent-soft: color-mix(in oklch, var(--vsk-accent) 9%, transparent);
+    --vsk-accent-2: oklch(0.78 0 0);
+    --vsk-danger: oklch(0.69 0.18 25);
+    --vsk-danger-soft: color-mix(in oklch, var(--vsk-danger) 15%, transparent);
+    --vsk-success: oklch(0.7 0.1 150);
+    --vsk-success-soft: color-mix(
+      in oklch,
+      var(--vsk-success) 14%,
+      transparent
+    );
+    --vsk-warning: oklch(0.82 0.14 92);
+    --vsk-warning-soft: color-mix(
+      in oklch,
+      var(--vsk-warning) 16%,
+      transparent
+    );
+    --vsk-code-bg: oklch(0.225 0 0);
+    --vsk-highlight: oklch(0.82 0.14 92);
+    --vsk-highlight-soft: color-mix(
+      in oklch,
+      var(--vsk-highlight) 22%,
+      transparent
+    );
+    --vsk-comment-tint: var(--vsk-highlight-soft);
+    --vsk-comment-tint-strong: color-mix(
+      in oklch,
+      var(--vsk-highlight) 34%,
+      transparent
+    );
+    --vsk-comment-ink: var(--vsk-highlight);
+    --vsk-agent-ink: oklch(0.71 0.075 155);
+    --vsk-agent-tint: color-mix(
+      in oklch,
+      var(--vsk-agent-ink) 14%,
+      transparent
+    );
+    --vsk-agent-tint-strong: color-mix(
+      in oklch,
+      var(--vsk-agent-ink) 24%,
+      transparent
+    );
+    --vsk-ring: transparent;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --vsk-bg: oklch(0.145 0 0);
+  --vsk-bg-2: oklch(0.18 0 0);
+  --vsk-surface: oklch(0.19 0 0);
+  --vsk-surface-2: oklch(0.235 0 0);
+  --vsk-surface-muted: oklch(0.225 0 0);
+  --vsk-surface-hover: oklch(0.265 0 0);
+  --vsk-sidebar: var(--vsk-bg-2);
+  --vsk-control-bg: oklch(0.215 0 0);
+  --vsk-control-bg-hover: oklch(0.245 0 0);
+  --vsk-text: oklch(0.94 0 0);
+  --vsk-muted: oklch(0.69 0 0);
+  --vsk-muted-2: oklch(0.52 0 0);
+  --vsk-border: oklch(0.31 0 0);
+  --vsk-border-strong: oklch(0.39 0 0);
+  --vsk-accent: oklch(0.94 0 0);
+  --vsk-accent-foreground: oklch(0.16 0 0);
+  --vsk-accent-soft: color-mix(in oklch, var(--vsk-accent) 9%, transparent);
+  --vsk-accent-2: oklch(0.78 0 0);
+  --vsk-danger: oklch(0.69 0.18 25);
+  --vsk-danger-soft: color-mix(in oklch, var(--vsk-danger) 15%, transparent);
+  --vsk-success: oklch(0.7 0.1 150);
+  --vsk-success-soft: color-mix(in oklch, var(--vsk-success) 14%, transparent);
+  --vsk-warning: oklch(0.82 0.14 92);
+  --vsk-warning-soft: color-mix(in oklch, var(--vsk-warning) 16%, transparent);
+  --vsk-code-bg: oklch(0.225 0 0);
+  --vsk-highlight: oklch(0.82 0.14 92);
+  --vsk-highlight-soft: color-mix(
+    in oklch,
+    var(--vsk-highlight) 22%,
+    transparent
+  );
+  --vsk-comment-tint: var(--vsk-highlight-soft);
+  --vsk-comment-tint-strong: color-mix(
+    in oklch,
+    var(--vsk-highlight) 34%,
+    transparent
+  );
+  --vsk-comment-ink: var(--vsk-highlight);
+  --vsk-agent-ink: oklch(0.71 0.075 155);
+  --vsk-agent-tint: color-mix(in oklch, var(--vsk-agent-ink) 14%, transparent);
+  --vsk-agent-tint-strong: color-mix(
+    in oklch,
+    var(--vsk-agent-ink) 24%,
+    transparent
+  );
+  --vsk-ring: transparent;
+  color-scheme: dark;
+}
+
+/* Shared cross-theme tokens (overlays, shadows, z-index, hairlines, layout).
+   These don't change between light and dark — they reference theme colors
+   so they stay theme-aware automatically. */
+:root {
+  /* Hairlines alias to --vsk-border so every border-coloured edge in the
+     project — sidebar sections, cards, dividers, form inputs — resolves to
+     the same value. Use the *-soft variant only when you want a barely-
+     there divider (it still maps to the same value here; kept as a name
+     for readability at the callsite). */
+  --vsk-hairline: var(--vsk-border);
+  --vsk-hairline-soft: var(--vsk-border);
+  --vsk-tint: color-mix(in srgb, var(--vsk-text) 8%, transparent);
+  --vsk-tint-soft: color-mix(in srgb, var(--vsk-text) 4%, transparent);
+  --vsk-tint-strong: color-mix(in srgb, var(--vsk-text) 12%, transparent);
+  --vsk-tint-2: color-mix(in srgb, var(--vsk-text) 2%, transparent);
+  --vsk-tint-3: color-mix(in srgb, var(--vsk-text) 3%, transparent);
+  --vsk-tint-5: color-mix(in srgb, var(--vsk-text) 5%, transparent);
+  --vsk-tint-6: color-mix(in srgb, var(--vsk-text) 6%, transparent);
+  --vsk-tint-7: color-mix(in srgb, var(--vsk-text) 7%, transparent);
+  --vsk-tint-9: color-mix(in srgb, var(--vsk-text) 9%, transparent);
+  --vsk-tint-10: color-mix(in srgb, var(--vsk-text) 10%, transparent);
+  --vsk-tint-11: color-mix(in srgb, var(--vsk-text) 11%, transparent);
+  --vsk-tint-14: color-mix(in srgb, var(--vsk-text) 14%, transparent);
+  --vsk-tint-16: color-mix(in srgb, var(--vsk-text) 16%, transparent);
+  --vsk-tint-18: color-mix(in srgb, var(--vsk-text) 18%, transparent);
+  --vsk-tint-20: color-mix(in srgb, var(--vsk-text) 20%, transparent);
+  --vsk-tint-22: color-mix(in srgb, var(--vsk-text) 22%, transparent);
+  --vsk-tint-24: color-mix(in srgb, var(--vsk-text) 24%, transparent);
+  --vsk-tint-26: color-mix(in srgb, var(--vsk-text) 26%, transparent);
+  --vsk-tint-28: color-mix(in srgb, var(--vsk-text) 28%, transparent);
+  --vsk-tint-34: color-mix(in srgb, var(--vsk-text) 34%, transparent);
+  --vsk-tint-40: color-mix(in srgb, var(--vsk-text) 40%, transparent);
+  --vsk-text-80: color-mix(in srgb, var(--vsk-text) 80%, transparent);
+  --vsk-text-decoration: color-mix(in srgb, var(--vsk-text) 25%, transparent);
+  --vsk-text-on-bg-hover: color-mix(
+    in srgb,
+    var(--vsk-text) 88%,
+    var(--vsk-bg)
+  );
+  --vsk-text-muted-70: color-mix(
+    in srgb,
+    var(--vsk-text) 70%,
+    var(--vsk-muted)
+  );
+  --vsk-text-muted-90: color-mix(in srgb, var(--vsk-text) 90%, transparent);
+  --vsk-muted-soft: color-mix(in srgb, var(--vsk-muted) 80%, transparent);
+  --vsk-muted-55: color-mix(in srgb, var(--vsk-muted) 55%, transparent);
+  --vsk-muted-45: color-mix(in srgb, var(--vsk-muted) 45%, transparent);
+  --vsk-muted-faint: color-mix(in srgb, var(--vsk-muted) 60%, transparent);
+  --vsk-muted-65: color-mix(in srgb, var(--vsk-muted) 65%, transparent);
+  --vsk-muted-70: color-mix(in srgb, var(--vsk-muted) 70%, transparent);
+  --vsk-muted-75: color-mix(in srgb, var(--vsk-muted) 75%, transparent);
+  --vsk-muted-82: color-mix(in srgb, var(--vsk-muted) 82%, transparent);
+  --vsk-muted-85: color-mix(in srgb, var(--vsk-muted) 85%, transparent);
+  --vsk-muted-86: color-mix(in srgb, var(--vsk-muted) 86%, transparent);
+  --vsk-muted-88-on-text: color-mix(
+    in srgb,
+    var(--vsk-muted) 88%,
+    var(--vsk-text)
+  );
+  --vsk-muted-90: color-mix(in srgb, var(--vsk-muted) 90%, transparent);
+  --vsk-muted-95: color-mix(in srgb, var(--vsk-muted) 95%, transparent);
+  --vsk-danger-border: color-mix(in oklch, var(--vsk-danger) 42%, transparent);
+  --vsk-danger-tint-11: color-mix(in srgb, var(--vsk-danger) 11%, transparent);
+  --vsk-danger-tint-12: color-mix(in srgb, var(--vsk-danger) 12%, transparent);
+  --vsk-danger-tint-16: color-mix(in srgb, var(--vsk-danger) 16%, transparent);
+  --vsk-danger-border-soft: color-mix(
+    in srgb,
+    var(--vsk-danger) 35%,
+    var(--vsk-hairline)
+  );
+  --vsk-success-border: color-mix(
+    in oklch,
+    var(--vsk-success) 42%,
+    transparent
+  );
+  --vsk-success-tint-14: color-mix(
+    in srgb,
+    var(--vsk-success) 14%,
+    transparent
+  );
+  --vsk-agent-border: color-mix(
+    in oklch,
+    var(--vsk-agent-ink) 30%,
+    transparent
+  );
+  --vsk-agent-border-soft: color-mix(
+    in srgb,
+    var(--vsk-agent-ink) 22%,
+    var(--vsk-border)
+  );
+  --vsk-agent-border-strong: color-mix(
+    in srgb,
+    var(--vsk-agent-ink) 28%,
+    transparent
+  );
+  --vsk-agent-hover: color-mix(in srgb, var(--vsk-agent-ink) 18%, transparent);
+  --vsk-agent-soft-hover: color-mix(
+    in srgb,
+    var(--vsk-agent-ink) 22%,
+    transparent
+  );
+  --vsk-agent-soft-bg: color-mix(
+    in srgb,
+    var(--vsk-agent-ink) 10%,
+    transparent
+  );
+  --vsk-comment-border: color-mix(
+    in srgb,
+    var(--vsk-comment-ink) 38%,
+    transparent
+  );
+  --vsk-comment-hover: color-mix(
+    in srgb,
+    var(--vsk-comment-ink) 22%,
+    transparent
+  );
+  --vsk-comment-control-border: color-mix(
+    in srgb,
+    var(--vsk-text) 14%,
+    transparent
+  );
+  --vsk-surface-active: color-mix(
+    in srgb,
+    var(--vsk-text) 2%,
+    var(--vsk-surface)
+  );
+  --vsk-bg-translucent: color-mix(in oklch, var(--vsk-bg) 90%, transparent);
+  --vsk-bg-translucent-88: color-mix(in srgb, var(--vsk-bg) 88%, transparent);
+  --vsk-focus-ring: color-mix(in oklch, var(--vsk-text) 18%, transparent);
+  --vsk-border-blend: color-mix(
+    in srgb,
+    var(--vsk-text) 22%,
+    var(--vsk-border)
+  );
+  --vsk-border-soft-72: color-mix(in srgb, var(--vsk-border) 72%, transparent);
+  --vsk-hairline-soft-82: color-mix(
+    in srgb,
+    var(--vsk-hairline-soft) 82%,
+    transparent
+  );
+
+  /* shadcn/ui compatibility aliases. New Tailwind or shadcn components can
+     use the standard token names and still resolve to VegaStack's palette. */
+  --background: var(--vsk-bg);
+  --foreground: var(--vsk-text);
+  --card: var(--vsk-surface);
+  --card-foreground: var(--vsk-text);
+  --popover: var(--vsk-surface);
+  --popover-foreground: var(--vsk-text);
+  --primary: var(--vsk-accent);
+  --primary-foreground: var(--vsk-accent-foreground);
+  --secondary: var(--vsk-surface-2);
+  --secondary-foreground: var(--vsk-text);
+  --muted: var(--vsk-surface-muted);
+  --muted-foreground: var(--vsk-muted);
+  --accent: var(--vsk-accent-soft);
+  --accent-foreground: var(--vsk-text);
+  --destructive: var(--vsk-danger);
+  --destructive-foreground: var(--vsk-bg);
+  --border: var(--vsk-border);
+  --input: var(--vsk-border);
+  --ring: var(--vsk-ring);
+
+  /* Overlay scrims for sheets / dialogs / mobile drawers. Light mode uses
+     dark scrim; dark mode flips to a softer dark scrim (so the surface
+     above doesn't over-darken). */
+  --vsk-overlay-soft: rgba(0, 0, 0, 0.28);
+  --vsk-overlay-medium: rgba(0, 0, 0, 0.44);
+  --vsk-overlay-strong: rgba(0, 0, 0, 0.58);
+
+  /* Flat UI policy: elevation and focus rings are intentionally disabled.
+     Surfaces separate with real borders and background contrast only. */
+  --vsk-shadow-tint: transparent;
+
+  /* Elevation scale kept as compatibility aliases for existing components. */
+  --vsk-shadow-sm: none;
+  --vsk-shadow-tooltip: none;
+  --vsk-shadow-md: none;
+  --vsk-shadow-lg: none;
+  --vsk-shadow-xl: none;
+  --vsk-shadow-2xl: none;
+
+  /* Legacy outline aliases resolve to none. Use --vsk-line-* for borders. */
+  --vsk-shadow-ring: none;
+
+  --vsk-ring-input: none;
+
+  --vsk-ring-danger: none;
+
+  --vsk-ring-soft: none;
+  --vsk-ring-base: none;
+
+  /* Motion durations + easings. --motion-fast for hovers and micro
+     interactions, --motion-base for feedback states, --motion-slow for
+     panel/sheet/drawer transitions. Use --ease-out for state changes
+     and --ease-spring for entrances. */
+  --motion-fast: 120ms;
+  --motion-base: 160ms;
+  --motion-slow: 220ms;
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Z-index scale. Use these names instead of raw numbers so the stacking
+     order is explicit and centrally tunable. */
+  --vsk-z-nav: 50;
+  --vsk-z-popover: 920;
+  --vsk-z-tooltip: 940;
+  --vsk-z-overlay: 900;
+  --vsk-z-dialog: 910;
+  --vsk-z-sheet-overlay: 950;
+  --vsk-z-sheet: 960;
+  --vsk-z-toast: 1000;
+
+  /* Layout tokens — lifted from .app-shell scope so they're available
+     globally (e.g. for components that need to compute sticky offsets
+     outside the app shell). */
+  --app-nav-h: 3.6rem;
+  --app-gutter: clamp(1rem, 3vw, 2rem);
+  --app-sidebar-w: 16rem;
+  --app-rail-pad: 0.85rem;
+  --docs-toc-w: 16rem;
+  --prose-max-width: 46rem;
+
+  /* Default font stacks. Geist Sans for UI + prose, Geist Mono for code.
+     No serif anywhere — single sans family across app shell and rendered
+     page content for visual consistency. */
+  /* --font-geist and --font-geist-mono are emitted by the Astro Fonts API
+     (see astro.config.mjs `fonts: [...]`). Astro builds the stack with an
+     optimized metric-matched fallback face and the generic family already
+     appended, so we just alias them. The literal "ui-sans-serif"/
+     "ui-monospace" fallbacks inside var() apply ONLY if the Astro variable
+     is undefined (defensive — e.g. if the Fonts API is disabled). */
+  --font-sans: var(--font-geist, ui-sans-serif, system-ui, sans-serif);
+  --font-mono: var(
+    --font-geist-mono,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace
+  );
+
+  /* Typography scale — Notion-aligned for restraint. Page titles and hero
+     can scale; block headings (h1/h2 inside prose) are fixed at 30/24/20px
+     to feel like content, not posters. */
+  --text-h1-hero: clamp(2rem, 4vw, 2.75rem);
+  --text-h1: 1.875rem;
+  --text-h2: 1.5rem;
+  --text-h3: 1.25rem;
+  --text-h4: 1rem;
+  --text-h5: 0.875rem;
+  --text-h6: 0.75rem;
+  --text-body: 1rem;
+  --text-small: 0.875rem;
+
+  /* Weight scale — five tokens. Everything maps to one of these. */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-extrabold: 800;
+
+  /* Line heights + tracking. */
+  --leading-none: 1;
+  --leading-tight: 1.1;
+  --leading-title: 1.15;
+  --leading-compact: 1.2;
+  --leading-snug: 1.25;
+  --leading-heading: 1.3;
+  --leading-dense: 1.35;
+  --leading-form: 1.4;
+  --leading-control: 1.45;
+  --leading-normal: 1.5;
+  --leading-copy: 1.55;
+  --leading-readable: 1.6;
+  --leading-relaxed: 1.65;
+  --leading-loose: 1.7;
+  --leading-list: 1.85;
+  --tracking-tighter: -0.025em;
+  --tracking-tight: -0.02em;
+  --tracking-section: -0.012em;
+  --tracking-snug: -0.01em;
+  --tracking-micro: -0.005em;
+  --tracking-normal: 0;
+  --tracking-subtle: 0.01em;
+  --tracking-label: 0.02em;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.06em;
+  --tracking-badge: 0.07em;
+  --tracking-widest: 0.08em;
+
+  /* Tailwind-style text scale aliases — single source for the values that
+     appear across components. Names mirror Tailwind so component CSS can
+     read intuitively, but they alias the existing semantic tokens above. */
+  --text-3xs: 0.66rem;
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: var(--text-small);
+  --text-base: var(--text-body);
+  --text-control: 0.9rem;
+  --text-lg: 1.125rem;
+  --text-xl: var(--text-h3);
+  --text-2xl: var(--text-h2);
+  --text-3xl: var(--text-h1);
+  --text-relative-xs: 0.82em;
+  --text-relative-sm: 0.85em;
+  --text-relative-md: 0.88em;
+  --text-relative-lg: 0.92em;
+  --vsk-text-3xs: var(--text-3xs);
+  --vsk-text-2xs: var(--text-2xs);
+  --vsk-text-xs: var(--text-xs);
+  --vsk-text-sm: var(--text-sm);
+  --vsk-text-base: var(--text-base);
+  --vsk-text-control: var(--text-control);
+  --vsk-text-lg: var(--text-lg);
+  --vsk-text-xl: var(--text-xl);
+  --vsk-text-2xl: var(--text-2xl);
+  --vsk-text-3xl: var(--text-3xl);
+  --vsk-weight-regular: var(--weight-regular);
+  --vsk-weight-medium: var(--weight-medium);
+  --vsk-weight-semibold: var(--weight-semibold);
+  --vsk-weight-bold: var(--weight-bold);
+  --vsk-weight-extrabold: var(--weight-extrabold);
+
+  /* Control sizing — Nova compact scale (all 32px default). */
+  --control-h-sm: 1.75rem;
+  --control-h-md: 2rem;
+  --control-h-lg: 2.25rem;
+  --control-px-sm: 0.5rem;
+  --control-px-md: 0.625rem;
+  --control-px-lg: 0.75rem;
+  --control-gap: 0.4rem;
+
+  /* Vertical breathing room between rows in dropdowns / selects / menus so
+     adjacent options don't visually merge on hover. */
+  --menu-row-gap: 2px;
+
+  /* Radius primitives — Tailwind-aligned scale. These are the only raw
+     radius values allowed in the product UI. Component CSS should prefer
+     the semantic --vsk-radius-* tokens below; primitives exist for the
+     Tailwind bridge and exceptional geometry such as partial corners. */
+  --vsk-radius-none: 0;
+  --vsk-radius-xs: 2px;
+  --vsk-radius-sm: 4px;
+  --vsk-radius-md: 6px;
+  --vsk-radius-lg: 8px;
+  --vsk-radius-xl: 12px;
+  --vsk-radius-2xl: 16px;
+  --vsk-radius-3xl: 24px;
+  --vsk-radius-full: 9999px;
+
+  /* Tailwind-compatible aliases. Keep these mapped to the primitives so
+     existing utilities and future Tailwind classes resolve to the same
+     design system values. */
+  --radius-none: var(--vsk-radius-none);
+  --radius-xs: var(--vsk-radius-xs);
+  --radius-sm: var(--vsk-radius-sm);
+  --radius-md: var(--vsk-radius-md);
+  --radius-lg: var(--vsk-radius-lg);
+  --radius-xl: var(--vsk-radius-xl);
+  --radius-2xl: var(--vsk-radius-2xl);
+  --radius-3xl: var(--vsk-radius-3xl);
+  --radius-full: var(--vsk-radius-full);
+  --vsk-radius-pill: var(--vsk-radius-full);
+  --radius-pill: var(--vsk-radius-full);
+
+  /* Semantic radius tokens — use these at component level.
+
+     Dense task rows and option rows:
+       --vsk-radius-row, --vsk-radius-menu-item
+     Standard interactive controls:
+       --vsk-radius-control, --vsk-radius-button, --vsk-radius-icon-button
+     Binary controls and compact glyphs:
+       --vsk-radius-checkbox, --vsk-radius-kbd, --vsk-radius-inline-marker
+     Floating/contained surfaces:
+       --vsk-radius-surface, --vsk-radius-card, --vsk-radius-dropdown,
+       --vsk-radius-dialog, --vsk-radius-sheet
+     Conversational/agent command surfaces:
+       --vsk-radius-comment-card for saved thread cards,
+       --vsk-radius-composer for active comment/reply composers.
+
+     Nested alignment rule:
+       Circular actions inside a composer must use --vsk-radius-circle,
+       be 60–75% of the composer height, and sit at least 6–8px from the
+       composer edge. Do not use full radius for square icon buttons unless
+       the rendered box is visually circular. */
+  --vsk-radius-row: var(--radius-md);
+  --vsk-radius-nav-item: var(--radius-md);
+  --vsk-radius-menu-item: var(--radius-md);
+  --vsk-radius-control: var(--radius-lg);
+  --vsk-radius-control-compact: var(--radius-md);
+  --vsk-radius-button: var(--radius-lg);
+  --vsk-radius-button-compact: var(--radius-md);
+  --vsk-radius-icon-button: var(--radius-lg);
+  --vsk-radius-checkbox: var(--radius-xs);
+  --vsk-radius-surface: var(--radius-xl);
+  --vsk-radius-card: var(--radius-xl);
+  --vsk-radius-dropdown: var(--radius-xl);
+  --vsk-radius-dialog: var(--radius-xl);
+  --vsk-radius-sheet: var(--radius-xl);
+  --vsk-radius-code: var(--radius-lg);
+  --vsk-radius-tooltip: var(--radius-md);
+  --vsk-radius-kbd: var(--radius-sm);
+  --vsk-radius-inline-marker: var(--radius-xs);
+  --vsk-radius-badge: var(--radius-full);
+  --vsk-radius-avatar: var(--radius-full);
+  --vsk-radius-indicator: var(--radius-full);
+  --vsk-radius-tab-indicator: var(--radius-full);
+  --vsk-radius-comment-card: var(--radius-xl);
+  --vsk-radius-composer: var(--radius-2xl);
+  --vsk-radius-circle: var(--radius-full);
+
+  /* Border primitives and semantic lines. Component CSS should use the
+     semantic --vsk-line-* tokens for real borders. This keeps border color and width consistent across
+     cards, inputs, panels, menus, docs prose, and generated examples. */
+  --border-width-default: 1px;
+  --border-width-medium: 1.5px;
+  --border-width-strong: 2px;
+  --border-style-solid: solid;
+  --border-style-dashed: dashed;
+  --hairline-color: color-mix(in srgb, var(--vsk-text) 10%, transparent);
+  --hairline-color-strong: color-mix(in srgb, var(--vsk-text) 16%, transparent);
+  --hairline: var(--border-width-default) var(--border-style-solid)
+    var(--hairline-color);
+  --hairline-strong: var(--border-width-default) var(--border-style-solid)
+    var(--hairline-color-strong);
+  --vsk-line: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-border);
+  --vsk-line-soft: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-hairline-soft);
+  --vsk-line-hairline: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-hairline);
+  --vsk-line-hairline-soft: var(--border-width-default)
+    var(--border-style-solid) var(--vsk-hairline-soft);
+  --vsk-line-strong: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-border-strong);
+  --vsk-line-dashed: var(--border-width-default) var(--border-style-dashed)
+    var(--vsk-border);
+  --vsk-line-current-medium: var(--border-width-medium)
+    var(--border-style-solid) currentColor;
+  --vsk-line-bg-strong: var(--border-width-strong) var(--border-style-solid)
+    var(--vsk-bg);
+  --vsk-line-agent: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-agent-border);
+  --vsk-line-comment: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-comment-border);
+  --vsk-line-comment-control: var(--border-width-default)
+    var(--border-style-solid) var(--vsk-comment-control-border);
+  --vsk-line-tint: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-tint);
+  --vsk-line-tint-14: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-tint-14);
+  --vsk-line-border-soft: var(--border-width-default) var(--border-style-solid)
+    var(--vsk-border-soft-72);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  :root[data-theme="system"] {
+    --vsk-overlay-soft: rgba(0, 0, 0, 0.42);
+    --vsk-overlay-medium: rgba(0, 0, 0, 0.58);
+    --vsk-overlay-strong: rgba(0, 0, 0, 0.72);
+  }
+}
+
+:root[data-theme="dark"] {
+  --vsk-overlay-soft: rgba(0, 0, 0, 0.42);
+  --vsk-overlay-medium: rgba(0, 0, 0, 0.58);
+  --vsk-overlay-strong: rgba(0, 0, 0, 0.72);
+}

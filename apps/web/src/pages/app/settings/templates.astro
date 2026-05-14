@@ -1,0 +1,63 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { loadSettings } from "../../../lib/settings-data";
+import { templateService } from "../../../lib/runtime";
+import { WorkspaceTemplatesManager } from "../../../components/settings/WorkspaceTemplatesManager";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace } = result.context;
+const templates = templateService
+  .listTemplates(workspace.id)
+  .map((template) => ({
+    id: template.id,
+    slug: template.slug,
+    name: template.name,
+    description: template.description,
+    category: template.category,
+    source_type: template.sourceType,
+    version_id: template.versionId,
+    properties: template.properties,
+    is_builtin: template.isBuiltin,
+    created_at: template.createdAt,
+    updated_at: template.updatedAt,
+  }));
+---
+
+<SettingsLayout
+  title={`Templates · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="templates"
+  sectionLabel="Templates"
+  description="Reusable page scaffolds with structured sections and typed frontmatter. Available to humans in the New page picker and to agents through the MCP tools."
+>
+  <a
+    slot="actions"
+    class="vpg-button vpg-button-primary vpg-button-md"
+    href="/app/settings/templates/new"
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      width="14"
+      height="14"
+      aria-hidden="true"
+    >
+      <path d="M5 12h14"></path>
+      <path d="M12 5v14"></path>
+    </svg>
+    <span>New template</span>
+  </a>
+
+  <WorkspaceTemplatesManager
+    client:load
+    workspaceId={workspace.id}
+    initialTemplates={templates}
+  />
+</SettingsLayout>

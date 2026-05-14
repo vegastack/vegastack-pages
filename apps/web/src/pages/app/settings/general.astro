@@ -1,0 +1,558 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { loadSettings } from "../../../lib/settings-data";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace, pages } = result.context;
+const firstPage = pages[0];
+const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
+---
+
+<SettingsLayout
+  title={`General · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="general"
+  sectionLabel="General"
+  description="Workspace identity, retention, and export."
+>
+  <a
+    slot="actions"
+    class="vpg-button vpg-button-subtle vpg-button-md"
+    href={openPagesHref}
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      width="14"
+      height="14"
+      aria-hidden="true"
+    >
+      <path d="M15 3h6v6"></path>
+      <path d="m10 14 11-11"></path>
+      <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path>
+    </svg>
+    <span>Open pages</span>
+  </a>
+
+  <section class="settings-card" aria-labelledby="general-identity-h">
+    <header class="settings-card-header">
+      <h2 id="general-identity-h">Identity</h2>
+      <p>Name, slug, and version retention for this workspace.</p>
+    </header>
+    <form class="settings-card-form" data-workspace-form>
+      <label class="vpg-field">
+        <span>Name</span>
+        <input class="vpg-input" name="name" value={workspace.name} required />
+      </label>
+      <label class="vpg-field">
+        <span>Slug</span>
+        <input
+          class="vpg-input"
+          name="slug"
+          value={workspace.slug}
+          required
+          pattern="[a-z0-9-]+"
+        />
+      </label>
+      <label class="vpg-field">
+        <span>Version retention days</span>
+        <input
+          class="vpg-input"
+          name="version_retention_days"
+          type="number"
+          min="1"
+          max="3650"
+          value={workspace.versionRetentionDays ?? 30}
+          required
+        />
+      </label>
+      <p class="settings-status" data-workspace-status></p>
+      <button class="vpg-button vpg-button-primary vpg-button-md" type="submit">
+        <span class="settings-button-label">Save changes</span>
+        <span class="settings-button-spinner-wrap"
+          ><span class="settings-button-spinner" aria-hidden="true"
+          ></span></span
+        >
+      </button>
+    </form>
+  </section>
+
+  <section class="settings-card" aria-labelledby="general-backup-h">
+    <header class="settings-card-header">
+      <h2 id="general-backup-h">Backup to Git</h2>
+      <p>Mirror the latest workspace files to an existing GitHub repository.</p>
+    </header>
+    <div class="settings-github-backup" data-github-backup>
+      <div class="settings-github-summary">
+        <p class="settings-muted-line" data-github-backup-summary>
+          Loading GitHub backup status...
+        </p>
+        <a
+          class="vpg-button vpg-button-default vpg-button-md"
+          href={`/api/integrations/github/start?workspace_id=${workspace.id}`}
+          data-github-connect
+          hidden
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="14"
+            height="14"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14"></path>
+            <path d="M5 12h14"></path>
+          </svg>
+          <span>Connect GitHub</span>
+        </a>
+        <button
+          class="vpg-button vpg-button-ghost vpg-button-md"
+          type="button"
+          data-github-disconnect
+          hidden
+        >
+          Disconnect
+        </button>
+      </div>
+      <form class="settings-card-form" data-github-backup-form hidden>
+        <label class="vpg-field">
+          <span>Repository</span>
+          <select class="vpg-input" name="repo_id" data-github-repos required>
+            <option value="">Select a repository</option>
+          </select>
+        </label>
+        <label class="vpg-field">
+          <span>Branch</span>
+          <select class="vpg-input" name="branch" data-github-branches required>
+            <option value="">Select a branch</option>
+          </select>
+        </label>
+        <label class="vpg-field">
+          <span>Root path</span>
+          <input
+            class="vpg-input"
+            name="root_path"
+            value="docs"
+            required
+            data-github-root-path
+          />
+        </label>
+        <label class="settings-inline-toggle">
+          <input type="checkbox" name="include_assets" data-github-assets />
+          <span class="settings-inline-toggle-label">
+            Mirror attachments up to 10 MiB
+          </span>
+        </label>
+        <p class="settings-status" data-github-status></p>
+        <div class="settings-inline-actions">
+          <button
+            class="vpg-button vpg-button-primary vpg-button-md"
+            type="submit"
+          >
+            <span class="settings-button-label">Save backup</span>
+            <span class="settings-button-spinner-wrap"
+              ><span class="settings-button-spinner" aria-hidden="true"
+              ></span></span
+            >
+          </button>
+          <button
+            class="vpg-button vpg-button-default vpg-button-md"
+            type="button"
+            data-github-sync
+          >
+            Sync now
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="settings-card" aria-labelledby="general-export-h">
+    <header class="settings-card-header">
+      <h2 id="general-export-h">Export</h2>
+      <p>
+        Download all pages, attachments, and versions as a single ZIP archive.
+      </p>
+    </header>
+    <div>
+      <a
+        class="vpg-button vpg-button-default vpg-button-md"
+        href={`/api/workspaces/${workspace.id}/export`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          width="14"
+          height="14"
+          aria-hidden="true"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" x2="12" y1="15" y2="3"></line>
+        </svg>
+        <span>Download workspace ZIP</span>
+      </a>
+    </div>
+  </section>
+
+  <section
+    class="settings-card settings-card-danger"
+    aria-labelledby="general-danger-h"
+  >
+    <header class="settings-card-header">
+      <h2 id="general-danger-h">Danger zone</h2>
+      <p>
+        Workspace deletion is not yet available from this screen. Contact the
+        workspace owner to retire a workspace.
+      </p>
+    </header>
+    <div>
+      <button class="vpg-button vpg-button-destructive vpg-button-md" disabled>
+        Delete workspace
+      </button>
+    </div>
+  </section>
+
+  <script is:inline>
+    (() => {
+      const { withSubmit, setStatus, toast, workspaceId } =
+        window.settingsHelpers;
+      const form = document.querySelector("[data-workspace-form]");
+      function cookie(name) {
+        return document.cookie
+          .split(";")
+          .map((part) => part.trim())
+          .find((part) => part.startsWith(`${name}=`))
+          ?.slice(name.length + 1);
+      }
+      function csrfHeaders(extra) {
+        return {
+          ...extra,
+          "x-vpg-csrf-token": decodeURIComponent(cookie("vpg_csrf") || ""),
+        };
+      }
+      form?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!(form instanceof HTMLFormElement)) return;
+        const data = new FormData(form);
+        setStatus("[data-workspace-status]", "pending", "Saving...");
+        await withSubmit(form, async () => {
+          const response = await fetch(
+            `/api/workspaces/${workspaceId}/settings`,
+            {
+              method: "PATCH",
+              headers: csrfHeaders({ "content-type": "application/json" }),
+              body: JSON.stringify({
+                name: data.get("name"),
+                slug: data.get("slug"),
+                version_retention_days: data.get("version_retention_days"),
+              }),
+            },
+          );
+          if (response.ok) {
+            setStatus("[data-workspace-status]", "success", "Saved.");
+            toast("Workspace updated.");
+          } else {
+            const payload = await response.json().catch(() => null);
+            const message = payload?.error?.message ?? "Save failed.";
+            setStatus("[data-workspace-status]", "error", message);
+            toast(message, "error");
+          }
+        });
+      });
+
+      const backupForm = document.querySelector("[data-github-backup-form]");
+      const summary = document.querySelector("[data-github-backup-summary]");
+      const connect = document.querySelector("[data-github-connect]");
+      const repos = document.querySelector("[data-github-repos]");
+      const branches = document.querySelector("[data-github-branches]");
+      const rootPath = document.querySelector("[data-github-root-path]");
+      const assets = document.querySelector("[data-github-assets]");
+      const syncButton = document.querySelector("[data-github-sync]");
+      const saveBackupButton = backupForm?.querySelector(
+        "button[type='submit']",
+      );
+      const disconnectButton = document.querySelector(
+        "[data-github-disconnect]",
+      );
+      const connectHref = connect?.getAttribute("href") || "";
+
+      function setConnectAvailable(available) {
+        if (!connect) return;
+        connect.hidden = false;
+        if (available) {
+          connect.setAttribute("href", connectHref);
+          connect.removeAttribute("aria-disabled");
+        } else {
+          connect.removeAttribute("href");
+          connect.setAttribute("aria-disabled", "true");
+        }
+      }
+
+      function setDisconnectAvailable(available) {
+        if (!disconnectButton) return;
+        disconnectButton.hidden = !available;
+        disconnectButton.disabled = !available;
+      }
+
+      function setBackupControlsAvailable(available) {
+        for (const control of [
+          repos,
+          branches,
+          rootPath,
+          assets,
+          saveBackupButton,
+          syncButton,
+        ]) {
+          if (!control) continue;
+          if ("disabled" in control) control.disabled = !available;
+        }
+      }
+
+      function setSummary(text, link, state) {
+        if (!summary) return;
+        summary.textContent = text;
+        if (state) summary.dataset.state = state;
+        else delete summary.dataset.state;
+        if (link) {
+          const anchor = document.createElement("a");
+          anchor.href = link;
+          anchor.textContent = "View commit";
+          anchor.target = "_blank";
+          anchor.rel = "noreferrer";
+          summary.append(" ", anchor);
+        }
+      }
+
+      function fillSelect(select, items, selected, label) {
+        if (!(select instanceof HTMLSelectElement)) return;
+        select.textContent = "";
+        const empty = document.createElement("option");
+        empty.value = "";
+        empty.textContent = label;
+        select.append(empty);
+        for (const item of items) {
+          const option = document.createElement("option");
+          option.value = String(item.value);
+          option.textContent = item.label;
+          if (String(item.value) === String(selected ?? "")) {
+            option.selected = true;
+          }
+          select.append(option);
+        }
+      }
+
+      function setSyncAvailable(available) {
+        if (syncButton) syncButton.disabled = !available;
+      }
+
+      async function loadBackup() {
+        const response = await fetch(
+          `/api/workspaces/${workspaceId}/github-backup`,
+        );
+        if (!response.ok) {
+          setSummary("GitHub backup status could not be loaded.");
+          if (connect) connect.hidden = true;
+          setDisconnectAvailable(false);
+          if (backupForm) backupForm.hidden = true;
+          setBackupControlsAvailable(false);
+          setSyncAvailable(false);
+          return;
+        }
+        const payload = await response.json();
+        if (!payload.app_configured) {
+          setSummary(
+            "GitHub backup is not configured for this deployment.",
+            null,
+            "warning",
+          );
+          setConnectAvailable(false);
+          setDisconnectAvailable(false);
+          if (backupForm) backupForm.hidden = true;
+          setBackupControlsAvailable(false);
+          setSyncAvailable(false);
+          return;
+        }
+        if (!payload.connection) {
+          setSummary("No GitHub repository is connected.");
+          setConnectAvailable(true);
+          setDisconnectAvailable(false);
+          if (backupForm) backupForm.hidden = true;
+          setBackupControlsAvailable(false);
+          setSyncAvailable(false);
+          return;
+        }
+        if (connect) connect.hidden = true;
+        setDisconnectAvailable(true);
+        if (backupForm) backupForm.hidden = false;
+        setBackupControlsAvailable(true);
+        const connection = payload.connection;
+        fillSelect(
+          repos,
+          (payload.repositories || []).map((repo) => ({
+            value: repo.id,
+            label: repo.full_name,
+          })),
+          connection.repoId,
+          "Select a repository",
+        );
+        fillSelect(
+          branches,
+          (payload.branches || []).map((branch) => ({
+            value: branch.name,
+            label: branch.name,
+          })),
+          connection.branch,
+          "Select a branch",
+        );
+        if (rootPath) rootPath.value = connection.rootPath || "docs";
+        if (assets) assets.checked = Boolean(connection.includeAssets);
+        setSyncAvailable(Boolean(connection.enabled));
+        if (connection.enabled && connection.lastStatus === "success") {
+          setSummary(
+            `Backing up to ${connection.repoOwner}/${connection.repoName} on ${connection.branch}. Last sync succeeded.`,
+            payload.commit_url,
+          );
+        } else if (connection.enabled && connection.lastStatus === "failed") {
+          setSummary(
+            `Backing up to ${connection.repoOwner}/${connection.repoName} on ${connection.branch}. Last sync failed.`,
+          );
+        } else if (connection.repoName) {
+          setSummary(
+            `Backing up to ${connection.repoOwner}/${connection.repoName} on ${connection.branch}.`,
+          );
+        } else {
+          setSummary(
+            "GitHub is connected. Choose a repository to enable backup.",
+          );
+        }
+      }
+
+      repos?.addEventListener("change", async () => {
+        const selected = Array.from(repos.options).find(
+          (option) => option.selected,
+        );
+        if (!selected?.value) return;
+        setStatus("[data-github-status]", "pending", "Loading branches...");
+        const response = await fetch(
+          `/api/workspaces/${workspaceId}/github-backup?repo_id=${encodeURIComponent(selected.value)}`,
+        );
+        if (!response.ok) {
+          setStatus("[data-github-status]", "error", "Branch load failed.");
+          return;
+        }
+        const payload = await response.json();
+        const selectedRepo = (payload.repositories || []).find(
+          (repo) => String(repo.id) === String(selected.value),
+        );
+        fillSelect(
+          branches,
+          (payload.branches || []).map((branch) => ({
+            value: branch.name,
+            label: branch.name,
+          })),
+          selectedRepo?.default_branch || payload.branches?.[0]?.name,
+          "Select a branch",
+        );
+        setStatus("[data-github-status]", null, "");
+      });
+
+      backupForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!(backupForm instanceof HTMLFormElement)) return;
+        const data = new FormData(backupForm);
+        setStatus("[data-github-status]", "pending", "Saving backup...");
+        await withSubmit(backupForm, async () => {
+          const response = await fetch(
+            `/api/workspaces/${workspaceId}/github-backup`,
+            {
+              method: "PUT",
+              headers: csrfHeaders({ "content-type": "application/json" }),
+              body: JSON.stringify({
+                repo_id: data.get("repo_id"),
+                branch: data.get("branch"),
+                root_path: data.get("root_path"),
+                include_assets: data.get("include_assets") === "on",
+              }),
+            },
+          );
+          if (response.ok) {
+            setStatus("[data-github-status]", "success", "Saved.");
+            toast("GitHub backup saved.");
+            await loadBackup();
+          } else {
+            const payload = await response.json().catch(() => null);
+            const message = payload?.error?.message ?? "Save failed.";
+            setStatus("[data-github-status]", "error", message);
+            toast(message, "error");
+          }
+        });
+      });
+
+      syncButton?.addEventListener("click", async () => {
+        setStatus("[data-github-status]", "pending", "Syncing...");
+        syncButton.disabled = true;
+        try {
+          const response = await fetch(
+            `/api/workspaces/${workspaceId}/github-backup/sync`,
+            {
+              method: "POST",
+              headers: csrfHeaders({ "content-type": "application/json" }),
+              body: "{}",
+            },
+          );
+          if (response.ok) {
+            setStatus("[data-github-status]", "success", "Synced.");
+            toast("GitHub backup synced.");
+            await loadBackup();
+          } else {
+            const payload = await response.json().catch(() => null);
+            const message = payload?.error?.message ?? "Sync failed.";
+            setStatus("[data-github-status]", "error", message);
+            toast(message, "error");
+          }
+        } finally {
+          syncButton.disabled = false;
+        }
+      });
+
+      disconnectButton?.addEventListener("click", async () => {
+        const confirmed = await window.settingsHelpers.confirmAction({
+          title: "Disconnect GitHub backup",
+          description:
+            "VegaStack Pages will stop writing backup commits to this repository.",
+          confirmLabel: "Disconnect",
+        });
+        if (!confirmed) return;
+        const response = await fetch(
+          `/api/workspaces/${workspaceId}/github-backup`,
+          { method: "DELETE", headers: csrfHeaders({}) },
+        );
+        if (response.ok) {
+          toast("GitHub backup disconnected.");
+          await loadBackup();
+        } else {
+          const payload = await response.json().catch(() => null);
+          toast(payload?.error?.message ?? "Disconnect failed.", "error");
+        }
+      });
+
+      loadBackup();
+    })();
+  </script>
+</SettingsLayout>

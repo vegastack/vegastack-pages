@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": [
+    "@changesets/changelog-github",
+    { "repo": "vegastack/vegastack-pages" }
+  ],
+  "commit": false,
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "fixed": [
+    [
+      "@vegastack/pages",
+      "@vegastack/pages-config",
+      "@vegastack/pages-core",
+      "@vegastack/pages-db",
+      "@vegastack/pages-mcp",
+      "@vegastack/pages-renderer",
+      "@vegastack/pages-ui",
+      "@vegastack/pages-web"
+    ]
+  ],
+  "linked": [],
+  "ignore": []
+}

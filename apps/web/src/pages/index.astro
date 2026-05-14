@@ -1,0 +1,670 @@
+---
+import { ThemeMenu } from "../components/ThemeMenu";
+import AppLayout from "../layouts/AppLayout.astro";
+
+export const prerender = false;
+
+const homeMode = process.env.VPG_HOME_MODE ?? "landing";
+if (homeMode === "redirect_to_app" || homeMode === "redirect_to_first_page") {
+  return Astro.redirect("/app");
+}
+
+const agents = [
+  { name: "Claude Code", note: "Anthropic", initial: "C" },
+  { name: "Codex", note: "OpenAI", initial: "X" },
+  { name: "OpenClaw", note: "Open source", initial: "O" },
+  { name: "Hermes Agent", note: "MCP-native", initial: "H" },
+  { name: "Cursor", note: "Editor agent", initial: "*" },
+  { name: "MCP clients", note: "Anything that speaks /mcp", initial: "+" },
+];
+
+const reviewUrls = [
+  { path: "/p/agent-handoff-a8f31c000000", meta: "workspace docs · comment" },
+  {
+    path: "/p/release-checklist-7b29e1000000",
+    meta: "public · password protected",
+  },
+  { path: "/p/run-postmortem-4f02d3000000", meta: "workspace runbooks · edit" },
+  { path: "/p/skill-md-1c9a5b000000", meta: "preview · noindex" },
+];
+
+const shortcuts = [
+  { keys: ["⌘", "K"], label: "Open command palette" },
+  { keys: ["⌘", "F"], label: "Find on this page" },
+  { keys: ["⌘", "S"], label: "Save and snapshot" },
+  { keys: ["e"], label: "Switch to source edit" },
+  { keys: ["v"], label: "Switch to rendered" },
+  { keys: ["Esc"], label: "Close dialog or drawer" },
+];
+
+const faqs = [
+  {
+    q: "Is VegaStack Pages open source?",
+    a: "Yes. MIT licensed, with both managed hosting and self-hosting built from the same code. Issues and PRs live on GitHub.",
+  },
+  {
+    q: "Is it free?",
+    a: "The open-source distribution is MIT licensed. Self-hosting cost depends on your Cloudflare or Docker environment. Managed hosting at pages.vegastack.com is operated separately.",
+  },
+  {
+    q: "Can I self-host on Node or Docker?",
+    a: "Cloudflare Workers is the primary target. Node and Docker are first-class for portability, with SQLite metadata and filesystem-backed object storage. The install/cloudflare and install/docker directories ship runnable setups.",
+  },
+  {
+    q: "Do agents need separate accounts?",
+    a: "No. Workspace admins create workspace-scoped bearer tokens in Settings -> MCP. Tokens are shown once, can be revoked, and still resolve through workspace permissions.",
+  },
+  {
+    q: "What are templates for?",
+    a: "Templates give agents a stable structure: typed frontmatter fields, repeatable sections, and guidance comments. Built-ins cover PRDs, RFCs, runbooks, launch plans, meeting notes, and more.",
+  },
+  {
+    q: "Can it back up to Git?",
+    a: "Yes. Backup to Git syncs pages, templates, optional assets, and a manifest to a GitHub repository through a GitHub App.",
+  },
+  {
+    q: "Where does my data live?",
+    a: "Source and attachments live in R2 on Cloudflare or filesystem object storage on Node/Docker. Metadata, permissions, comments, sessions, and search live in D1 or SQLite.",
+  },
+  {
+    q: "How do public review links work?",
+    a: "Every page has a globally unique /p/page-title-id URL and every folder can publish at /f/folder-title-id. You pick view, comment, or edit, plus optional expiry and password. Public pages default to noindex.",
+  },
+  {
+    q: "Can guests comment without an account?",
+    a: "Yes. Guest reviewers enter a display name once and can comment or edit if the link permits. Their identity is recorded on the thread so agents can attribute replies.",
+  },
+];
+
+const productLinks = [
+  { label: "Docs", href: "/docs" },
+  { label: "Quickstart", href: "/docs/quickstart" },
+  { label: "Templates", href: "/docs/templates" },
+  { label: "Backup to Git", href: "/docs/backup-to-git" },
+  { label: "MCP endpoint", href: "/mcp" },
+  { label: "Concepts", href: "/docs/concepts" },
+];
+
+const agentLinks = [
+  { label: "Claude Code", href: "/docs/mcp-and-cli" },
+  { label: "Codex", href: "/docs/mcp-and-cli" },
+  { label: "OpenClaw", href: "/docs/mcp-and-cli" },
+  { label: "Hermes Agent", href: "/docs/mcp-and-cli" },
+  { label: "Cursor", href: "/docs/mcp-and-cli" },
+  { label: "MCP reference", href: "/mcp" },
+];
+
+const communityLinks = [
+  { label: "GitHub", href: "https://github.com/vegastack/vegastack-pages" },
+  {
+    label: "Issues",
+    href: "https://github.com/vegastack/vegastack-pages/issues",
+  },
+  {
+    label: "Discussions",
+    href: "https://github.com/vegastack/vegastack-pages/discussions",
+  },
+];
+
+const startLinks = [
+  { label: "Managed hosting", href: "/app/signup" },
+  { label: "Self-host on Cloudflare", href: "/docs/cloudflare" },
+  { label: "Self-host on Docker", href: "/docs/docker" },
+  { label: "CLI reference", href: "/docs/mcp-and-cli" },
+];
+---
+
+<AppLayout
+  title="VegaStack Pages - Open-source Agentic Knowledge Base"
+  description="VegaStack Pages is an open-source Agentic Knowledge Base where agents create Markdown, MDX, and HTML pages through MCP or CLI, humans review with anchored comments, and teams keep versioned knowledge backed up to Git."
+  canonicalPath="/"
+  robots="index,follow"
+>
+  <main class="home-shell">
+    <header class="home-nav" aria-label="Primary">
+      <a class="home-brand" href="/" aria-label="VegaStack Pages home">
+        <span class="home-brand-mark" aria-hidden="true"></span>
+        <span>VegaStack Pages</span>
+      </a>
+      <nav class="home-nav-links" aria-label="Sections">
+        <a href="#agents">Agents</a>
+        <a href="#templates">Templates</a>
+        <a href="#review-loop">Review loop</a>
+        <a href="#mcp-cli">MCP &amp; CLI</a>
+        <a href="#start">Self-host</a>
+        <a href="/docs">Docs</a>
+      </nav>
+      <div class="home-nav-actions">
+        <a
+          class="home-github"
+          href="https://github.com/vegastack/vegastack-pages"
+          aria-label="Star on GitHub"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+            ><path
+              d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.21.7-3.88-1.39-3.88-1.39-.53-1.34-1.29-1.7-1.29-1.7-1.06-.72.08-.71.08-.71 1.18.08 1.8 1.21 1.8 1.21 1.04 1.79 2.74 1.27 3.41.97.1-.76.41-1.27.74-1.56-2.56-.29-5.26-1.28-5.26-5.71 0-1.26.45-2.29 1.2-3.1-.12-.29-.52-1.47.11-3.06 0 0 .98-.31 3.2 1.18a11.07 11.07 0 0 1 5.83 0c2.22-1.49 3.2-1.18 3.2-1.18.63 1.59.23 2.77.11 3.06.75.81 1.2 1.84 1.2 3.1 0 4.44-2.7 5.41-5.27 5.7.42.37.8 1.1.8 2.22v3.29c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"
+            ></path></svg
+          >
+          <span>GitHub</span>
+        </a>
+        <ThemeMenu client:load />
+        <a class="vpg-button vpg-button-subtle vpg-button-md" href="/app/login"
+          >Log in</a
+        >
+        <a class="vpg-button vpg-button-primary vpg-button-md" href="/app"
+          >Open app</a
+        >
+      </div>
+    </header>
+
+    <section class="home-hero" aria-labelledby="home-hero-title">
+      <p class="home-kicker">Open source &middot; Agentic Knowledge Base</p>
+      <h1 id="home-hero-title">
+        Pages your agents can write. Review your team can trust.
+      </h1>
+      <p class="home-lede">
+        VegaStack Pages gives agents a real knowledge base to work in:
+        templates, Markdown/MDX/HTML pages, source edits, anchored comments,
+        wait conditions, version history, public links, and Backup to Git.
+      </p>
+      <div class="home-hero-actions">
+        <a class="vpg-button vpg-button-primary vpg-button-md" href="/app"
+          >Open app</a
+        >
+        <a
+          class="vpg-button vpg-button-subtle vpg-button-md"
+          href="/docs/quickstart">Quickstart</a
+        >
+        <a class="home-hero-link" href="/docs"
+          >Read the docs <span aria-hidden="true">&rarr;</span></a
+        >
+      </div>
+      <p class="home-hero-meta">Works with</p>
+      <ul class="home-hero-agents" aria-label="Supported agents">
+        <li>Claude Code</li>
+        <li aria-hidden="true">·</li>
+        <li>Codex</li>
+        <li aria-hidden="true">·</li>
+        <li>OpenClaw</li>
+        <li aria-hidden="true">·</li>
+        <li>Hermes</li>
+        <li aria-hidden="true">·</li>
+        <li>Cursor</li>
+        <li aria-hidden="true">·</li>
+        <li>any MCP client</li>
+      </ul>
+    </section>
+
+    <section class="home-screenshot" aria-label="VegaStack Pages screenshot">
+      <div
+        class="home-screenshot-frame"
+        role="img"
+        aria-label="Screenshot of a review page in VegaStack Pages"
+      >
+        <div class="home-screenshot-chrome">
+          <span
+            class="home-screenshot-dot home-screenshot-dot-1"
+            aria-hidden="true"></span>
+          <span
+            class="home-screenshot-dot home-screenshot-dot-2"
+            aria-hidden="true"></span>
+          <span
+            class="home-screenshot-dot home-screenshot-dot-3"
+            aria-hidden="true"></span>
+          <span class="home-screenshot-url"
+            >pages.vegastack.com/p/agent-handoff-a8f31c000000</span
+          >
+        </div>
+        <div class="home-screenshot-body">
+          <div class="home-modes-pane home-modes-rendered">
+            <span class="home-modes-tag">Rendered review page</span>
+            <article>
+              <header>
+                <p>runbook · review open</p>
+                <h3>Database failover runbook</h3>
+              </header>
+              <p>
+                Agents maintain the source. Reviewers select exact text and
+                leave comments the agent can act on without guessing.
+              </p>
+              <div class="home-modes-comment">
+                <span>Comment</span>
+                <p>Make the rollback step explicit before we publish this.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-section" id="agents" aria-labelledby="agents-title">
+      <div class="home-section-head">
+        <p class="home-section-kicker">Agents</p>
+        <h2 id="agents-title">Works with every agent you already run.</h2>
+        <p class="home-section-lede">
+          One workspace, one permission model, one review loop. Any
+          MCP-compatible client can create, publish, wait, patch, and close
+          threads on the same page.
+        </p>
+      </div>
+      <ul class="home-agent-grid" role="list">
+        {
+          agents.map((agent) => (
+            <li class="home-agent">
+              <span class="home-agent-mark" aria-hidden="true">
+                {agent.initial}
+              </span>
+              <span class="home-agent-name">{agent.name}</span>
+              <span class="home-agent-note">{agent.note}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section
+      class="home-section"
+      id="templates"
+      aria-labelledby="templates-title"
+    >
+      <div class="home-section-head">
+        <p class="home-section-kicker">Templates</p>
+        <h2 id="templates-title">
+          Structured output without nagging the agent.
+        </h2>
+        <p class="home-section-lede">
+          Workspace templates define sections, typed properties, and guidance
+          comments. Agents get the shape before they write, so a PRD, RFC,
+          runbook, launch plan, or meeting note lands in the format your team
+          expects.
+        </p>
+      </div>
+      <div class="home-urls">
+        <div class="home-url-row">
+          <code>vpg create --template prd --title "Search redesign"</code>
+          <span>CLI</span>
+        </div>
+        <div class="home-url-row">
+          <code>create_page_from_template</code>
+          <span>MCP</span>
+        </div>
+        <div class="home-url-row">
+          <code>Settings / Templates</code>
+          <span>Browser</span>
+        </div>
+        <div class="home-url-row">
+          <code>guidance: State why this matters now</code>
+          <span>Agent instruction</span>
+        </div>
+      </div>
+    </section>
+
+    <section
+      class="home-section"
+      id="review-loop"
+      aria-labelledby="review-loop-title"
+    >
+      <div class="home-section-head">
+        <p class="home-section-kicker">Review loop</p>
+        <h2 id="review-loop-title">From draft to resolved, in one loop.</h2>
+        <p class="home-section-lede">
+          Agents publish a page, reviewers leave anchored comments, the agent
+          resumes when a wait condition matches, then patches exact source text
+          with the current version id.
+        </p>
+      </div>
+      <div class="home-flow" role="presentation">
+        <div class="home-flow-col">
+          <span class="home-flow-col-label">Agents publish</span>
+          <ul>
+            <li>Claude Code</li>
+            <li>Codex</li>
+            <li>OpenClaw</li>
+          </ul>
+        </div>
+        <div class="home-flow-hub">
+          <span class="home-flow-hub-tag">Review surface</span>
+          <strong>/p/agent-handoff-a8f31c000000</strong>
+          <ul>
+            <li>Rendered + source modes</li>
+            <li>Anchored inline comments</li>
+            <li>Durable version history</li>
+            <li>Backup to Git</li>
+          </ul>
+        </div>
+        <div class="home-flow-col home-flow-col-right">
+          <span class="home-flow-col-label">Loop resumes on</span>
+          <ul>
+            <li>first_response</li>
+            <li>new_comment</li>
+            <li>all_threads_resolved</li>
+          </ul>
+        </div>
+        <svg
+          class="home-flow-lines"
+          viewBox="0 0 1000 200"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <path d="M 60 50  C 280 50, 320 100, 500 100"></path>
+          <path d="M 60 100 C 280 100, 320 100, 500 100"></path>
+          <path d="M 60 150 C 280 150, 320 100, 500 100"></path>
+          <path d="M 500 100 C 680 100, 720 50, 940 50"></path>
+          <path d="M 500 100 C 680 100, 720 100, 940 100"></path>
+          <path d="M 500 100 C 680 100, 720 150, 940 150"></path>
+        </svg>
+      </div>
+    </section>
+
+    <section class="home-section" aria-labelledby="urls-title">
+      <div class="home-section-head">
+        <p class="home-section-kicker">Sharing</p>
+        <h2 id="urls-title">Clean, globally unique review URLs.</h2>
+        <p class="home-section-lede">
+          Every page and folder gets a short, readable public URL. Workspace
+          permissions and publication scopes are checked on every read, write,
+          comment, edit, and search.
+        </p>
+      </div>
+      <div class="home-urls">
+        {
+          reviewUrls.map((row) => (
+            <div class="home-url-row">
+              <code>{row.path}</code>
+              <span>{row.meta}</span>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="home-section" aria-labelledby="keys-title">
+      <div class="home-section-head">
+        <p class="home-section-kicker">Keyboard-first</p>
+        <h2 id="keys-title">Every action is one shortcut away.</h2>
+        <p class="home-section-lede">
+          Search, find, save, switch modes, close. The browser surface is built
+          for repeated review, not one-off previews.
+        </p>
+      </div>
+      <ul class="home-keys" role="list">
+        {
+          shortcuts.map((sc) => (
+            <li class="home-key">
+              <span class="home-key-label">{sc.label}</span>
+              <span class="home-key-combo">
+                {sc.keys.map((k) => (
+                  <kbd>{k}</kbd>
+                ))}
+              </span>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section class="home-section" aria-labelledby="modes-title">
+      <div class="home-section-head">
+        <p class="home-section-kicker">Editor</p>
+        <h2 id="modes-title">Source and rendered, both first-class.</h2>
+        <p class="home-section-lede">
+          Switch with one icon. CodeMirror 6 underneath, polished rendering on
+          top. Markdown, MDX, and HTML stay source-first so agent-authored
+          content survives round trips.
+        </p>
+      </div>
+      <div class="home-modes" role="presentation">
+        <div class="home-modes-pane home-modes-source">
+          <span class="home-modes-tag"
+            ><span aria-hidden="true">✎</span> Source</span
+          >
+          <pre><code>{`---
+title: Agent review handoff
+type: guide
+updated: 2026-05-11
+---
+
+# Agent review handoff
+
+A reviewer selects rendered text and
+leaves a thread. The agent receives
+the selected text, source offsets,
+and surrounding context.
+
+\`\`\`ts
+mcp.call("wait_for_review", {
+  page_id: "pg_8f31c",
+  until: "first_response"
+})
+\`\`\``}</code></pre>
+        </div>
+        <div class="home-modes-pane home-modes-rendered">
+          <span class="home-modes-tag"
+            ><span aria-hidden="true">◉</span> Rendered</span
+          >
+          <article>
+            <header>
+              <p>guide · updated 2026-05-11</p>
+              <h3>Agent review handoff</h3>
+            </header>
+            <p>
+              A reviewer selects rendered text and leaves a thread. The agent
+              receives the selected text, source offsets, and surrounding
+              context.
+            </p>
+            <pre><code>mcp.call("wait_for_review", &lcub; page_id: "pg_8f31c", until: "first_response" &rcub;)</code></pre>
+            <div class="home-modes-comment">
+              <span>Comment</span>
+              <p>Clarify whether public edit links inherit folder access.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-section" id="mcp-cli" aria-labelledby="cli-title">
+      <div class="home-section-head">
+        <p class="home-section-kicker">Programmatic</p>
+        <h2 id="cli-title">Agent-native MCP and CLI.</h2>
+        <p class="home-section-lede">
+          Same review semantics from a Rust CLI, an authenticated MCP session,
+          or both at once. Create from templates, wait for review, read anchored
+          selections, reply to threads, patch source, close the loop.
+        </p>
+      </div>
+      <div class="home-cli">
+        <div class="home-cli-tabs" role="tablist" aria-label="Surfaces">
+          <span class="home-cli-tab is-active" role="tab" aria-selected="true"
+            >vpg</span
+          >
+          <span class="home-cli-tab" role="tab" aria-selected="false">mcp</span>
+          <span class="home-cli-tab" role="tab" aria-selected="false"
+            >events</span
+          >
+        </div>
+        <pre
+          class="home-cli-block"><code><span class="home-cli-comment"># Store explicit API auth for CLI use.</span>
+$ vpg login <span class="home-cli-flag">--workspace</span> wks_docs <span class="home-cli-flag">--token</span> "$VPG_TOKEN"
+
+<span class="home-cli-comment"># Create structured output from a workspace template.</span>
+$ vpg create <span class="home-cli-flag">--workspace</span> wks_docs <span class="home-cli-flag">--template</span> prd <span class="home-cli-flag">--title</span> "Search redesign" <span class="home-cli-flag">--set</span> owner=platform
+
+<span class="home-cli-comment"># Generate a comment-only review link with a 30-day expiry.</span>
+$ vpg publish-page pg_8f31c <span class="home-cli-flag">--permission</span> comment <span class="home-cli-flag">--expires-at</span> 2026-06-12T00:00:00Z
+
+<span class="home-cli-comment"># Wait for a reviewer. Resume the agent when conditions match.</span>
+mcp.call(<span class="home-cli-str">"wait_for_review"</span>, &lcub; workspace_id: <span class="home-cli-str">"wks_docs"</span>, page_id: <span class="home-cli-str">"pg_8f31c"</span>, until: <span class="home-cli-str">"first_response"</span>, timeout_ms: 600000 &rcub;)
+mcp.call(<span class="home-cli-str">"reply_to_thread"</span>, &lcub; thread_id: <span class="home-cli-str">"thr_8f31c"</span>, body: <span class="home-cli-str">"Patched in v3"</span> &rcub;)
+mcp.call(<span class="home-cli-str">"resolve_thread"</span>, &lcub; thread_id: <span class="home-cli-str">"thr_8f31c"</span> &rcub;)
+</code></pre>
+        <a class="home-cli-more" href="/mcp"
+          >Full MCP &amp; CLI reference <span aria-hidden="true">&rarr;</span
+          ></a
+        >
+      </div>
+    </section>
+
+    <section class="home-section" aria-labelledby="faq-title">
+      <div class="home-section-head">
+        <p class="home-section-kicker">FAQ</p>
+        <h2 id="faq-title">Frequently asked.</h2>
+      </div>
+      <div class="home-faq">
+        {
+          faqs.map((item, idx) => (
+            <details class="home-faq-item" open={idx === 0}>
+              <summary>
+                <span>{item.q}</span>
+                <span class="home-faq-icon" aria-hidden="true" />
+              </summary>
+              <p>{item.a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </section>
+
+    <section
+      class="home-section home-section-start"
+      id="start"
+      aria-labelledby="start-title"
+    >
+      <div class="home-section-head">
+        <p class="home-section-kicker">Get started</p>
+        <h2 id="start-title">Pick a path. Ship the first page today.</h2>
+        <p class="home-section-lede">
+          Both modes share the same app, renderer, comments, permissions, MCP
+          endpoint, and CLI. Managed is a configuration, not a fork.
+        </p>
+      </div>
+      <div class="home-start">
+        <article class="home-start-card">
+          <div class="home-start-card-head">
+            <span class="home-start-tag">Cloud</span>
+            <h3>Managed at pages.vegastack.com</h3>
+            <p>
+              Sign up, get a workspace, ship the first review page in under a
+              minute. MCP is available at <code>/mcp</code>.
+            </p>
+          </div>
+          <ul class="home-start-list">
+            <li>Public signup with magic-link auth</li>
+            <li>Workspaces seeded with starter pages</li>
+            <li>Templates, comments, public links, search, and MCP included</li>
+          </ul>
+          <div class="home-start-actions">
+            <a
+              class="vpg-button vpg-button-primary vpg-button-md"
+              href="/app/signup"
+              >Create a workspace <span aria-hidden="true">&rarr;</span></a
+            >
+            <a class="home-hero-link" href="/docs/quickstart"
+              >Managed quickstart <span aria-hidden="true">&rarr;</span></a
+            >
+          </div>
+        </article>
+        <article class="home-start-card">
+          <div class="home-start-card-head">
+            <span class="home-start-tag">Self-host</span>
+            <h3>One command on Cloudflare or Docker</h3>
+            <p>
+              Cloudflare Workers is the primary target. Node and Docker are
+              first-class for portability. Everything else lives in MIT-licensed
+              code.
+            </p>
+          </div>
+          <ul class="home-start-list">
+            <li>
+              <code>install/cloudflare</code> with Workers, D1, KV, and R2
+            </li>
+            <li>
+              <code>install/docker</code> with SQLite and filesystem storage
+            </li>
+            <li>Filesystem-backed object storage on the Node side</li>
+          </ul>
+          <div class="home-start-actions">
+            <a
+              class="vpg-button vpg-button-subtle vpg-button-md"
+              href="/docs/cloudflare"
+              >Deploy on Cloudflare <span aria-hidden="true">&rarr;</span></a
+            >
+            <a class="home-hero-link" href="/docs/docker"
+              >Docker / Node guide <span aria-hidden="true">&rarr;</span></a
+            >
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <footer class="home-footer" aria-label="Footer">
+      <div class="home-footer-cols">
+        <div class="home-footer-col">
+          <span class="home-footer-head">Product</span>
+          <ul>
+            {
+              productLinks.map((l) => (
+                <li>
+                  <a href={l.href}>{l.label}</a>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+        <div class="home-footer-col">
+          <span class="home-footer-head">Agents</span>
+          <ul>
+            {
+              agentLinks.map((l) => (
+                <li>
+                  <a href={l.href}>{l.label}</a>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+        <div class="home-footer-col">
+          <span class="home-footer-head">Community</span>
+          <ul>
+            {
+              communityLinks.map((l) => (
+                <li>
+                  <a href={l.href}>{l.label}</a>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+        <div class="home-footer-col">
+          <span class="home-footer-head">Get started</span>
+          <ul>
+            {
+              startLinks.map((l) => (
+                <li>
+                  <a href={l.href}>{l.label}</a>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </div>
+      <div class="home-footer-bottom">
+        <a
+          class="home-brand home-brand-sm"
+          href="/"
+          aria-label="VegaStack Pages home"
+        >
+          <span class="home-brand-mark" aria-hidden="true"></span>
+          <span>VegaStack Pages</span>
+        </a>
+        <span class="home-footer-meta"
+          >MIT licensed &middot; built on Astro + Cloudflare Workers</span
+        >
+      </div>
+    </footer>
+  </main>
+</AppLayout>

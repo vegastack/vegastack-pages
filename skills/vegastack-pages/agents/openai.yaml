@@ -1,0 +1,13 @@
+interface:
+  display_name: "VegaStack Pages"
+  short_description: "Use VegaStack Pages MCP and CLI safely"
+  default_prompt: "Use $vegastack-pages to review, edit, and respond to a VegaStack Pages document."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "vegastack-pages"
+      description: "VegaStack Pages Remote MCP endpoint"
+      transport: "streamable_http"
+      url: "/mcp"
+policy:
+  allow_implicit_invocation: true

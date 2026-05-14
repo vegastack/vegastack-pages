@@ -1,0 +1,1221 @@
+---
+import { AppError, hasPermission } from "@vegastack/pages-core";
+import { renderMarkdown } from "@vegastack/pages-renderer";
+import { CommentsRail } from "../../components/CommentsSlideOver";
+import { CommandPalette } from "../../components/CommandPalette";
+import { SharePasswordPrompt } from "../../components/SharePasswordPrompt";
+import MobileTabBar from "../../components/MobileTabBar.astro";
+import PageHeader from "../../components/PageHeader.astro";
+import PublicFolderSidebar from "../../components/PublicFolderSidebar.astro";
+import Sidebar from "../../components/Sidebar.astro";
+import type {
+  BreadcrumbSegment,
+  BreadcrumbSibling,
+} from "../../components/BreadcrumbCascade";
+import {
+  getRequestActor,
+  resolvePublicationForPage,
+  resolveActorPermission,
+  resolvePageAccess,
+  type PageAccess,
+} from "../../lib/access";
+import { publicSignupEnabled } from "../../lib/deployment";
+import { enrichThreads } from "../../lib/comments-enrich";
+import {
+  commentService,
+  ensureSeedData,
+  favoriteService,
+  pageService,
+  workspaceService,
+} from "../../lib/runtime";
+import {
+  listSelectableWorkspaces,
+  listVisibleFoldersForActor,
+} from "../../lib/workspace-visibility";
+import AppLayout from "../../layouts/AppLayout.astro";
+
+export const prerender = false;
+
+const { slugId } = Astro.params;
+if (!publicSignupEnabled()) {
+  await ensureSeedData();
+}
+const pageWithSource = slugId
+  ? await pageService.getPageBySlugId(slugId)
+  : null;
+if (!pageWithSource) {
+  return new Response("Page not found", { status: 404 });
+}
+let access: PageAccess | null = null;
+let passwordPrompt: { publicationId: string } | null = null;
+try {
+  access = await resolvePageAccess({
+    cookies: Astro.cookies,
+    url: Astro.url,
+    page: pageWithSource.page,
+    required: "read",
+  });
+} catch (error) {
+  if (
+    error instanceof AppError &&
+    error.code === "PUBLICATION_PASSWORD_REQUIRED"
+  ) {
+    const publicationId =
+      typeof error.details?.publication_id === "string"
+        ? error.details.publication_id
+        : null;
+    if (publicationId) passwordPrompt = { publicationId };
+  }
+  if (!passwordPrompt) {
+    return new Response("Permission denied", { status: 403 });
+  }
+}
+
+const pageAccess =
+  access ??
+  ({
+    actor: getRequestActor(Astro.cookies),
+    permission: "none",
+    publicationId: null,
+    publication: null,
+    guestNameRequired: false,
+  } as PageAccess);
+const canExportSource = hasPermission(pageAccess.permission, "write");
+const canWrite = hasPermission(pageAccess.permission, "write");
+const canComment = hasPermission(pageAccess.permission, "comment");
+const canManageAccess = hasPermission(pageAccess.permission, "admin");
+const isPublicPublication = Boolean(
+  passwordPrompt || (pageAccess.publicationId && !pageAccess.actor.user),
+);
+const actor = pageAccess.actor;
+const sidebarUser = actor.user ?? {
+  id: "guest",
+  email: "guest@local",
+  displayName: "Guest",
+};
+const workspaceRecord = workspaceService.getWorkspace(
+  pageWithSource.page.workspaceId,
+);
+const sidebarWorkspace = workspaceRecord ?? {
+  id: pageWithSource.page.workspaceId,
+  name: "Workspace",
+  slug: "workspace",
+  versionRetentionDays: null,
+  createdAt: pageWithSource.page.createdAt,
+  updatedAt: pageWithSource.page.updatedAt,
+};
+const sidebarWorkspaces =
+  !isPublicPublication && actor.user
+    ? listSelectableWorkspaces(actor.user)
+    : [];
+const isHtmlPage = pageWithSource.page.sourceType === "html";
+const rendered = isHtmlPage
+  ? { frontmatter: {}, headings: [], html: "" }
+  : await renderMarkdown(pageWithSource.source);
+const frontmatter = rendered.frontmatter as Record<string, unknown>;
+const title = isHtmlPage
+  ? pageWithSource.page.title
+  : typeof frontmatter.title === "string"
+    ? frontmatter.title
+    : "Untitled";
+const description =
+  !isHtmlPage && typeof frontmatter.description === "string"
+    ? frontmatter.description
+    : null;
+const metadataEntries = isHtmlPage
+  ? []
+  : Object.entries(frontmatter).filter(
+      ([key]) => key !== "title" && key !== "description",
+    );
+
+const workspaceFolders = workspaceService.listFolders(
+  pageWithSource.page.workspaceId,
+);
+const currentFolder =
+  workspaceFolders.find(
+    (folder) => folder.path === pageWithSource.page.folderPath,
+  ) ?? null;
+const ancestorFolders = currentFolder
+  ? workspaceService.folderAncestors(currentFolder.id)
+  : [];
+const publicPublication =
+  pageAccess.publication ?? resolvePublicationForPage(pageWithSource.page);
+const publicRootFolder =
+  publicPublication?.resourceType === "folder"
+    ? workspaceService.getFolder(publicPublication.resourceId)
+    : null;
+const publicFolderPrefix = publicRootFolder
+  ? `${publicRootFolder.path}/`
+  : null;
+const workspacePages = pageService
+  .listPages(pageWithSource.page.workspaceId)
+  .filter((page) =>
+    isPublicPublication
+      ? publicRootFolder
+        ? Boolean(
+            page.folderPath &&
+            (page.folderPath === publicRootFolder.path ||
+              page.folderPath.startsWith(publicFolderPrefix!)),
+          )
+        : page.id === pageWithSource.page.id
+      : hasPermission(resolveActorPermission({ actor, page }), "read"),
+  )
+  .sort(
+    (left, right) =>
+      left.folderPath.localeCompare(right.folderPath) ||
+      left.title.localeCompare(right.title),
+  );
+const visibleFolders = isPublicPublication
+  ? publicRootFolder
+    ? workspaceFolders.filter(
+        (folder) =>
+          folder.id === publicRootFolder.id ||
+          folder.path.startsWith(publicFolderPrefix!),
+      )
+    : []
+  : listVisibleFoldersForActor(actor, pageWithSource.page.workspaceId);
+
+// Build breadcrumb segments. Each segment's `siblings` are the children of
+// that segment's container so the dropdown reveals lateral navigation
+// options. Workspace root is rendered separately (non-cascading anchor).
+const MAX_BREADCRUMB_SUBMENU_DEPTH = 6;
+
+function childrenOf(
+  folderPath: string,
+  folderId: string | null,
+  depth = 0,
+): BreadcrumbSibling[] {
+  const childPages = workspacePages
+    .filter((page) => page.folderPath === folderPath)
+    .map(
+      (page) =>
+        ({
+          id: page.id,
+          name: page.title,
+          href: `/p/${page.slugId}`,
+          isCurrent: page.id === pageWithSource!.page.id,
+          isFolder: false,
+        }) satisfies BreadcrumbSibling,
+    );
+  const childFolders = visibleFolders
+    .filter((folder) =>
+      folderId
+        ? folder.parentFolderId === folderId
+        : folder.parentFolderId === null,
+    )
+    .map(
+      (folder) =>
+        ({
+          id: folder.id,
+          name: folder.name,
+          href: `/f/${folder.slugId}`,
+          isCurrent: folder.id === currentFolder?.id,
+          isFolder: true,
+          children:
+            depth < MAX_BREADCRUMB_SUBMENU_DEPTH
+              ? childrenOf(folder.path, folder.id, depth + 1)
+              : [],
+        }) satisfies BreadcrumbSibling,
+    );
+  return [...childFolders, ...childPages];
+}
+
+const segments: BreadcrumbSegment[] = [
+  ...ancestorFolders.map((folder, index) => {
+    const isLast = index === ancestorFolders.length - 1;
+    return {
+      id: folder.id,
+      name: folder.name,
+      href: `/f/${folder.slugId}`,
+      isCurrent: false,
+      siblings: childrenOf(folder.path, folder.id),
+      allChildrenHref: isLast ? `/f/${folder.slugId}` : undefined,
+    } satisfies BreadcrumbSegment;
+  }),
+  {
+    id: pageWithSource.page.id,
+    name: title,
+    href: `/p/${pageWithSource.page.slugId}`,
+    isCurrent: true,
+    siblings: childrenOf(
+      pageWithSource.page.folderPath ?? "",
+      currentFolder?.id ?? null,
+    ).filter((sibling) => sibling.id !== pageWithSource.page.id),
+  } satisfies BreadcrumbSegment,
+];
+
+const displayedHeadings =
+  rendered.headings[0]?.depth === 1 &&
+  rendered.headings[0].text.trim().toLowerCase() === title.trim().toLowerCase()
+    ? rendered.headings.slice(1)
+    : rendered.headings;
+const displayedHtml =
+  !isHtmlPage &&
+  rendered.headings[0]?.depth === 1 &&
+  rendered.headings[0].text.trim().toLowerCase() === title.trim().toLowerCase()
+    ? rendered.html.replace(/^<h1[^>]*>.*?<\/h1>\s*/s, "")
+    : rendered.html;
+const publicIndexable = Boolean(
+  publicPublication?.indexingEnabled && !publicPublication.passwordHash,
+);
+const initialThreads = enrichThreads(
+  commentService.listForPage(pageWithSource.page.id, "all"),
+);
+const initialOpenThreadCount = initialThreads.filter(
+  (entry) => entry.thread.status === "open",
+).length;
+
+const workspaceHref = workspaceRecord
+  ? `/app?workspace_id=${encodeURIComponent(sidebarWorkspace.id)}`
+  : "/app";
+
+const sidebarPages = workspacePages.map((page) => ({
+  id: page.id,
+  slugId: page.slugId,
+  title: page.title,
+  folderPath: page.folderPath || null,
+}));
+const sidebarPageIds = new Set(sidebarPages.map((page) => page.id));
+const initialFavoriteIds = actor.user
+  ? favoriteService
+      .listForWorkspace(actor.user.id, sidebarWorkspace.id)
+      .map((favorite) => favorite.pageId)
+      .filter((pageId) => sidebarPageIds.has(pageId))
+  : [];
+const sidebarFoldersForTree = visibleFolders.map((folder) => ({
+  id: folder.id,
+  slugId: folder.slugId,
+  name: folder.name,
+  path: folder.path,
+  parentFolderId: folder.parentFolderId,
+}));
+// The same shell layout in every state — the TOC column is always reserved
+// so unlocking the editor never shifts the main column.
+const shellClasses = [
+  "vpg-shell",
+  "vpg-shell--reading",
+  "vpg-shell--has-mtab",
+  canComment ? "vpg-shell--has-comments" : "",
+  isHtmlPage ? "vpg-shell--html-page" : "",
+  isPublicPublication ? "vpg-shell--public-share" : "",
+]
+  .filter(Boolean)
+  .join(" ");
+
+const commentsBridgeNonce = isHtmlPage ? crypto.randomUUID() : "";
+
+function htmlPreviewRuntimeScript(pageId: string, nonce: string) {
+  return `<script nonce="${nonce}">
+(() => {
+  const PAGE_ID = ${JSON.stringify(pageId)};
+  const NONCE = ${JSON.stringify(nonce)};
+  const ROOT_ATTR = "data-vpg-comment-root";
+  const VISUAL_ATTR = "data-vpg-comment-visual";
+  const STYLE_ID = "vpg-comment-bridge-style";
+  let lastRenderPayload = null;
+  let renderFrame = 0;
+
+  const send = () => {
+    const body = document.body;
+    const root = document.documentElement;
+    const height = Math.max(
+      body ? body.scrollHeight : 0,
+      root ? root.scrollHeight : 0,
+      body ? body.offsetHeight : 0,
+      root ? root.offsetHeight : 0
+    );
+    parent.postMessage({ type: "vpg:html-preview-resize", height }, "*");
+    if (typeof scheduleRerenderComments === "function") scheduleRerenderComments();
+  };
+  const observer = "ResizeObserver" in window ? new ResizeObserver(send) : null;
+  if (observer) {
+    observer.observe(document.documentElement);
+    if (document.body) observer.observe(document.body);
+  }
+  window.addEventListener("load", send);
+  window.addEventListener("resize", send);
+  send();
+  setTimeout(send, 100);
+  setTimeout(send, 500);
+
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = \`
+      html,
+      body {
+        max-width: 100%;
+        overflow-x: hidden;
+        overflow-x: clip;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      img,
+      svg,
+      video,
+      canvas,
+      iframe {
+        max-width: 100%;
+      }
+      pre {
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      table {
+        max-width: 100%;
+      }
+      .vpg-comment-visual-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2147483600;
+      }
+      [\${VISUAL_ATTR}] {
+        position: absolute;
+        pointer-events: auto;
+        border: var(--vsk-line-comment);
+        background: var(--vsk-comment-tint);
+        color: var(--vsk-comment-ink);
+        cursor: pointer;
+      }
+      [\${VISUAL_ATTR}][data-kind="point"] {
+        width: 1.55rem;
+        height: 1.55rem;
+        display: grid;
+        place-items: center;
+        border-color: var(--vsk-comment-ink);
+        border-radius: var(--vsk-radius-circle);
+        transform: translate(-50%, -50%);
+        background: var(--vsk-comment-tint-strong);
+        color: var(--vsk-comment-ink);
+        box-shadow: none;
+        font-family: var(--font-sans);
+        font-size: var(--text-xs);
+        font-weight: var(--weight-bold);
+      }
+      [\${VISUAL_ATTR}][data-kind="point"]:hover {
+        border-color: var(--vsk-comment-ink);
+        background: var(--vsk-comment-tint-strong);
+        color: var(--vsk-comment-ink);
+      }
+      [\${VISUAL_ATTR}][data-kind="text"] {
+        border: 0;
+        border-bottom: var(--vsk-line-comment);
+        border-radius: var(--vsk-radius-xs);
+        background: var(--vsk-comment-tint);
+      }
+      [\${VISUAL_ATTR}][data-kind="text"]:hover {
+        background: var(--vsk-comment-tint-strong);
+      }
+    \`;
+    document.head.append(style);
+  }
+  ensureStyle();
+
+  function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
+    return String(value).replace(/["\\\\#.:,[\\]>+~*\\s]/g, "\\\\$&");
+  }
+
+  function domPath(node) {
+    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    if (!(el instanceof Element)) return null;
+    const parts = [];
+    let current = el;
+    while (current && current !== document.body && parts.length < 12) {
+      const parent = current.parentElement;
+      if (!parent) break;
+      const tag = current.tagName.toLowerCase();
+      if (current.id) {
+        parts.unshift(tag + "#" + cssEscape(current.id));
+        break;
+      }
+      const index = Array.from(parent.children).filter((child) => child.tagName === current.tagName).indexOf(current) + 1;
+      parts.unshift(tag + ":nth-of-type(" + Math.max(1, index) + ")");
+      current = parent;
+    }
+    return parts.join(">");
+  }
+
+  function queryPath(path) {
+    if (!path) return null;
+    try {
+      return document.querySelector(path);
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizedText(value, limit) {
+    return String(value || "").replace(/\\s+/g, " ").trim().slice(0, limit);
+  }
+
+  function nearestStableElement(target) {
+    let current = target instanceof Element ? target : target && target.parentElement;
+    const stableTags = new Set(["a", "button", "input", "textarea", "select", "img", "svg", "figure", "table", "thead", "tbody", "tr", "th", "td", "section", "article", "header", "main", "nav", "aside", "form", "h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "pre", "code", "canvas"]);
+    while (current && current !== document.body && current !== document.documentElement) {
+      const tag = current.tagName.toLowerCase();
+      if (current.id || current.getAttribute("role") || current.getAttribute("aria-label") || stableTags.has(tag)) return current;
+      current = current.parentElement;
+    }
+    return document.body;
+  }
+
+  function elementContext(el) {
+    if (!(el instanceof Element)) return undefined;
+    const tag = el.tagName.toLowerCase();
+    const text = normalizedText(el.innerText || el.textContent || "", 512);
+    const titleNode = tag === "svg" ? el.querySelector("title") : null;
+    const title = normalizedText(el.getAttribute("title") || titleNode?.textContent || "", 512);
+    const alt = normalizedText(el.getAttribute("alt") || "", 512);
+    const id = el.id || null;
+    const className = normalizedText(el.className && typeof el.className === "string" ? el.className : "", 512);
+    const role = el.getAttribute("role");
+    const ariaLabel = normalizedText(el.getAttribute("aria-label") || "", 512);
+    const fingerprint = normalizedText([tag, id, className, role, ariaLabel, alt, title, text.slice(0, 160)].filter(Boolean).join("|"), 1000);
+    return {
+      path: domPath(el),
+      fingerprint,
+      tag,
+      id,
+      className,
+      role,
+      ariaLabel,
+      text,
+      alt,
+      title,
+    };
+  }
+
+  function textOffsetIn(root, node, offset) {
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    range.setEnd(node, offset);
+    return range.toString().length;
+  }
+
+  function textHitFromPoint(clientX, clientY, scope) {
+    const caretRange = document.caretRangeFromPoint
+      ? document.caretRangeFromPoint(clientX, clientY)
+      : (() => {
+          const pos = document.caretPositionFromPoint?.(clientX, clientY);
+          if (!pos) return null;
+          const range = document.createRange();
+          range.setStart(pos.offsetNode, pos.offset);
+          range.collapse(true);
+          return range;
+        })();
+    if (!caretRange || !scope.contains(caretRange.startContainer)) return null;
+    const node = caretRange.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return null;
+    const value = node.textContent || "";
+    if (!value.trim()) return null;
+    const isWord = (char) => /[\\p{L}\\p{N}_'-]/u.test(char);
+    let start = Math.min(caretRange.startOffset, value.length);
+    let end = start;
+    while (start > 0 && isWord(value[start - 1])) start -= 1;
+    while (end < value.length && isWord(value[end])) end += 1;
+    if (start === end) return null;
+    const exact = value.slice(start, end);
+    const prefix = value.slice(Math.max(0, start - 120), start);
+    const suffix = value.slice(end, end + 120);
+    let renderedStart = null;
+    let renderedEnd = null;
+    try {
+      renderedStart = textOffsetIn(document.body, node, start);
+      renderedEnd = textOffsetIn(document.body, node, end);
+    } catch {}
+    return { exact, prefix, suffix, renderedStart, renderedEnd };
+  }
+
+  function localPoint(event, el) {
+    const rect = el.getBoundingClientRect();
+    return {
+      x: clamp01((event.clientX - rect.left) / Math.max(1, rect.width)),
+      y: clamp01((event.clientY - rect.top) / Math.max(1, rect.height)),
+    };
+  }
+
+  function documentPoint(event) {
+    return {
+      x: clamp01(event.clientX / Math.max(1, document.documentElement.clientWidth)),
+      y: clamp01((event.clientY + window.scrollY) / Math.max(1, document.documentElement.scrollHeight)),
+      coordinateSpace: "document",
+    };
+  }
+
+  function targetForPoint(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || !target.closest("[" + VISUAL_ATTR + "]")) return event.target;
+    const marker = target.closest("[" + VISUAL_ATTR + "]");
+    const previous = marker.style.pointerEvents;
+    marker.style.pointerEvents = "none";
+    const underlying = document.elementFromPoint(event.clientX, event.clientY);
+    marker.style.pointerEvents = previous;
+    return underlying || event.target;
+  }
+
+  function anchorFromEvent(event) {
+    const stable = nearestStableElement(targetForPoint(event));
+    const point = localPoint(event, stable);
+    const element = elementContext(stable);
+    const textHit = textHitFromPoint(event.clientX, event.clientY, stable);
+    const nearbyText = normalizedText(stable.innerText || stable.textContent || document.body.textContent || "", 512);
+    return {
+      selectedText: textHit?.exact || "Pinned comment",
+      sourceStart: null,
+      sourceEnd: null,
+      renderedDomPath: element?.path || null,
+      prefixText: textHit?.prefix || "",
+      suffixText: textHit?.suffix || "",
+      kind: "point",
+      surface: "html",
+      selector: {
+        point: { x: point.x, y: point.y, coordinateSpace: "element", elementPath: element?.path || null },
+        documentPoint: documentPoint(event),
+        element,
+        textHit,
+        nearbyText,
+      },
+      confidence: element?.path ? "active" : "manual",
+    };
+  }
+
+  function anchorFromSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0).cloneRange();
+    if (!document.body.contains(range.commonAncestorContainer)) return null;
+    const commonElement =
+      range.commonAncestorContainer instanceof Element
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement;
+    if (commonElement?.closest("input, textarea, select, button, [contenteditable='true']")) return null;
+    const rawText = selection.toString();
+    const selectedText = rawText.trim();
+    if (!selectedText) return null;
+    let start = 0;
+    let end = 0;
+    try {
+      start = textOffsetIn(document.body, range.startContainer, range.startOffset);
+      end = textOffsetIn(document.body, range.endContainer, range.endOffset);
+    } catch {
+      return null;
+    }
+    const leadingWhitespace = rawText.length - rawText.trimStart().length;
+    const trailingWhitespace = rawText.length - rawText.trimEnd().length;
+    start += leadingWhitespace;
+    end = Math.max(start, end - trailingWhitespace);
+    if (end <= start) return null;
+    const trimmedRange = rangeFromTextOffsets(document.body, start, end) || range;
+    const rect = firstVisibleRect(trimmedRange);
+    if (!rect) return null;
+    const rootText = document.body.textContent || "";
+    const prefix = rootText.slice(Math.max(0, start - 120), start);
+    const suffix = rootText.slice(end, end + 120);
+    const stable = nearestStableElement(trimmedRange.commonAncestorContainer);
+    const element = elementContext(stable);
+    return {
+      anchor: {
+        selectedText,
+        sourceStart: null,
+        sourceEnd: null,
+        renderedDomPath: element?.path || null,
+        prefixText: prefix,
+        suffixText: suffix,
+        kind: "text",
+        surface: "html",
+        selector: {
+          quote: { exact: selectedText, prefix, suffix },
+          position: {
+            sourceStart: null,
+            sourceEnd: null,
+            renderedStart: start,
+            renderedEnd: end,
+          },
+          element,
+          nearbyText: normalizedText(stable.innerText || stable.textContent || document.body.textContent || "", 512),
+        },
+        confidence: element?.path ? "active" : "manual",
+      },
+      rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+    };
+  }
+
+  function postPin(anchor, rect) {
+    parent.postMessage({ type: "vpg:comment-pin", pageId: PAGE_ID, nonce: NONCE, anchor, rect }, "*");
+  }
+
+  function postClearDraft() {
+    parent.postMessage({ type: "vpg:comment-clear-draft", pageId: PAGE_ID, nonce: NONCE }, "*");
+  }
+
+  let selectionDraftTimer = 0;
+  function scheduleSelectionDraft() {
+    window.clearTimeout(selectionDraftTimer);
+    selectionDraftTimer = window.setTimeout(() => {
+      const draft = anchorFromSelection();
+      if (!draft) return;
+      postPin(draft.anchor, draft.rect);
+    }, 0);
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const marker = event.target instanceof Element ? event.target.closest("[" + VISUAL_ATTR + "]") : null;
+    if (!marker) {
+      window.getSelection()?.removeAllRanges();
+      postClearDraft();
+    }
+    if (event.altKey) {
+      event.preventDefault();
+      postPin(anchorFromEvent(event), { top: event.clientY, left: event.clientX, width: 1, height: 1 });
+      return;
+    }
+  });
+  function postPinFromEvent(event) {
+    if (event.target instanceof Element && event.target.closest("[" + VISUAL_ATTR + "]")) return;
+    event.preventDefault();
+    postPin(anchorFromEvent(event), { top: event.clientY, left: event.clientX, width: 1, height: 1 });
+  }
+  document.addEventListener("contextmenu", postPinFromEvent);
+  document.addEventListener("dblclick", (event) => {
+    if (event.target instanceof Element && event.target.closest("[" + VISUAL_ATTR + "]")) return;
+    scheduleSelectionDraft();
+  });
+  document.addEventListener("mouseup", (event) => {
+    if (event.target instanceof Element && event.target.closest("[" + VISUAL_ATTR + "]")) return;
+    scheduleSelectionDraft();
+  });
+  document.addEventListener("touchend", scheduleSelectionDraft, { passive: true });
+  document.addEventListener("keyup", (event) => {
+    if (event.key !== "Shift" && !event.shiftKey && !event.key.startsWith("Arrow")) return;
+    scheduleSelectionDraft();
+  });
+
+  function clearRenderedComments() {
+    for (const visual of Array.from(document.querySelectorAll("[" + VISUAL_ATTR + "][data-kind='text']"))) {
+      visual.remove();
+    }
+    for (const visual of Array.from(document.querySelectorAll("[" + ROOT_ATTR + "]"))) visual.remove();
+    document.body.normalize();
+  }
+
+  function rangeFromTextOffsets(root, start, end) {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let offset = 0;
+    let startNode = null;
+    let startOffset = 0;
+    let endNode = null;
+    let endOffset = 0;
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const length = node.textContent?.length || 0;
+      const nodeStart = offset;
+      const nodeEnd = offset + length;
+      if (!startNode && start >= nodeStart && start <= nodeEnd) {
+        startNode = node;
+        startOffset = start - nodeStart;
+      }
+      if (startNode && end >= nodeStart && end <= nodeEnd) {
+        endNode = node;
+        endOffset = end - nodeStart;
+        break;
+      }
+      offset = nodeEnd;
+    }
+    if (!startNode || !endNode) return null;
+    const range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    return range;
+  }
+
+  function findTextHitRange(scope, textHit) {
+    if (!scope || !textHit || !textHit.exact) return null;
+    if (Number.isFinite(textHit.renderedStart) && Number.isFinite(textHit.renderedEnd)) {
+      const range = rangeFromTextOffsets(document.body, textHit.renderedStart, textHit.renderedEnd);
+      if (range && range.toString() === textHit.exact) return range;
+    }
+    const text = scope.textContent || "";
+    let bestIndex = text.indexOf(textHit.exact);
+    let bestScore = bestIndex >= 0 ? 0 : -1;
+    let index = bestIndex;
+    while (index >= 0) {
+      const prefix = text.slice(Math.max(0, index - (textHit.prefix || "").length), index);
+      const suffix = text.slice(index + textHit.exact.length, index + textHit.exact.length + (textHit.suffix || "").length);
+      const score = commonSuffixLength(prefix, textHit.prefix || "") + commonPrefixLength(suffix, textHit.suffix || "");
+      if (score > bestScore) {
+        bestIndex = index;
+        bestScore = score;
+      }
+      index = text.indexOf(textHit.exact, index + textHit.exact.length);
+    }
+    if (bestIndex < 0) return null;
+    return rangeFromTextOffsets(scope, bestIndex, bestIndex + textHit.exact.length);
+  }
+
+  function commonPrefixLength(left, right) {
+    const limit = Math.min(left.length, right.length);
+    let count = 0;
+    while (count < limit && left[count] === right[count]) count += 1;
+    return count;
+  }
+
+  function commonSuffixLength(left, right) {
+    const limit = Math.min(left.length, right.length);
+    let count = 0;
+    while (count < limit && left[left.length - 1 - count] === right[right.length - 1 - count]) count += 1;
+    return count;
+  }
+
+  function firstVisibleRect(range) {
+    return Array.from(range.getClientRects()).find((rect) => rect.width > 0 && rect.height > 0) || null;
+  }
+
+  function resolvePoint(thread) {
+    const selector = thread.anchor && thread.anchor.selector;
+    if (!selector) return null;
+    const point = selector.point;
+    const elementPath = point?.elementPath || selector.element?.path || thread.anchor.renderedDomPath;
+    const element = queryPath(elementPath);
+    if (selector.textHit) {
+      const range = findTextHitRange(element || document.body, selector.textHit);
+      const rect = range ? firstVisibleRect(range) : null;
+      if (rect) {
+        return {
+          left: rect.left + window.scrollX + rect.width / 2,
+          top: rect.top + window.scrollY + rect.height / 2,
+        };
+      }
+    }
+    if (point && point.coordinateSpace === "element" && element) {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left + window.scrollX + clamp01(point.x) * rect.width,
+        top: rect.top + window.scrollY + clamp01(point.y) * rect.height,
+      };
+    }
+    const documentPoint = selector.documentPoint || (point?.coordinateSpace === "document" ? point : null);
+    if (documentPoint) {
+      return {
+        left: clamp01(documentPoint.x) * Math.max(1, document.documentElement.clientWidth),
+        top: clamp01(documentPoint.y) * Math.max(1, document.documentElement.scrollHeight),
+      };
+    }
+    return null;
+  }
+
+  function renderVisual(thread, layer) {
+    const resolved = resolvePoint(thread);
+    if (!resolved) return false;
+    const el = document.createElement("button");
+    el.type = "button";
+    el.setAttribute(VISUAL_ATTR, thread.id);
+    el.dataset.kind = "point";
+    el.setAttribute("aria-label", "Annotation " + (thread.annotationNumber || 1) + ": " + thread.replyCount + " comments");
+    el.style.left = resolved.left + "px";
+    el.style.top = resolved.top + "px";
+    el.textContent = String(thread.annotationNumber || 1);
+    layer.append(el);
+    return true;
+  }
+
+  function resolveTextRange(thread) {
+    const selector = thread.anchor && thread.anchor.selector;
+    if (!selector) return null;
+    const scope = queryPath(selector.element?.path || thread.anchor.renderedDomPath) || document.body;
+    const position = selector.position;
+    if (position && Number.isFinite(position.renderedStart) && Number.isFinite(position.renderedEnd)) {
+      const range = rangeFromTextOffsets(document.body, position.renderedStart, position.renderedEnd);
+      if (range && (!selector.quote?.exact || range.toString().trim() === selector.quote.exact.trim())) return range;
+    }
+    if (selector.textHit) return findTextHitRange(scope, selector.textHit);
+    if (selector.quote?.exact) {
+      return findTextHitRange(scope, {
+        exact: selector.quote.exact,
+        prefix: selector.quote.prefix,
+        suffix: selector.quote.suffix,
+        renderedStart: position?.renderedStart,
+        renderedEnd: position?.renderedEnd,
+      });
+    }
+    return null;
+  }
+
+  function renderTextVisual(thread, layer) {
+    const range = resolveTextRange(thread);
+    if (!range) return false;
+    const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+    if (rects.length === 0) return false;
+    for (const rect of rects) {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.setAttribute(VISUAL_ATTR, thread.id);
+      el.dataset.kind = "text";
+      el.setAttribute("aria-label", "Annotation " + (thread.annotationNumber || 1) + ": " + thread.replyCount + " comments");
+      el.style.left = rect.left + window.scrollX + "px";
+      el.style.top = rect.top + window.scrollY + "px";
+      el.style.width = rect.width + "px";
+      el.style.height = rect.height + "px";
+      layer.append(el);
+    }
+    return true;
+  }
+
+  function renderFallbackVisual(thread, layer) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.setAttribute(VISUAL_ATTR, thread.id);
+    el.dataset.kind = "point";
+    el.setAttribute("aria-label", "Annotation " + (thread.annotationNumber || 1) + " needs placement");
+    el.textContent = String(thread.annotationNumber || 1);
+    el.style.left = "50%";
+    el.style.top = "1rem";
+    layer.append(el);
+  }
+
+  function sendRects() {
+    const rects = {};
+    for (const el of Array.from(document.querySelectorAll("[" + VISUAL_ATTR + "]"))) {
+      const threadId = el.getAttribute(VISUAL_ATTR);
+      const rect = el.getBoundingClientRect();
+      if (threadId && rect.width > 0 && rect.height > 0 && !rects[threadId]) {
+        rects[threadId] = { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+      }
+    }
+    parent.postMessage({ type: "vpg:comment-rects", pageId: PAGE_ID, nonce: NONCE, rects }, "*");
+  }
+
+  function renderComments(data) {
+    ensureStyle();
+    window.__vpgActiveCommentThreadId = data.activeThreadId || null;
+    clearRenderedComments();
+    const layer = document.createElement("div");
+    layer.className = "vpg-comment-visual-layer";
+    layer.setAttribute(ROOT_ATTR, "true");
+    layer.style.width = Math.max(1, document.documentElement.clientWidth) + "px";
+    layer.style.height = Math.max(1, document.documentElement.scrollHeight) + "px";
+    document.body.append(layer);
+    for (const thread of data.threads || []) {
+      if (!thread.anchor || thread.anchor.surface !== "html") continue;
+      if (thread.anchorVisible !== true) continue;
+      const rendered =
+        thread.anchor.kind === "point"
+          ? renderVisual(thread, layer)
+          : renderTextVisual(thread, layer);
+      if (!rendered && thread.status === "open") renderFallbackVisual(thread, layer);
+    }
+    sendRects();
+  }
+  function scheduleRerenderComments() {
+    if (!lastRenderPayload || renderFrame) return;
+    renderFrame = requestAnimationFrame(() => {
+      renderFrame = 0;
+      if (lastRenderPayload) renderComments(lastRenderPayload);
+    });
+  }
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || data.type !== "vpg:comments-render" || data.pageId !== PAGE_ID || data.nonce !== NONCE) return;
+    lastRenderPayload = data;
+    renderComments(data);
+  });
+  window.addEventListener("resize", scheduleRerenderComments);
+  parent.postMessage({ type: "vpg:comments-ready", pageId: PAGE_ID, nonce: NONCE }, "*");
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[" + VISUAL_ATTR + "]") : null;
+    if (!target) return;
+    const threadId = target.getAttribute(VISUAL_ATTR);
+    if (!threadId) return;
+    event.preventDefault();
+    parent.postMessage({ type: "vpg:comment-open", pageId: PAGE_ID, nonce: NONCE, threadId }, "*");
+  });
+  let dragVisual = null;
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[" + VISUAL_ATTR + "]") : null;
+    if (!target || event.button !== 0) return;
+    dragVisual = {
+      threadId: target.getAttribute(VISUAL_ATTR),
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+  });
+  document.addEventListener("pointerup", (event) => {
+    if (!dragVisual || !dragVisual.threadId) {
+      dragVisual = null;
+      return;
+    }
+    const moved = Math.abs(event.clientX - dragVisual.startX) + Math.abs(event.clientY - dragVisual.startY) > 6;
+    const current = dragVisual;
+    dragVisual = null;
+    if (!moved) return;
+    const selector = anchorFromEvent(event).selector;
+    parent.postMessage({ type: "vpg:comment-anchor-update", pageId: PAGE_ID, nonce: NONCE, threadId: current.threadId, kind: "point", selector }, "*");
+  });
+})();
+</script>`;
+}
+
+const htmlPreviewRuntimeScriptValue = isHtmlPage
+  ? htmlPreviewRuntimeScript(pageWithSource.page.id, commentsBridgeNonce)
+  : "";
+const htmlPreviewSourceWithCsp = isHtmlPage
+  ? withHtmlPreviewCsp(pageWithSource.source, commentsBridgeNonce)
+  : "";
+const htmlPreviewSrcdoc = isHtmlPage
+  ? /<\/body\s*>/i.test(htmlPreviewSourceWithCsp)
+    ? htmlPreviewSourceWithCsp.replace(
+        /<\/body\s*>/i,
+        `${htmlPreviewRuntimeScriptValue}</body>`,
+      )
+    : `${htmlPreviewSourceWithCsp}${htmlPreviewRuntimeScriptValue}`
+  : "";
+
+function withHtmlPreviewCsp(source: string, nonce: string) {
+  const csp = [
+    "default-src 'none'",
+    `script-src 'nonce-${nonce}'`,
+    "style-src 'unsafe-inline' https:",
+    "img-src data: blob: https: http:",
+    "font-src data: https:",
+    "media-src data: blob: https: http:",
+    "connect-src 'none'",
+    "frame-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join("; ");
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+  if (/<head[^>]*>/i.test(source)) {
+    return source.replace(/<head([^>]*)>/i, `<head$1>${meta}`);
+  }
+  if (/<html[^>]*>/i.test(source)) {
+    return source.replace(/<html([^>]*)>/i, `<html$1><head>${meta}</head>`);
+  }
+  return `<!doctype html><html><head>${meta}</head><body>${source}</body></html>`;
+}
+---
+
+<AppLayout
+  title={`${title} - VegaStack Pages`}
+  robots={publicIndexable ? "index,follow" : "noindex"}
+>
+  {
+    passwordPrompt ? (
+      <SharePasswordPrompt
+        client:load
+        publicationId={passwordPrompt.publicationId}
+        workspaceId={pageWithSource.page.workspaceId}
+      />
+    ) : (
+      <div class={shellClasses} data-vpg-workspace-id={sidebarWorkspace.id}>
+        {!isPublicPublication && (
+          <Sidebar
+            workspace={{
+              id: sidebarWorkspace.id,
+              name: sidebarWorkspace.name,
+              slug: sidebarWorkspace.slug,
+            }}
+            workspaces={sidebarWorkspaces.map((w) => ({
+              id: w.id,
+              name: w.name,
+              slug: w.slug,
+            }))}
+            currentUser={sidebarUser}
+            pages={sidebarPages}
+            folders={sidebarFoldersForTree}
+            canWrite={canWrite}
+            currentPageId={pageWithSource.page.id}
+            initialFavoriteIds={initialFavoriteIds}
+          />
+        )}
+        {isPublicPublication && publicRootFolder && (
+          <PublicFolderSidebar
+            rootFolderId={publicRootFolder.id}
+            currentPageId={pageWithSource.page.id}
+            folders={sidebarFoldersForTree}
+            pages={sidebarPages}
+          />
+        )}
+
+        <div class="vpg-shell-right">
+          <PageHeader
+            workspaceId={sidebarWorkspace.id}
+            workspaceName={sidebarWorkspace.name}
+            workspaceHref={workspaceHref}
+            segments={segments}
+            pageId={pageWithSource.page.id}
+            slugId={pageWithSource.page.slugId}
+            title={title}
+            sourceType={pageWithSource.page.sourceType}
+            canEdit={canWrite}
+            canExportSource={canExportSource}
+            canComment={canComment}
+            canManageAccess={canManageAccess}
+            showNavigationToggle={!isPublicPublication}
+            canFavorite={Boolean(actor.user)}
+            initialFavorited={initialFavoriteIds.includes(
+              pageWithSource.page.id,
+            )}
+            commentsBadge={initialOpenThreadCount}
+            headings={displayedHeadings}
+            renderedHtml={displayedHtml}
+            updatedAt={pageWithSource.page.updatedAt}
+          />
+
+          <div class="vpg-shell-body">
+            <main class="vpg-shell-main">
+              <article
+                class:list={[
+                  "vpg-shell-article",
+                  isHtmlPage ? "html-article" : "prose-article",
+                ]}
+                data-vpg-page-editor={canWrite ? "true" : undefined}
+                data-page-id={canWrite ? pageWithSource.page.id : undefined}
+                data-page-title={canWrite ? title : undefined}
+                data-source-type={
+                  canWrite ? pageWithSource.page.sourceType : undefined
+                }
+                data-guest-name-required={
+                  canWrite ? String(pageAccess.guestNameRequired) : undefined
+                }
+                data-workspace-id={sidebarWorkspace.id}
+              >
+                {!isHtmlPage && <h1 class="prose-title">{title}</h1>}
+                {description && (
+                  <p class="prose-description" data-vpg-description-static>
+                    {description}
+                  </p>
+                )}
+
+                {metadataEntries.length > 0 && (
+                  <dl
+                    class="metadata-list"
+                    aria-label="Page metadata"
+                    data-vpg-metadata-static
+                  >
+                    {metadataEntries.map(([key, value]) => (
+                      <div>
+                        <dt>{key}</dt>
+                        <dd>
+                          {typeof value === "string"
+                            ? value
+                            : JSON.stringify(value)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+
+                {pageWithSource.page.sourceType === "html" ? (
+                  <>
+                    <iframe
+                      class="html-preview"
+                      data-vpg-html-static
+                      data-vpg-comments-nonce={commentsBridgeNonce}
+                      sandbox="allow-scripts"
+                      srcdoc={htmlPreviewSrcdoc}
+                      title={title}
+                    />
+                    {canWrite && <div data-vpg-editor-host hidden />}
+                  </>
+                ) : (
+                  <>
+                    <div
+                      class="prose"
+                      data-context="app"
+                      data-vpg-prose
+                      data-vpg-prose-static
+                      set:html={displayedHtml}
+                    />
+                    {canWrite && <div data-vpg-editor-host hidden />}
+                  </>
+                )}
+              </article>
+            </main>
+            {canComment && (
+              <CommentsRail
+                client:load
+                workspaceId={sidebarWorkspace.id}
+                pageId={pageWithSource.page.id}
+                contentHash={pageWithSource.page.contentHash}
+                sourceType={pageWithSource.page.sourceType}
+                guestNameRequired={pageAccess.guestNameRequired}
+                currentUserName={sidebarUser.displayName}
+                initialThreads={initialThreads}
+              />
+            )}
+          </div>
+        </div>
+
+        {!isPublicPublication && (
+          <CommandPalette
+            client:only="react"
+            workspaceId={sidebarWorkspace.id}
+          />
+        )}
+
+        {!isPublicPublication && (
+          <MobileTabBar
+            pageId={pageWithSource.page.id}
+            showComments={canComment}
+            commentsBadge={initialOpenThreadCount}
+          />
+        )}
+      </div>
+    )
+  }
+
+  <script>
+    import { initPageEditorController } from "../../scripts/page-editor-controller";
+    import { enhanceProse } from "../../scripts/prose-enhancements";
+    import { initTocRail } from "../../scripts/toc-rail";
+
+    function initHtmlPreviewResize() {
+      const root = document.documentElement;
+      if (root.dataset.vpgHtmlPreviewResizeInitialized === "true") return;
+      root.dataset.vpgHtmlPreviewResizeInitialized = "true";
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (
+          !data ||
+          typeof data !== "object" ||
+          data.type !== "vpg:html-preview-resize" ||
+          typeof data.height !== "number"
+        ) {
+          return;
+        }
+        for (const iframe of document.querySelectorAll(
+          "[data-vpg-html-static]",
+        )) {
+          if (!(iframe instanceof HTMLIFrameElement)) continue;
+          if (event.source !== iframe.contentWindow) continue;
+          iframe.style.height = `${Math.ceil(Math.max(0, data.height))}px`;
+          break;
+        }
+      });
+    }
+
+    enhanceProse();
+    initTocRail();
+    initHtmlPreviewResize();
+    initPageEditorController();
+    document.addEventListener("astro:page-load", () => {
+      enhanceProse();
+      initTocRail();
+      initHtmlPreviewResize();
+      initPageEditorController();
+    });
+  </script>
+</AppLayout>

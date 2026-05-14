@@ -1,0 +1,14 @@
+.agents/
+.env.example
+.astro/
+.vegastack-pages/
+**/.vegastack-pages/
+coverage/
+dist/
+node_modules/
+pnpm-lock.yaml
+target/
+apps/web/dist/
+apps/web/.astro/
+apps/web/.wrangler/
+apps/web/.vegastack-pages/

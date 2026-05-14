@@ -1,0 +1,1097 @@
+/* =====================================================
+   Comments: in-page review rail + anchored thread cards
+   ===================================================== */
+
+:root {
+  --vsk-comment-card-w: clamp(316px, 23vw, 376px);
+  --vsk-comments-rail-w: clamp(320px, 24vw, 388px);
+  --vsk-comments-rail-collapsed-w: 3.15rem;
+  --vsk-comment-card-radius: var(--vsk-radius-comment-card);
+  --vsk-comment-composer-radius: var(--vsk-radius-composer);
+}
+
+.comments-rail {
+  display: none;
+  min-width: 0;
+  border-left: var(--vsk-line-hairline-soft);
+  background: var(--vsk-bg);
+  font-family: var(--font-sans);
+}
+
+.comments-rail[data-collapsed="true"] {
+  background: var(--vsk-bg);
+}
+
+.comments-rail[data-collapsed="true"] .comments-rail-body {
+  display: none;
+}
+
+@media (min-width: 1180px) {
+  .comments-rail {
+    display: block;
+    align-self: stretch;
+    min-height: calc(100dvh - var(--shell-header-h));
+  }
+}
+
+@media (max-width: 1179px) {
+  .comments-rail {
+    display: block;
+    order: -1;
+    border-bottom: var(--vsk-line-hairline-soft);
+    border-left: 0;
+  }
+}
+
+.comments-rail-header {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.8rem 0.85rem 0;
+}
+
+.comments-rail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.comments-rail-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-heading);
+  color: var(--vsk-text);
+}
+
+.comments-rail-collapse,
+.comments-rail-collapsed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--vsk-radius-control);
+  background: transparent;
+  color: var(--vsk-muted);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) ease;
+}
+
+.comments-rail-collapse {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+}
+
+.comments-rail-collapse:hover,
+.comments-rail-collapse:focus-visible,
+.comments-rail-collapsed:hover,
+.comments-rail-collapsed:focus-visible {
+  background: var(--vsk-tint);
+  color: var(--vsk-text);
+  outline: 0;
+}
+
+.comments-rail-collapsed {
+  position: sticky;
+  top: calc(var(--shell-header-h) + 0.6rem);
+  display: grid;
+  width: 100%;
+  place-items: center;
+  align-content: start;
+  gap: 0.4rem;
+  padding: 0.45rem 0;
+  border-radius: var(--vsk-radius-none);
+}
+
+.comments-rail-collapsed:hover,
+.comments-rail-collapsed:focus-visible {
+  background: transparent;
+}
+
+.comments-rail-collapsed-icon {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: var(--vsk-radius-control);
+  color: var(--vsk-muted);
+}
+
+.comments-rail-collapsed:hover .comments-rail-collapsed-icon,
+.comments-rail-collapsed:focus-visible .comments-rail-collapsed-icon {
+  background: var(--vsk-tint-soft);
+  color: var(--vsk-text);
+}
+
+.comments-rail-collapsed-count {
+  display: inline-grid;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-surface-active);
+  color: var(--vsk-text);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+}
+
+.comments-rail-tabs,
+.comments-rail-tabs .vpg-tabs-list {
+  width: 100%;
+}
+
+.comments-rail-tabs .vpg-tabs-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+  border-bottom: var(--vsk-line);
+  border-radius: var(--vsk-radius-none);
+  background: transparent;
+}
+
+.comments-rail-tabs .vpg-tabs-trigger {
+  position: relative;
+  justify-content: center;
+  min-width: 0;
+  height: 2.35rem;
+  padding: 0 0.45rem;
+  border-radius: var(--vsk-radius-none);
+  box-shadow: none;
+}
+
+.comments-rail-tabs .vpg-tabs-trigger::after {
+  position: absolute;
+  right: 0.45rem;
+  bottom: 0;
+  left: 0.45rem;
+  height: 2px;
+  border-radius: var(--vsk-radius-tab-indicator) var(--vsk-radius-tab-indicator)
+    var(--vsk-radius-none) var(--vsk-radius-none);
+  background: transparent;
+  content: "";
+  transform: scaleX(0);
+  transform-origin: center;
+  transition:
+    background var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.comments-rail-tabs .vpg-tabs-trigger[data-state="active"],
+.comments-rail-tabs .vpg-tabs-trigger[data-vpg-active="true"] {
+  background: transparent;
+  box-shadow: none;
+}
+
+.comments-rail-tabs .vpg-tabs-trigger[data-state="active"]::after,
+.comments-rail-tabs .vpg-tabs-trigger[data-vpg-active="true"]::after {
+  background: var(--vsk-text);
+  transform: scaleX(1);
+}
+
+.comments-rail-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.3rem;
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-tint-10);
+  color: inherit;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-none);
+}
+
+.vpg-tabs-trigger[data-state="active"] .comments-rail-tab-count {
+  background: var(--vsk-tint-14);
+}
+
+.comments-rail-body {
+  position: relative;
+  min-height: calc(100dvh - var(--shell-header-h) - 4rem);
+  padding: 0.7rem 0.75rem 1.5rem;
+}
+
+@media (max-width: 1179px) {
+  .comments-rail[data-collapsed="true"] {
+    display: none;
+  }
+
+  .comments-rail-body {
+    min-height: 14rem;
+    padding-bottom: 1rem;
+  }
+}
+
+.thread-list--list {
+  display: grid;
+  gap: 0.62rem;
+  padding: 0;
+}
+
+.thread-list--list .thread-card {
+  position: static;
+}
+
+.comments-body {
+  display: grid;
+  gap: var(--space-sm);
+  font-family: var(--font-sans);
+}
+
+.comments-guest-name {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--vsk-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.comments-status {
+  margin: var(--space-sm) 0 0;
+  color: var(--vsk-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-control);
+}
+
+.comments-empty {
+  display: grid;
+  min-height: 14rem;
+  place-items: center;
+  align-content: center;
+  gap: 0.38rem;
+  padding: var(--space-xl) var(--space-md);
+  color: var(--vsk-muted);
+  text-align: center;
+}
+
+.comments-empty svg {
+  width: 1.65rem;
+  height: 1.65rem;
+  margin-bottom: 0.12rem;
+  color: var(--vsk-muted-82);
+}
+
+.comments-empty strong {
+  color: var(--vsk-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+
+.comments-empty span {
+  max-width: 13.5rem;
+  color: var(--vsk-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-control);
+}
+
+.comment-draft-affordance {
+  position: fixed;
+  z-index: calc(var(--vsk-z-nav) + 3);
+  display: inline-grid;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  place-items: center;
+  border: var(--vsk-line);
+  border-radius: var(--vsk-radius-control);
+  background: var(--vsk-surface);
+  color: var(--vsk-muted);
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.comment-draft-affordance:hover,
+.comment-draft-affordance:focus-visible {
+  border-color: var(--vsk-tint-24);
+  background: var(--vsk-tint-soft);
+  color: var(--vsk-text);
+  outline: 0;
+}
+
+/* Mobile inline icon — count pill after each unresolved highlight.
+   Hidden on desktop (floating cards cover the same role). */
+.vpg-comment-icon {
+  display: none;
+}
+
+.prose-article {
+  position: relative;
+}
+
+.vpg-comment-visual {
+  position: absolute;
+  z-index: 4;
+  border: var(--vsk-line-comment);
+  background: var(--vsk-comment-tint-strong);
+  color: var(--vsk-comment-ink);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+}
+
+.vpg-comment-visual--point {
+  width: 1.55rem;
+  height: 1.55rem;
+  display: grid;
+  place-items: center;
+  border-color: var(--vsk-comment-ink);
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-comment-tint-strong);
+  color: var(--vsk-comment-ink);
+  box-shadow: none;
+  font-size: var(--text-xs);
+  transform: translate(-50%, -50%);
+}
+
+.vpg-comment-visual:hover,
+.vpg-comment-visual.is-flashing {
+  border-color: var(--vsk-comment-ink);
+  background: var(--vsk-comment-tint-strong);
+  color: var(--vsk-comment-ink);
+}
+
+@media (max-width: 1399px) {
+  .vpg-comment-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.18rem;
+    margin: 0 0.05em 0 0.22em;
+    padding: 0.05rem 0.32rem 0.05rem 0.28rem;
+    border: var(--vsk-line-comment);
+    border-radius: var(--vsk-radius-circle);
+    background: var(--vsk-comment-tint-strong);
+    color: var(--vsk-comment-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-2xs);
+    font-weight: var(--weight-bold);
+    line-height: var(--leading-none);
+    cursor: pointer;
+    vertical-align: baseline;
+    transition:
+      background var(--motion-base) var(--ease-out),
+      border-color var(--motion-base) ease-out;
+  }
+  .vpg-comment-icon[data-author-type="agent"] {
+    background: var(--vsk-agent-tint-strong);
+    color: var(--vsk-agent-ink);
+    border-color: var(--vsk-agent-border);
+  }
+  .vpg-comment-icon:hover {
+    background: var(--vsk-comment-hover);
+    outline: 0;
+  }
+  .vpg-comment-icon[data-author-type="agent"]:hover {
+    background: var(--vsk-agent-soft-hover);
+  }
+  .vpg-comment-icon svg {
+    flex-shrink: 0;
+  }
+}
+
+/* =====================================================
+   Thread card: floating, anchored, Notion/Docs-style
+   ===================================================== */
+
+.thread-card {
+  position: relative;
+  display: grid;
+  gap: 0.68rem;
+  padding: 0.78rem;
+  border: var(--vsk-line-comment-control);
+  border-radius: var(--vsk-comment-card-radius);
+  background: var(--vsk-surface);
+  color: var(--vsk-text);
+  cursor: pointer;
+  pointer-events: auto;
+  animation: vpg-thread-in 220ms cubic-bezier(0.25, 1, 0.5, 1);
+  box-shadow: none;
+}
+
+/* Y-anchored cards. The container is position: relative; cards stack
+   absolutely. Position is driven by inline `transform: translate3d(0,Y,0)`
+   set directly by JS on every rAF tick — never via CSS transition.
+   Translate3d forces a compositor layer so the card glides during scroll
+   without repainting.
+
+   No entry animation (would override the inline transform during 220ms and
+   cause a flash at the top of the overlay before snapping to position).
+   Anchored cards start hidden until JS has measured their Y; layout effect
+   flips visibility once the inline transform is applied. */
+.thread-card.is-anchored {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+  visibility: hidden;
+  will-change: transform;
+  animation: none;
+  /* transform is set inline by JS — do NOT add a transition on transform. */
+  transition:
+    border-color var(--motion-base) ease-out,
+    opacity var(--motion-base) ease-out;
+}
+
+.thread-card:hover {
+  border-color: var(--vsk-tint-22);
+}
+
+/* Active card: same neutral border, just slightly stronger. */
+.thread-card.is-active {
+  border-color: var(--vsk-tint-34);
+  background: var(--vsk-surface-active);
+  box-shadow: none;
+  z-index: 2;
+}
+
+.thread-card.is-agent {
+  border-color: var(--vsk-agent-border-soft);
+}
+
+/* Resolved cards: dimmed, full opacity on hover/active. */
+.thread-card.is-resolved {
+  opacity: 0.62;
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) ease-out;
+}
+
+.thread-card.is-resolved:hover,
+.thread-card.is-resolved.is-active {
+  opacity: 1;
+}
+
+.thread-anchor-status {
+  border: var(--vsk-line-comment-control);
+  border-radius: var(--vsk-radius-control);
+  background: var(--vsk-comment-tint);
+  color: var(--vsk-comment-ink);
+  padding: 0.42rem 0.5rem;
+  font-size: var(--text-xs);
+  line-height: var(--leading-control);
+}
+
+@keyframes vpg-thread-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-card,
+  .thread-card.is-anchored {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* =====================================================
+   Reply rows: avatar + meta + body, one per reply
+   ===================================================== */
+
+.thread-reply {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.55rem minmax(0, 1fr);
+  align-items: start;
+  column-gap: 0.58rem;
+  min-width: 0;
+}
+
+.thread-replies .thread-reply {
+  padding-top: 0.05rem;
+}
+
+.thread-reply-avatar {
+  display: inline-grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  place-items: center;
+  border: var(--vsk-line-tint-14);
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-tint-7);
+  color: var(--vsk-text);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-none);
+  transform: translateY(0.02rem);
+}
+
+.thread-reply-avatar--agent {
+  border-color: var(--vsk-agent-border-strong);
+  background: var(--vsk-agent-soft-bg);
+  color: var(--vsk-agent-ink);
+}
+
+.thread-reply-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.thread-reply--opener .thread-reply-main {
+  padding-right: 4.4rem;
+}
+
+.thread-reply-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.38rem;
+  row-gap: 0.12rem;
+  min-width: 0;
+}
+
+.thread-reply-name {
+  overflow: hidden;
+  color: var(--vsk-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-title);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 11rem;
+}
+
+.thread-agent-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 1.05rem;
+  padding: 0 0.4rem;
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-agent-hover);
+  color: var(--vsk-agent-ink);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-wide);
+  line-height: var(--leading-none);
+}
+
+.thread-reply-time {
+  color: var(--vsk-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-compact);
+  cursor: default;
+}
+
+.thread-reply-actions {
+  position: absolute;
+  top: -0.06rem;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+}
+
+.thread-reply-model {
+  color: var(--vsk-muted-86);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-snug);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-reply-body {
+  margin: 0;
+  color: var(--vsk-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Cap the visible height so a 500-line comment doesn't blow the card up
+     to the size of the viewport. Anything above the cap is internally
+     scrollable. The opener (first reply at the top of a card) gets a
+     slightly larger cap than nested follow-ups so single-comment threads
+     still feel breathy. */
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.thread-reply--opener .thread-reply-body {
+  max-height: 9rem;
+}
+
+/* Inside the full discussions rail/list, comments have more horizontal
+   room and reviewers expect to read whole threads — let bodies grow taller
+   before they scroll. */
+.thread-list--list .thread-reply-body {
+  max-height: 22rem;
+}
+
+.thread-list--list .thread-reply--opener .thread-reply-body {
+  max-height: 22rem;
+}
+
+/* Thin scrollbar for the inner body scroll, matching the sidebar's. */
+.thread-reply-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.thread-reply-body::-webkit-scrollbar-thumb {
+  background: var(--vsk-tint-14);
+  border-radius: var(--vsk-radius-circle);
+}
+
+.thread-reply-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--vsk-tint-14) transparent;
+}
+
+.thread-replies {
+  display: grid;
+  gap: 0.66rem;
+  margin-top: 0;
+  padding-top: 0.62rem;
+  border-top: var(--vsk-line-tint);
+}
+
+.thread-replies-toggle + .thread-replies {
+  margin-top: 0;
+  padding-top: 0.04rem;
+  border-top: 0;
+}
+
+.thread-list--list .thread-card {
+  padding: 0.78rem;
+  border-width: 1px;
+  border-radius: var(--vsk-comment-card-radius);
+  background: var(--vsk-surface);
+  box-shadow: none;
+}
+
+.thread-list--list .thread-replies {
+  gap: 0.72rem;
+  border-top-color: var(--vsk-tint);
+}
+
+.thread-list--list .thread-card:hover,
+.thread-list--list .thread-card.is-active {
+  background: var(--vsk-surface-active);
+  border-color: var(--vsk-tint-24);
+  box-shadow: none;
+}
+
+/* =====================================================
+   Card action buttons (resolve, menu)
+   ===================================================== */
+
+.thread-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+}
+
+.thread-menu-button.vpg-button,
+.thread-locate.vpg-button,
+.thread-resolve.vpg-button {
+  display: inline-grid;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  min-width: var(--control-h-md);
+  place-items: center;
+  border: 0;
+  border-radius: var(--vsk-radius-control);
+  background: transparent;
+  color: var(--vsk-muted);
+  padding: 0;
+  cursor: pointer;
+  line-height: var(--leading-none);
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.thread-resolve svg,
+.thread-menu-button svg,
+.thread-locate svg {
+  flex-shrink: 0;
+}
+
+.thread-resolve.vpg-button:hover,
+.thread-resolve.vpg-button:focus-visible,
+.thread-menu-button.vpg-button:hover,
+.thread-menu-button.vpg-button:focus-visible,
+.thread-menu-button.vpg-button[data-state="open"],
+.thread-locate.vpg-button:hover,
+.thread-locate.vpg-button:focus-visible {
+  background: var(--vsk-tint-soft);
+  color: var(--vsk-text);
+  outline: 0;
+}
+
+/* =====================================================
+   Reply expand/collapse toggle ("Show N more replies")
+   ===================================================== */
+
+.thread-replies-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin: -0.04rem 0 -0.02rem;
+  border: 0;
+  background: transparent;
+  color: var(--vsk-muted);
+  padding: 0;
+  border-radius: var(--vsk-radius-none);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-heading);
+  transition:
+    background var(--motion-base) var(--ease-out),
+    color var(--motion-base) ease-out;
+}
+
+.thread-replies-toggle:hover {
+  color: var(--vsk-text);
+  outline: 0;
+}
+
+.thread-replies-toggle-line {
+  display: block;
+  height: 1px;
+  min-width: 0;
+  background: var(--vsk-tint);
+  transition: background var(--motion-base) ease-out;
+}
+
+.thread-replies-toggle:hover .thread-replies-toggle-line {
+  background: var(--vsk-tint-16);
+}
+
+/* =====================================================
+   Reply composer at the bottom of each card.
+   Rounded input surface with the same inline arrow affordance as the
+   new-comment composer.
+   ===================================================== */
+
+.thread-reply-composer {
+  position: relative;
+  display: block;
+  margin-top: 0.02rem;
+}
+
+.thread-reply-input {
+  display: block;
+  width: 100%;
+  min-height: 2.35rem;
+  max-height: 8.5rem;
+  padding: 0.52rem 2.4rem 0.52rem 0.75rem;
+  border: var(--vsk-line-comment-control);
+  border-radius: var(--vsk-comment-composer-radius);
+  background: var(--vsk-control-bg);
+  color: var(--vsk-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-control);
+  resize: none;
+  overflow-y: hidden;
+  transition:
+    border-color var(--motion-fast) ease,
+    background var(--motion-fast) ease;
+}
+
+.thread-reply-input::placeholder {
+  color: var(--vsk-muted-90);
+}
+
+.thread-reply-input:focus {
+  outline: 0;
+  border-color: var(--vsk-tint-28);
+  background: var(--vsk-control-bg);
+}
+
+.thread-reply-send {
+  position: absolute;
+  right: 0.34rem;
+  bottom: 0.34rem;
+  display: inline-grid;
+  place-items: center;
+  width: 1.68rem;
+  height: 1.68rem;
+  border: 0;
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-text);
+  color: var(--vsk-bg);
+  cursor: pointer;
+  transition: transform var(--motion-fast) ease;
+}
+
+.thread-reply-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.thread-reply-send:disabled {
+  background: var(--vsk-tint);
+  color: var(--vsk-muted);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.thread-reply-send svg {
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
+/* =====================================================
+   Draft composer: a single input surface, not a full thread card
+   ===================================================== */
+
+.thread-card.is-draft {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+
+.thread-draft-composer {
+  position: relative;
+  display: block;
+  margin: 0;
+}
+
+.thread-draft-input {
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+  max-height: 13.75rem;
+  padding: 0.72rem 2.75rem 0.72rem 0.9rem;
+  border: var(--vsk-line-comment-control);
+  border-radius: var(--vsk-comment-composer-radius);
+  background: var(--vsk-control-bg);
+  color: var(--vsk-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-control);
+  resize: none;
+  overflow-y: hidden;
+  transition:
+    border-color var(--motion-fast) ease,
+    background var(--motion-fast) ease;
+}
+
+.thread-draft-input::placeholder {
+  color: var(--vsk-muted-90);
+}
+
+.thread-draft-input:focus {
+  outline: 0;
+  border-color: var(--vsk-tint-28);
+  background: var(--vsk-control-bg);
+}
+
+.thread-draft-send {
+  position: absolute;
+  right: 0.42rem;
+  bottom: 0.42rem;
+  display: inline-grid;
+  place-items: center;
+  width: 2.05rem;
+  height: 2.05rem;
+  border: 0;
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-text);
+  color: var(--vsk-bg);
+  cursor: pointer;
+  transition: transform var(--motion-fast) ease;
+}
+
+.thread-draft-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.thread-draft-send:disabled {
+  background: var(--vsk-tint);
+  color: var(--vsk-muted);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.thread-draft-send svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.share-password-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--vsk-bg);
+  padding: var(--space-lg);
+}
+
+.share-password-card {
+  display: grid;
+  width: min(24rem, 100%);
+  gap: 0.85rem;
+  border-radius: var(--vsk-radius-surface);
+  background: var(--vsk-surface);
+  padding: 1.25rem;
+  box-shadow: none;
+}
+
+.share-password-icon {
+  display: inline-grid;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  place-items: center;
+  border-radius: var(--vsk-radius-circle);
+  background: var(--vsk-tint);
+  color: var(--vsk-text);
+}
+
+.share-password-card h1,
+.share-password-card p {
+  margin: 0;
+}
+
+.share-password-card h1 {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+
+.share-password-card p {
+  color: var(--vsk-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-copy);
+}
+
+/* Cards container: positioning context for .thread-card.is-anchored.
+   Inherits the panel scroll area's clipped relative geometry. */
+.thread-list {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.thread-list--rail {
+  min-height: calc(100dvh - var(--shell-header-h) - 5.5rem);
+  pointer-events: none;
+}
+
+.thread-list--rail .thread-card {
+  pointer-events: auto;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    --app-gutter: clamp(0.9rem, 3.5vw, 1.25rem);
+    grid-template-columns: 1fr;
+  }
+
+  .app-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-right: max(0.85rem, env(safe-area-inset-right));
+    padding-left: max(0.85rem, env(safe-area-inset-left));
+  }
+
+  .app-brand {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-nav-workspace {
+    display: none;
+  }
+
+  .app-nav-actions {
+    flex: 0 0 auto;
+    gap: 0.4rem;
+  }
+
+  .app-nav-actions
+    > :not(.app-mobile-toggle):not(.comments-toggle):not(.theme-menu):not(
+      .app-nav-status
+    ) {
+    display: none;
+  }
+
+  .app-mobile-toggle {
+    display: inline-flex;
+  }
+
+  .app-sidebar-backdrop {
+    position: fixed;
+    inset: calc(env(safe-area-inset-top) + var(--app-nav-h)) 0 0 0;
+    z-index: 25;
+    display: block;
+    background: var(--vsk-overlay-strong);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-slow) ease;
+  }
+
+  .app-sidebar-backdrop.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .app-sidebar-close {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-h-md);
+    height: var(--control-h-md);
+    border: var(--vsk-line-hairline);
+    border-radius: var(--vsk-radius-control);
+    background: var(--vsk-surface);
+    color: var(--vsk-text);
+    cursor: pointer;
+  }
+
+  .doc-main {
+    padding: 1.35rem 1rem 2.5rem;
+    padding-bottom: max(2.5rem, env(safe-area-inset-bottom));
+  }
+
+  .prose-title {
+    font-size: var(--text-2xl);
+  }
+}
+
+@media (max-width: 420px) {
+  .app-brand-divider,
+  .app-brand-section {
+    display: none;
+  }
+}

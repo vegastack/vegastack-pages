@@ -1,0 +1,40 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { loadSettings } from "../../../lib/settings-data";
+import { workspaceService } from "../../../lib/runtime";
+import { InviteMemberDialog } from "../../../components/settings/InviteMemberDialog";
+import { WorkspaceMembersManager } from "../../../components/settings/WorkspaceMembersManager";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace, currentUser } = result.context;
+const members = workspaceService.listMembers(workspace.id).map((item) => ({
+  ...item,
+  user: workspaceService.getUser(item.userId),
+}));
+const openInviteOnLoad = Astro.url.searchParams.get("focus") === "invite";
+---
+
+<SettingsLayout
+  title={`Members · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="members"
+  sectionLabel="Members"
+  description="People with access to this workspace. Roles control read, comment, and edit permissions across all pages."
+>
+  <InviteMemberDialog
+    slot="actions"
+    client:load
+    workspaceId={workspace.id}
+    openOnLoad={openInviteOnLoad}
+  />
+
+  <WorkspaceMembersManager
+    client:load
+    workspaceId={workspace.id}
+    currentUserId={currentUser.id}
+    initialMembers={members}
+  />
+</SettingsLayout>

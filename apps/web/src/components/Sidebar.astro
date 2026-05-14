@@ -1,0 +1,370 @@
+---
+import { SidebarWorkspace } from "./SidebarWorkspace";
+import { SidebarSearch } from "./SidebarSearch";
+import { SidebarFavorites } from "./SidebarFavorites";
+import { SidebarUserPill } from "./SidebarUserPill";
+import { SidebarCreateMenu } from "./SidebarCreateMenu";
+import SidebarTreeNode from "./SidebarTreeNode.astro";
+
+type FolderRecord = {
+  id: string;
+  slugId: string;
+  name: string;
+  path: string;
+  parentFolderId: string | null;
+};
+
+type PageRecord = {
+  id: string;
+  slugId: string;
+  title: string;
+  folderPath: string | null;
+};
+
+type Workspace = { id: string; name: string; slug: string };
+type User = { id: string; email: string; displayName: string };
+
+interface Props {
+  workspace: Workspace;
+  workspaces: Workspace[];
+  currentUser: User;
+  pages: PageRecord[];
+  folders: FolderRecord[];
+  canWrite?: boolean;
+  currentPageId?: string;
+  currentFolderId?: string;
+  initialFavoriteIds?: string[];
+}
+
+const {
+  workspace,
+  workspaces,
+  currentUser,
+  pages,
+  folders,
+  canWrite = false,
+  currentPageId,
+  currentFolderId,
+  initialFavoriteIds = [],
+} = Astro.props;
+
+type FolderNode = {
+  folder: FolderRecord;
+  children: FolderNode[];
+  pages: PageRecord[];
+};
+
+const folderById = new Map<string, FolderNode>();
+folders.forEach((folder) => {
+  folderById.set(folder.id, { folder, children: [], pages: [] });
+});
+
+const rootFolders: FolderNode[] = [];
+folders.forEach((folder) => {
+  const node = folderById.get(folder.id);
+  if (!node) return;
+  if (folder.parentFolderId && folderById.has(folder.parentFolderId)) {
+    folderById.get(folder.parentFolderId)!.children.push(node);
+  } else {
+    rootFolders.push(node);
+  }
+});
+
+pages.forEach((page) => {
+  if (!page.folderPath) return;
+  const owner = [...folderById.values()].find(
+    (node) => node.folder.path === page.folderPath,
+  );
+  if (owner) owner.pages.push(page);
+});
+
+const rootPages = pages.filter((page) => !page.folderPath);
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .map((p) => p[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "WS";
+const userInitials = initialsOf(currentUser.displayName);
+---
+
+<aside
+  class="vpg-shell-sidebar"
+  id="vpg-sidebar"
+  data-open="false"
+  aria-label="Workspace navigation"
+>
+  <div class="vpg-sidebar-head">
+    <div class="vpg-sidebar-brand-row">
+      <SidebarWorkspace
+        client:load
+        current={workspace}
+        workspaces={workspaces}
+      />
+      {
+        canWrite && (
+          <div class="vpg-sidebar-create-slot" aria-label="Create new">
+            <SidebarCreateMenu
+              client:load
+              workspaceId={workspace.id}
+              currentFolderId={null}
+              currentFolderPath=""
+            />
+          </div>
+        )
+      }
+    </div>
+    <SidebarSearch client:load />
+  </div>
+
+  <div class="vpg-sidebar-scroll" data-vpg-sidebar-scroll>
+    <SidebarFavorites
+      client:load
+      workspaceId={workspace.id}
+      pages={pages.map((p) => ({
+        id: p.id,
+        slugId: p.slugId,
+        title: p.title,
+      }))}
+      currentPageId={currentPageId}
+      initialFavoriteIds={initialFavoriteIds}
+    />
+
+    {
+      rootPages.length > 0 && (
+        <section class="vpg-sidebar-section">
+          <header class="vpg-sidebar-section-head">
+            <span class="vpg-sidebar-section-label">Pages</span>
+            {canWrite && (
+              <div class="vpg-sidebar-section-action">
+                <SidebarCreateMenu
+                  client:load
+                  workspaceId={workspace.id}
+                  currentFolderId={null}
+                  currentFolderPath=""
+                />
+              </div>
+            )}
+          </header>
+          <ul class="vpg-sidebar-tree">
+            {rootPages.map((page) => (
+              <li>
+                <a
+                  class="vpg-sidebar-row"
+                  href={`/p/${page.slugId}`}
+                  data-active={page.id === currentPageId ? "true" : undefined}
+                >
+                  <span class="vpg-sidebar-row-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.9"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="16" x2="8" y1="13" y2="13" />
+                      <line x1="16" x2="8" y1="17" y2="17" />
+                    </svg>
+                  </span>
+                  <span class="vpg-sidebar-row-label">{page.title}</span>
+                  <span class="vpg-sidebar-row-trail" aria-hidden="true" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    {
+      rootFolders.map((node) => (
+        <section class="vpg-sidebar-section">
+          <header class="vpg-sidebar-section-head vpg-sidebar-folder-section-head">
+            <a
+              class="vpg-sidebar-section-label vpg-sidebar-section-label-link"
+              href={`/f/${node.folder.slugId}`}
+            >
+              {node.folder.name}
+            </a>
+            {canWrite && (
+              <div class="vpg-sidebar-section-action">
+                <SidebarCreateMenu
+                  client:load
+                  workspaceId={workspace.id}
+                  currentFolderId={node.folder.id}
+                  currentFolderPath={node.folder.path}
+                />
+              </div>
+            )}
+          </header>
+          <ul class="vpg-sidebar-tree">
+            {canWrite &&
+              node.pages.length === 0 &&
+              node.children.length === 0 && (
+                <li class="vpg-sidebar-empty-folder">
+                  <SidebarCreateMenu
+                    client:load
+                    workspaceId={workspace.id}
+                    currentFolderId={node.folder.id}
+                    currentFolderPath={node.folder.path}
+                    triggerClassName="vpg-sidebar-empty-folder-action"
+                    triggerLabel="New"
+                  />
+                </li>
+              )}
+            {node.pages.map((page) => (
+              <li>
+                <a
+                  class="vpg-sidebar-row"
+                  href={`/p/${page.slugId}`}
+                  data-active={page.id === currentPageId ? "true" : undefined}
+                >
+                  <span class="vpg-sidebar-row-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.9"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="16" x2="8" y1="13" y2="13" />
+                      <line x1="16" x2="8" y1="17" y2="17" />
+                    </svg>
+                  </span>
+                  <span class="vpg-sidebar-row-label">{page.title}</span>
+                  <span class="vpg-sidebar-row-trail" aria-hidden="true" />
+                </a>
+              </li>
+            ))}
+            {node.children.map((child) => (
+              <SidebarTreeNode
+                node={child}
+                currentPageId={currentPageId}
+                currentFolderId={currentFolderId}
+              />
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+  </div>
+
+  <div class="vpg-sidebar-foot">
+    <nav class="vpg-sidebar-foot-nav" aria-label="Workspace utilities">
+      <a class="vpg-sidebar-foot-link" href="/app/settings/general">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+          ></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        <span>Settings</span>
+      </a>
+      <a class="vpg-sidebar-foot-link" href="/docs">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <path d="M12 17h.01"></path>
+        </svg>
+        <span>Help &amp; docs</span>
+      </a>
+    </nav>
+    <SidebarUserPill
+      client:load
+      name={currentUser.displayName}
+      email={currentUser.email}
+      initials={userInitials}
+    />
+  </div>
+</aside>
+
+<div
+  class="vpg-shell-backdrop"
+  data-vpg-sidebar-backdrop
+  data-open="false"
+  aria-hidden="true"
+>
+</div>
+
+<script is:inline>
+  (() => {
+    const sidebar = document.getElementById("vpg-sidebar");
+    const backdrop = document.querySelector("[data-vpg-sidebar-backdrop]");
+    if (!sidebar || !backdrop) return;
+
+    function setOpen(open) {
+      sidebar.dataset.open = open ? "true" : "false";
+      backdrop.dataset.open = open ? "true" : "false";
+      document
+        .querySelectorAll("[data-vpg-sidebar-toggle]")
+        .forEach((toggle) => {
+          toggle.setAttribute("aria-expanded", String(open));
+        });
+      document.body.style.overflow = open ? "hidden" : "";
+    }
+
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const toggle = target.closest("[data-vpg-sidebar-toggle]");
+      if (toggle) {
+        event.preventDefault();
+        setOpen(sidebar.dataset.open !== "true");
+        return;
+      }
+      if (sidebar.contains(target) && target.closest("a[href]")) {
+        const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+        if (!isDesktop) setOpen(false);
+      }
+    });
+
+    backdrop.addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && sidebar.dataset.open === "true") {
+        setOpen(false);
+      }
+    });
+
+    function hydrateFolders() {
+      document.querySelectorAll("details[data-folder-id]").forEach((node) => {
+        if (!(node instanceof HTMLDetailsElement)) return;
+        if (node.dataset.hydrated === "true") return;
+        node.dataset.hydrated = "true";
+        const id = node.dataset.folderId;
+        if (!id) return;
+        const key = "vpg-folder-" + id;
+        const stored = window.localStorage.getItem(key);
+        if (stored === "closed") node.open = false;
+        else if (stored === "open") node.open = true;
+        node.addEventListener("toggle", () => {
+          window.localStorage.setItem(key, node.open ? "open" : "closed");
+        });
+      });
+    }
+    hydrateFolders();
+    document.addEventListener("astro:page-load", hydrateFolders);
+  })();
+</script>

@@ -1,0 +1,245 @@
+---
+import { SidebarWorkspace } from "./SidebarWorkspace";
+import { SidebarUserPill } from "./SidebarUserPill";
+
+type Workspace = { id: string; name: string; slug: string };
+type User = { id: string; email: string; displayName: string };
+
+type SectionId =
+  | "general"
+  | "folders"
+  | "members"
+  | "attachments"
+  | "templates"
+  | "mcp"
+  | "audit"
+  | "profile";
+
+interface Props {
+  workspace: Workspace;
+  workspaces: Workspace[];
+  currentUser: User;
+  currentSection: SectionId;
+  pages: Array<{ id: string; slugId: string }>;
+}
+
+const { workspace, workspaces, currentUser, currentSection, pages } =
+  Astro.props;
+
+const firstPage = pages[0];
+const backHref = firstPage ? `/p/${firstPage.slugId}` : "/app";
+
+// Active workspace is persisted in a cookie by loadSettings, so settings
+// nav links don't need to carry ?workspace_id= in the URL.
+/* Lucide SVG paths inlined so the settings sidebar renders icons without
+   hydrating a React component per row. Stroke / line caps applied at the
+   wrapper level. */
+type IconKey =
+  | "settings"
+  | "users"
+  | "folder"
+  | "template"
+  | "paperclip"
+  | "plug"
+  | "scroll";
+
+const ICONS: Record<IconKey, string> = {
+  settings:
+    '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  users:
+    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  folder:
+    '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  template:
+    '<rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="14" width="9" height="7" rx="1"/><rect x="16" y="14" width="5" height="7" rx="1"/>',
+  paperclip:
+    '<path d="M13.234 20.252 21 12.3a4.5 4.5 0 0 0-6.364-6.364L4.95 15.622a3 3 0 0 0 4.243 4.243L18.39 10.67a1.5 1.5 0 0 0-2.121-2.121L7.61 17.21"/>',
+  plug: '<path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z"/>',
+  scroll:
+    '<path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
+};
+
+const groups: Array<{
+  label: string;
+  items: Array<{ id: SectionId; label: string; href: string; icon: IconKey }>;
+}> = [
+  {
+    label: "Workspace",
+    items: [
+      {
+        id: "general",
+        label: "General",
+        href: "/app/settings/general",
+        icon: "settings",
+      },
+      {
+        id: "members",
+        label: "Members",
+        href: "/app/settings/members",
+        icon: "users",
+      },
+    ],
+  },
+  {
+    label: "Pages",
+    items: [
+      {
+        id: "folders",
+        label: "Folders",
+        href: "/app/settings/folders",
+        icon: "folder",
+      },
+      {
+        id: "templates",
+        label: "Templates",
+        href: "/app/settings/templates",
+        icon: "template",
+      },
+      {
+        id: "attachments",
+        label: "Attachments",
+        href: "/app/settings/attachments",
+        icon: "paperclip",
+      },
+      { id: "mcp", label: "MCP", href: "/app/settings/mcp", icon: "plug" },
+    ],
+  },
+  {
+    label: "Activity",
+    items: [
+      {
+        id: "audit",
+        label: "Audit log",
+        href: "/app/settings/audit",
+        icon: "scroll",
+      },
+    ],
+  },
+];
+
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .map((p) => p[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "WS";
+const userInitials = initialsOf(currentUser.displayName);
+---
+
+<aside
+  class="vpg-shell-sidebar"
+  id="vpg-sidebar"
+  data-open="false"
+  aria-label="Workspace settings navigation"
+>
+  <div class="vpg-sidebar-head">
+    <SidebarWorkspace client:load current={workspace} workspaces={workspaces} />
+    <a class="vpg-sidebar-back" href={backHref}>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m15 18-6-6 6-6"></path>
+      </svg>
+      <span>Back to workspace</span>
+    </a>
+  </div>
+
+  <div class="vpg-sidebar-scroll">
+    {
+      groups.map((group) => (
+        <div class="vpg-sidebar-group">
+          <div class="vpg-sidebar-group-label">
+            <span>{group.label}</span>
+          </div>
+          <ul class="vpg-sidebar-tree">
+            {group.items.map((item) => (
+              <li>
+                <a
+                  class="vpg-sidebar-row"
+                  href={item.href}
+                  data-active={item.id === currentSection ? "true" : undefined}
+                >
+                  <span class="vpg-sidebar-row-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.9"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      set:html={ICONS[item.icon]}
+                    />
+                  </span>
+                  <span class="vpg-sidebar-row-label">{item.label}</span>
+                  <span class="vpg-sidebar-row-trail" aria-hidden="true" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="vpg-sidebar-foot">
+    <SidebarUserPill
+      client:load
+      name={currentUser.displayName}
+      email={currentUser.email}
+      initials={userInitials}
+    />
+  </div>
+</aside>
+
+<div
+  class="vpg-shell-backdrop"
+  data-vpg-sidebar-backdrop
+  data-open="false"
+  aria-hidden="true"
+>
+</div>
+
+<script is:inline>
+  (() => {
+    const sidebar = document.getElementById("vpg-sidebar");
+    const backdrop = document.querySelector("[data-vpg-sidebar-backdrop]");
+    if (!sidebar || !backdrop) return;
+    function setOpen(open) {
+      sidebar.dataset.open = open ? "true" : "false";
+      backdrop.dataset.open = open ? "true" : "false";
+      document
+        .querySelectorAll("[data-vpg-sidebar-toggle]")
+        .forEach((toggle) =>
+          toggle.setAttribute("aria-expanded", String(open)),
+        );
+      document.body.style.overflow = open ? "hidden" : "";
+    }
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const toggle = target.closest("[data-vpg-sidebar-toggle]");
+      if (toggle) {
+        event.preventDefault();
+        setOpen(sidebar.dataset.open !== "true");
+        return;
+      }
+      if (sidebar.contains(target) && target.closest("a[href]")) {
+        const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+        if (!isDesktop) setOpen(false);
+      }
+    });
+    backdrop.addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && sidebar.dataset.open === "true") {
+        setOpen(false);
+      }
+    });
+  })();
+</script>

@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS runtime_state (
+  key TEXT PRIMARY KEY NOT NULL,
+  json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

@@ -1,0 +1,257 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { formatDate, loadSettings } from "../../../lib/settings-data";
+import { listMcpSessions } from "../../../lib/runtime";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace } = result.context;
+const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
+---
+
+<SettingsLayout
+  title={`MCP · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="mcp"
+  sectionLabel="MCP"
+  description="Workspace-scoped tokens for MCP-compatible agent clients. Tokens are shown once at creation and can be revoked at any time."
+>
+  <section class="settings-card" data-mcp-session-card>
+    <header class="settings-card-header">
+      <h2>New session</h2>
+      <p>
+        Issue a bearer token bound to this workspace. Copy it once and paste it
+        into your agent client.
+      </p>
+    </header>
+
+    <form class="settings-form compact" data-mcp-session-form>
+      <label>
+        Client label
+        <input name="client_name" value="Codex" autocomplete="off" />
+      </label>
+      <button class="vpg-button vpg-button-primary vpg-button-md" type="submit"
+        >Create session</button
+      >
+    </form>
+
+    <div class="settings-token-result" data-mcp-token-result hidden>
+      <label>
+        Endpoint
+        <input data-mcp-url readonly />
+      </label>
+      <label>
+        Bearer token
+        <textarea data-mcp-token readonly rows="3"></textarea>
+      </label>
+      <div class="settings-inline-actions">
+        <button
+          class="vpg-button vpg-button-default vpg-button-md"
+          type="button"
+          data-copy-mcp-token>Copy token</button
+        >
+        <button
+          class="vpg-button vpg-button-subtle vpg-button-md"
+          type="button"
+          data-copy-mcp-json>Copy JSON config</button
+        >
+      </div>
+      <p class="settings-help-text">
+        Send requests with <code>Authorization: Bearer &lt;token&gt;</code>.
+      </p>
+    </div>
+  </section>
+
+  <section class="settings-card settings-card-table">
+    <div class="settings-table-wrap">
+      <table class="settings-table" aria-label="MCP sessions">
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Created</th>
+            <th>Expires</th>
+            <th class="settings-actions-cell" aria-label="Actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            mcpSessions.length === 0 ? (
+              <tr>
+                <td colspan="4">
+                  <div class="settings-empty">
+                    <div class="settings-empty-glyph" aria-hidden="true">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <>
+                          <rect x="3" y="4" width="18" height="14" rx="2" />
+                          <path d="M8 22h8" />
+                          <path d="M12 18v4" />
+                        </>
+                      </svg>
+                    </div>
+                    <p>
+                      <>
+                        <strong>No active sessions</strong>
+                        <span>
+                          Create a token above, then point your agent client at
+                          the MCP endpoint.
+                        </span>
+                      </>
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              mcpSessions.map((session) => (
+                <tr data-mcp-session-row={session.id}>
+                  <td>
+                    <strong>{session.clientName}</strong>
+                    <small class="settings-muted-line">
+                      Session {session.id.slice(-6)}
+                    </small>
+                  </td>
+                  <td>{formatDate(session.createdAt)}</td>
+                  <td>{formatDate(session.expiresAt)}</td>
+                  <td class="settings-actions-cell">
+                    <button
+                      class="settings-row-action danger"
+                      type="button"
+                      data-revoke-mcp-session={session.id}
+                      aria-label={`Revoke ${session.clientName}`}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <>
+                          <path d="M18 6 6 18" />
+                          <path d="m6 6 12 12" />
+                        </>
+                      </svg>
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script is:inline define:vars={{ workspaceId: workspace.id }}>
+    (() => {
+      const {
+        toast,
+        withSubmit,
+        confirmAction,
+        closestRow,
+        removeRow,
+        withTransition,
+      } = window.settingsHelpers;
+      const form = document.querySelector("[data-mcp-session-form]");
+      const result = document.querySelector("[data-mcp-token-result]");
+      const urlInput = document.querySelector("[data-mcp-url]");
+      const tokenInput = document.querySelector("[data-mcp-token]");
+      const copyToken = document.querySelector("[data-copy-mcp-token]");
+      const copyJson = document.querySelector("[data-copy-mcp-json]");
+      let latest = null;
+
+      form?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        withSubmit(form, async () => {
+          const payload = {
+            workspace_id: workspaceId,
+            client_name: new FormData(form).get("client_name") || "MCP client",
+          };
+          const response = await fetch("/api/mcp/sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            toast("MCP session could not be created.", "error");
+            return;
+          }
+          latest = await response.json();
+          if (urlInput) urlInput.value = latest.mcp_url;
+          if (tokenInput) tokenInput.value = latest.token;
+          if (result) result.hidden = false;
+          toast("MCP session created.");
+        });
+      });
+
+      copyToken?.addEventListener("click", async () => {
+        if (!latest?.token) return;
+        await navigator.clipboard.writeText(latest.token);
+        toast("Token copied.");
+      });
+
+      copyJson?.addEventListener("click", async () => {
+        if (!latest?.token) return;
+        await navigator.clipboard.writeText(
+          JSON.stringify(
+            {
+              mcpServers: {
+                "vegastack-pages": {
+                  url: latest.mcp_url,
+                  headers: { Authorization: `Bearer ${latest.token}` },
+                },
+              },
+            },
+            null,
+            2,
+          ),
+        );
+        toast("JSON config copied.");
+      });
+
+      document.addEventListener("click", async (event) => {
+        const target =
+          event.target instanceof Element
+            ? event.target.closest("[data-revoke-mcp-session]")
+            : null;
+        if (!target) return;
+        const sessionId = target.getAttribute("data-revoke-mcp-session");
+        if (!sessionId) return;
+        const confirmed = await confirmAction({
+          title: "Revoke MCP session",
+          description:
+            "Agents using this token will lose access immediately. You can create a new session at any time.",
+          confirmLabel: "Revoke session",
+          tone: "danger",
+        });
+        if (!confirmed) return;
+        const row = closestRow(target);
+        if (row) row.dataset.pending = "true";
+        const response = await fetch("/api/mcp/sessions", {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            session_id: sessionId,
+          }),
+        });
+        if (response.ok) {
+          if (row) withTransition(() => removeRow(row));
+          toast("MCP session revoked.");
+        } else {
+          if (row) delete row.dataset.pending;
+          toast("Could not revoke MCP session.", "error");
+        }
+      });
+    })();
+  </script>
+</SettingsLayout>

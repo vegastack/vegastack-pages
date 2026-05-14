@@ -1,0 +1,23 @@
+services:
+  vegastack-pages-web:
+    build:
+      context: ../..
+      dockerfile: install/docker/Dockerfile
+    environment:
+      VPG_ADAPTER: node
+      VPG_RUNTIME: node
+      NODE_ENV: production
+      VPG_STATE_DIR: /data/state
+      VPG_SQLITE_PATH: /data/state/vegastack-pages.sqlite
+      VPG_OBJECT_STORE_DIR: /data/objects
+      VPG_DB_MIGRATIONS_DIR: /app/migrations
+      VPG_SETUP_TOKEN: ${VPG_SETUP_TOKEN:?Set VPG_SETUP_TOKEN before starting}
+      VPG_BASE_URL: ${VPG_BASE_URL:-http://localhost:4321}
+      VPG_EMAIL_PROVIDER: ${VPG_EMAIL_PROVIDER:-console}
+    ports:
+      - "4321:4321"
+    volumes:
+      - vegastack-pages-data:/data
+
+volumes:
+  vegastack-pages-data:

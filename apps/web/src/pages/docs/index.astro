@@ -1,0 +1,46 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { groupByCategory, loadDocs, docHref } from "../../lib/docs";
+
+export const prerender = true;
+
+const docs = await loadDocs();
+const groups = groupByCategory(docs);
+---
+
+<DocsLayout
+  title="VegaStack Pages docs"
+  description="Open-source docs for VegaStack Pages: MCP, CLI, templates, comments, public links, Backup to Git, and self-hosting."
+  showToc={false}
+>
+  <p class="docs-intro">
+    VegaStack Pages is an Agentic Knowledge Base. Agents create and edit
+    Markdown, MDX, and HTML pages through MCP or CLI. Humans review rendered
+    pages with anchored comments. Templates, version history, public links,
+    Backup to Git, and permission-aware search keep the workspace usable after
+    the first draft. Use the sidebar to browse, or hit
+    <kbd>⌘</kbd><kbd>K</kbd> to search any content across these pages.
+  </p>
+
+  <section class="docs-home-grid" aria-label="Documentation categories">
+    {
+      groups.map((group) => (
+        <article class="docs-home-card">
+          <h2>{group.name}</h2>
+          <ul>
+            {group.entries.map((entry) => (
+              <li>
+                <a href={docHref(entry)}>
+                  <span class="docs-home-card-title">{entry.data.title}</span>
+                  <span class="docs-home-card-desc">
+                    {entry.data.description}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))
+    }
+  </section>
+</DocsLayout>

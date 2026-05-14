@@ -1,0 +1,92 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { loadSettings, formatDate } from "../../../lib/settings-data";
+import { auditService, workspaceService } from "../../../lib/runtime";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace } = result.context;
+
+const logs = auditService
+  .list({ workspaceId: workspace.id, limit: 80 })
+  .reverse();
+
+function actorLabel(actorUserId: string | null) {
+  if (!actorUserId) return "System";
+  const user = workspaceService.getUser(actorUserId);
+  return user?.email ?? "(deleted user)";
+}
+---
+
+<SettingsLayout
+  title={`Audit · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="audit"
+  sectionLabel="Audit log"
+  description="Sensitive workspace changes, newest first. Used for incident response and compliance review."
+>
+  <section class="settings-card settings-card-table">
+    <div class="settings-table-wrap">
+      <table class="settings-table" aria-label="Audit log">
+        <thead>
+          <tr>
+            <th>Action</th>
+            <th>Target</th>
+            <th>Actor</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            logs.length === 0 ? (
+              <tr>
+                <td colspan="4">
+                  <div class="settings-empty">
+                    <div class="settings-empty-glyph" aria-hidden="true">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <>
+                          <path d="M15 12h-5" />
+                          <path d="M15 8h-5" />
+                          <path d="M19 17V5a2 2 0 0 0-2-2H4" />
+                          <path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />
+                        </>
+                      </svg>
+                    </div>
+                    <p>
+                      <strong>No audit events yet</strong>Sensitive actions are
+                      recorded here automatically. Invite a member or change a
+                      permission to see the first entry.
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              logs.map((log) => (
+                <tr>
+                  <td>
+                    <code class="settings-code-path">{log.action}</code>
+                  </td>
+                  <td>
+                    {log.targetType}:{" "}
+                    <code class="settings-code-path">{log.targetId}</code>
+                  </td>
+                  <td>{actorLabel(log.actorUserId)}</td>
+                  <td>{formatDate(log.createdAt)}</td>
+                </tr>
+              ))
+            )
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+</SettingsLayout>

@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem in VegaStack Pages.
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. For security issues, use private vulnerability reporting instead of a public issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest set of steps that reproduces the issue.
+      placeholder: |
+        1. Start from ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Local Node dev
+        - Docker/Node self-hosted
+        - Cloudflare self-hosted
+        - Managed
+        - CLI only
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "0.1.0, v0.1.0, or commit SHA"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Redact tokens, database contents, tenant data, and private URLs.

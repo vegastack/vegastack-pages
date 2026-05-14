@@ -1,0 +1,41 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+---
+
+<AppLayout title="Signing in - VegaStack Pages" robots="noindex">
+  <main class="login-page">
+    <section class="login-card">
+      <h1>Signing in</h1>
+      <p data-magic-link-status>Completing your sign-in.</p>
+    </section>
+  </main>
+
+  <script is:inline>
+    (() => {
+      const status = document.querySelector("[data-magic-link-status]");
+      const params = new URLSearchParams(window.location.hash.slice(1));
+      const token = params.get("token") ?? "";
+      window.history.replaceState(null, "", "/auth/magic-link");
+      if (!token) {
+        if (status)
+          status.textContent = "This sign-in link is missing its token.";
+        return;
+      }
+      fetch("/api/auth/magic-link/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      })
+        .then(async (response) => {
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok || !body.redirect_to) {
+            throw new Error(body?.error?.message || "Sign-in failed.");
+          }
+          window.location.replace(String(body.redirect_to));
+        })
+        .catch((error) => {
+          if (status) status.textContent = error.message || "Sign-in failed.";
+        });
+    })();
+  </script>
+</AppLayout>

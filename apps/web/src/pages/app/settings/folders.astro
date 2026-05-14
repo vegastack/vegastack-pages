@@ -1,0 +1,323 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { loadSettings } from "../../../lib/settings-data";
+import { CreateFolderDialog } from "../../../components/settings/CreateFolderDialog";
+import { FolderParentSelect } from "../../../components/settings/FolderParentSelect";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace, folders } = result.context;
+const openCreateOnLoad = Astro.url.searchParams.get("focus") === "create";
+
+const folderOptions = folders.map((folder) => ({
+  id: folder.id,
+  path: folder.path,
+}));
+
+const siblingIndexByFolder = new Map<
+  string,
+  { canMoveUp: boolean; canMoveDown: boolean }
+>();
+const foldersByParent = new Map<string, typeof folders>();
+for (const folder of folders) {
+  const key = folder.parentFolderId ?? "";
+  const siblings = foldersByParent.get(key) ?? [];
+  siblings.push(folder);
+  foldersByParent.set(key, siblings);
+}
+for (const siblings of foldersByParent.values()) {
+  siblings.forEach((folder, index) => {
+    siblingIndexByFolder.set(folder.id, {
+      canMoveUp: index > 0,
+      canMoveDown: index < siblings.length - 1,
+    });
+  });
+}
+
+const folderRows = folders.map((folder) => ({
+  folder,
+  movement: siblingIndexByFolder.get(folder.id) ?? {
+    canMoveUp: false,
+    canMoveDown: false,
+  },
+}));
+---
+
+<SettingsLayout
+  title={`Folders · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="folders"
+  sectionLabel="Folders"
+  description="Group pages in the sidebar. Renaming or moving a folder updates every page path inside it."
+>
+  <CreateFolderDialog
+    slot="actions"
+    client:load
+    workspaceId={workspace.id}
+    folders={folderOptions}
+    openOnLoad={openCreateOnLoad}
+  />
+
+  <section class="settings-card settings-card-table">
+    <div class="settings-table-wrap">
+      <table class="settings-table" aria-label="Folders">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="settings-cell-fit">Parent</th>
+            <th class="settings-actions-cell" aria-label="Actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            folders.length === 0 ? (
+              <tr>
+                <td colspan="3">
+                  <div class="settings-empty">
+                    <div class="settings-empty-glyph" aria-hidden="true">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                      </svg>
+                    </div>
+                    <p>
+                      <strong>No folders yet</strong>
+                      Create one above to group related pages in the sidebar.
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              folderRows.map(({ folder, movement }) => (
+                <tr data-folder-row={folder.id}>
+                  <td>
+                    <input
+                      class="settings-inline-input"
+                      value={folder.name}
+                      data-folder-name={folder.id}
+                      aria-label={`Name for ${folder.path}`}
+                    />
+                  </td>
+                  <td class="settings-cell-fit">
+                    <FolderParentSelect
+                      client:load
+                      workspaceId={workspace.id}
+                      folderId={folder.id}
+                      folderPath={folder.path}
+                      initialParentId={folder.parentFolderId ?? null}
+                      options={[
+                        { value: "", label: "No parent" },
+                        ...folders
+                          .filter(
+                            (candidate) =>
+                              candidate.id !== folder.id &&
+                              !candidate.path.startsWith(`${folder.path}/`),
+                          )
+                          .map((candidate) => ({
+                            value: candidate.id,
+                            label: candidate.path,
+                          })),
+                      ]}
+                    />
+                  </td>
+                  <td class="settings-actions-cell">
+                    <div class="settings-row-actions-group">
+                      <button
+                        class="settings-row-action"
+                        type="button"
+                        data-move-folder="up"
+                        data-folder-id={folder.id}
+                        disabled={!movement.canMoveUp}
+                        aria-label={`Move ${folder.path} up`}
+                        title="Move up"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="m18 15-6-6-6 6" />
+                        </svg>
+                      </button>
+                      <button
+                        class="settings-row-action"
+                        type="button"
+                        data-move-folder="down"
+                        data-folder-id={folder.id}
+                        disabled={!movement.canMoveDown}
+                        aria-label={`Move ${folder.path} down`}
+                        title="Move down"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                      <button
+                        class="settings-row-action danger"
+                        type="button"
+                        data-delete-folder={folder.id}
+                        aria-label={`Delete ${folder.path}`}
+                        title="Delete folder"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <>
+                            <path d="M3 6h18" />
+                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                            <line x1="10" x2="10" y1="11" y2="17" />
+                            <line x1="14" x2="14" y1="11" y2="17" />
+                          </>
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script is:inline define:vars={{ workspaceId: workspace.id }}>
+    (() => {
+      const { toast, withTransition, removeRow, closestRow, confirmAction } =
+        window.settingsHelpers;
+
+      async function patchFolder(folderId, body, row) {
+        if (row) row.dataset.pending = "true";
+        const response = await fetch(
+          `/api/folders/${folderId}?workspace_id=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          },
+        );
+        if (row) delete row.dataset.pending;
+        if (response.ok) toast("Folder saved.");
+        else {
+          const payload = await response.json().catch(() => null);
+          toast(payload?.error?.message ?? "Folder save failed.", "error");
+        }
+      }
+
+      // Move folder up / down within its sibling group. The server owns the
+      // dense 1..N position assignment so the UI cannot accidentally reorder
+      // across parent folders.
+      document.addEventListener("click", async (event) => {
+        const button =
+          event.target instanceof Element
+            ? event.target.closest("[data-move-folder]")
+            : null;
+        if (
+          !button ||
+          !(button instanceof HTMLButtonElement) ||
+          button.disabled
+        )
+          return;
+        const direction = button.getAttribute("data-move-folder");
+        const folderId = button.getAttribute("data-folder-id");
+        if (!folderId || !direction) return;
+        const row = closestRow(button);
+        if (!row) return;
+        row.dataset.pending = "true";
+        const response = await fetch(
+          `/api/folders/${folderId}/reorder?workspace_id=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ direction }),
+          },
+        );
+        delete row.dataset.pending;
+        if (response.ok) {
+          toast(`Folder moved ${direction}.`);
+          window.location.reload();
+        } else {
+          toast("Move failed.", "error");
+        }
+      });
+      document.addEventListener(
+        "blur",
+        (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLInputElement)) return;
+          const folderId = target.dataset.folderName;
+          if (
+            folderId &&
+            target.value &&
+            target.value !== target.defaultValue
+          ) {
+            const row = closestRow(target);
+            patchFolder(folderId, { name: target.value }, row);
+            target.defaultValue = target.value;
+          }
+        },
+        true,
+      );
+
+      // Delete
+      document.addEventListener("click", async (event) => {
+        const target =
+          event.target instanceof Element
+            ? event.target.closest("[data-delete-folder]")
+            : null;
+        if (!target) return;
+        const folderId = target.getAttribute("data-delete-folder");
+        if (!folderId) return;
+        const confirmed = await confirmAction({
+          title: "Delete folder",
+          description:
+            "Pages inside this folder move to the workspace root. The folder name and order are not recoverable.",
+          confirmLabel: "Delete folder",
+          tone: "danger",
+        });
+        if (!confirmed) return;
+        const row = closestRow(target);
+        if (!row) return;
+        row.dataset.pending = "true";
+        const response = await fetch(
+          `/api/folders/${folderId}?workspace_id=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "DELETE",
+          },
+        );
+        if (response.ok) {
+          delete row.dataset.pending;
+          withTransition(() => removeRow(row));
+          toast("Folder deleted.");
+        } else {
+          delete row.dataset.pending;
+          toast("Could not delete folder.", "error");
+        }
+      });
+    })();
+  </script>
+</SettingsLayout>

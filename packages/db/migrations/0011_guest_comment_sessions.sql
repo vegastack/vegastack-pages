@@ -1,0 +1,1 @@
+-- Superseded by the base publication-aware comment schema.

@@ -1,0 +1,105 @@
+---
+import { publicSignupEnabled } from "../lib/deployment";
+import AppLayout from "../layouts/AppLayout.astro";
+
+export const prerender = false;
+const signupEnabled = publicSignupEnabled();
+---
+
+<AppLayout title="Log in - VegaStack Pages">
+  <main class="auth-shell">
+    <section class="auth-form-side" aria-labelledby="login-heading">
+      <header>
+        <a class="auth-wordmark" href="/">VegaStack Pages</a>
+      </header>
+      <h1 id="login-heading">Log in</h1>
+      <p>
+        Enter the email an admin invited. We will send you a one-time sign-in
+        link.{
+          import.meta.env.DEV && (
+            <>
+              {" "}
+              Demo admin in dev: <code>admin@example.com</code>.
+            </>
+          )
+        }
+      </p>
+      <form class="login-form" data-login-form>
+        <label>
+          Email address
+          <input
+            name="email"
+            type="email"
+            autocomplete="email"
+            required
+            value={import.meta.env.DEV ? "admin@example.com" : ""}
+            placeholder="you@example.com"
+          />
+        </label>
+        <button class="toolbar-button primary" type="submit"
+          >Email me a sign-in link</button
+        >
+      </form>
+      {
+        signupEnabled && (
+          <p class="auth-alt">
+            New workspace? <a href="/app/signup">Create one</a>
+          </p>
+        )
+      }
+      {
+        import.meta.env.DEV && (
+          <a class="dev-login-link" href="/api/auth/dev-login">
+            Skip the email and sign in directly (dev only)
+          </a>
+        )
+      }
+      <pre class="login-result" data-login-result hidden></pre>
+    </section>
+    <aside class="auth-aside" aria-hidden="true">
+      <div>
+        <p class="auth-aside-eyebrow">Sign-in</p>
+        <h2 class="auth-aside-headline">No passwords. One link.</h2>
+        <div class="auth-aside-body">
+          <p>
+            We email you a short-lived sign-in link. No passwords to rotate, no
+            SSO to wire up before the first page ships.
+          </p>
+          <p>
+            Invites are scoped to a workspace. Public signup stays off unless
+            you turn it on.
+          </p>
+        </div>
+        <div class="auth-env-block" aria-label="Dev hint">
+          <div class="auth-env-comment">
+            # in dev the link prints to your server logs
+          </div>
+          <div class="auth-env-prompt">tail -f vegastack-pages.log</div>
+        </div>
+      </div>
+      <p class="auth-aside-footer">
+        No email after a minute? Check the server logs, or your spam folder in
+        production.
+      </p>
+    </aside>
+  </main>
+  <script>
+    const form = document.querySelector("[data-login-form]");
+    const result = document.querySelector("[data-login-result]");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!(form instanceof HTMLFormElement)) return;
+      const data = new FormData(form);
+      const response = await fetch("/api/auth/magic-link/request", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: data.get("email") }),
+      });
+      const payload = await response.json();
+      if (result instanceof HTMLElement) {
+        result.hidden = false;
+        result.textContent = JSON.stringify(payload, null, 2);
+      }
+    });
+  </script>
+</AppLayout>

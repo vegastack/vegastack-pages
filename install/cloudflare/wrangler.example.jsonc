@@ -1,0 +1,54 @@
+{
+  "name": "vegastack-pages",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-05-10",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist/client",
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "vars": {
+    "VPG_RUNTIME": "cloudflare",
+    "VPG_DEPLOYMENT_MODE": "self_hosted",
+    "VPG_PUBLIC_SIGNUP": "false",
+    "VPG_BASE_URL": "https://pages.example.com",
+    "VPG_HOME_MODE": "landing",
+    "VPG_EMAIL_PROVIDER": "auto",
+    "VPG_EMAIL_FROM": "notifications@example.com",
+    "VPG_EMAIL_FROM_NAME": "VegaStack Pages",
+    "VPG_GITHUB_APP_ID": "",
+    "VPG_GITHUB_APP_SLUG": "",
+    "VPG_GITHUB_SYNC_CRON": "17 2 * * *",
+  },
+  "triggers": {
+    "crons": ["17 2 * * *"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vegastack_pages",
+      "database_id": "<generated>",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSION",
+      "id": "<generated>",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "CONTENT",
+      "bucket_name": "vegastack-pages-content",
+    },
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+    },
+  ],
+}

@@ -1,0 +1,125 @@
+---
+type ListRow = {
+  kind: "folder" | "page";
+  id: string;
+  name: string;
+  href: string;
+  threadCount: number;
+  author: string | null;
+  updatedAt: string;
+  childCount: number;
+};
+
+interface Props {
+  rows: ListRow[];
+  workspaceId: string;
+  folderId: string;
+  canWrite?: boolean;
+}
+
+const { rows } = Astro.props;
+const folderRows = rows.filter((row) => row.kind === "folder");
+const pageRows = rows.filter((row) => row.kind === "page");
+
+function relative(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const diff = Date.now() - then;
+  const min = 60_000;
+  const hour = 60 * min;
+  const day = 24 * hour;
+  if (diff < min) return "just now";
+  if (diff < hour) return `${Math.round(diff / min)}m ago`;
+  if (diff < day) return `${Math.round(diff / hour)}h ago`;
+  if (diff < 30 * day) return `${Math.round(diff / day)}d ago`;
+  if (diff < 365 * day) return `${Math.round(diff / (30 * day))}mo ago`;
+  return `${Math.round(diff / (365 * day))}y ago`;
+}
+---
+
+<section class="vpg-folder-list" aria-label="Folder contents">
+  {
+    rows.length === 0 ? (
+      <p class="vpg-folder-empty">This folder is empty.</p>
+    ) : (
+      <ul role="list">
+        {folderRows.map((row) => (
+          <li class="vpg-folder-row" data-kind="folder">
+            <a class="vpg-folder-row-link" href={row.href}>
+              <span class="vpg-folder-row-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                </svg>
+              </span>
+              <span class="vpg-folder-row-name">{row.name}</span>
+              <span class="vpg-folder-row-author">
+                {row.childCount > 0
+                  ? `${row.childCount} ${row.childCount === 1 ? "item" : "items"}`
+                  : ""}
+              </span>
+              <time class="vpg-folder-row-time" datetime={row.updatedAt}>
+                {relative(row.updatedAt)}
+              </time>
+            </a>
+          </li>
+        ))}
+        {pageRows.map((row) => (
+          <li class="vpg-folder-row" data-kind="page">
+            <a class="vpg-folder-row-link" href={row.href}>
+              <span class="vpg-folder-row-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+              </span>
+              <span class="vpg-folder-row-name">{row.name}</span>
+              {row.threadCount > 0 && (
+                <span
+                  class="vpg-folder-row-threads"
+                  aria-label={`${row.threadCount} open ${row.threadCount === 1 ? "thread" : "threads"}`}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="12"
+                    height="12"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                  </svg>
+                  <span>{row.threadCount}</span>
+                </span>
+              )}
+              <span class="vpg-folder-row-author">{row.author ?? ""}</span>
+              <time class="vpg-folder-row-time" datetime={row.updatedAt}>
+                {relative(row.updatedAt)}
+              </time>
+            </a>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</section>

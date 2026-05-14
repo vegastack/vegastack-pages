@@ -1,0 +1,200 @@
+---
+import { publicSignupEnabled } from "../lib/deployment";
+import AppLayout from "../layouts/AppLayout.astro";
+
+export const prerender = false;
+
+const enabled = publicSignupEnabled();
+---
+
+<AppLayout title="Sign up - VegaStack Pages">
+  <main class="auth-shell">
+    <section class="auth-form-side" aria-labelledby="signup-heading">
+      <header>
+        <a class="auth-wordmark" href="/">VegaStack Pages</a>
+      </header>
+      {
+        enabled ? (
+          <>
+            <h1 id="signup-heading">Create a workspace</h1>
+            <p>
+              Set up a workspace for reviewable, agent-authored docs. We will
+              email you a link to confirm.
+            </p>
+            <form class="login-form" data-signup-form>
+              <div class="form-group">
+                <label>
+                  Your name
+                  <input
+                    name="display_name"
+                    autocomplete="name"
+                    required
+                    placeholder="Ada Lovelace"
+                  />
+                </label>
+                <label>
+                  Email address
+                  <input
+                    name="email"
+                    type="email"
+                    autocomplete="email"
+                    required
+                    placeholder="you@example.com"
+                  />
+                </label>
+              </div>
+              <label>
+                Workspace name
+                <input name="workspace_name" required placeholder="Acme Docs" />
+              </label>
+              <button class="toolbar-button primary" type="submit">
+                Create workspace
+              </button>
+            </form>
+            <p class="auth-alt">
+              Already have access? <a href="/app/login">Log in</a>
+            </p>
+            <div class="login-result" data-signup-result hidden />
+          </>
+        ) : (
+          <>
+            <h1 id="signup-heading">You need an invite</h1>
+            <p>
+              This is a private VegaStack Pages instance. A workspace admin can
+              add your email from{" "}
+              <strong>Workspace settings &rsaquo; Members</strong>, and you will
+              get a one-time sign-in link the moment they do.
+            </p>
+            <a class="toolbar-button primary" href="/app/login">
+              I have an invite, sign in
+            </a>
+            <p class="auth-alt">
+              Not sure who your admin is? Ask the person who shared a VegaStack
+              Pages link with you.
+            </p>
+          </>
+        )
+      }
+    </section>
+    <aside class="auth-aside" aria-hidden="true">
+      <div>
+        {
+          enabled ? (
+            <>
+              <p class="auth-aside-eyebrow">Workspaces</p>
+              <h2 class="auth-aside-headline">
+                Invite the people, not the public.
+              </h2>
+              <div class="auth-aside-body">
+                <p>
+                  Drafts, reviews, comments, and published pages live together.
+                  Agents write, humans review.
+                </p>
+                <p>
+                  You become the workspace admin. Add reviewers and editors
+                  after the magic link confirms your email.
+                </p>
+              </div>
+              <div class="auth-env-block" aria-label="Workspace primitives">
+                <div class="auth-env-comment"># the primitives</div>
+                <div>
+                  <span class="auth-env-key">workspace</span>{" "}
+                  <span class="auth-env-val">
+                    &rarr; folders &rarr; pages &rarr; threads
+                  </span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <p class="auth-aside-eyebrow">Invite only</p>
+              <h2 class="auth-aside-headline">Access is by invitation.</h2>
+              <div class="auth-aside-body">
+                <p>
+                  Self-hosted VegaStack Pages instances stay private by default.
+                  New members join when a workspace admin adds their email.
+                </p>
+                <p>
+                  Once invited, sign in with the magic link we send to your
+                  inbox. No password, no waiting on IT.
+                </p>
+              </div>
+              <div class="auth-env-block" aria-label="How invites work">
+                <div class="auth-env-comment"># how invites flow</div>
+                <div>
+                  <span class="auth-env-val">1.</span> admin adds your email
+                </div>
+                <div>
+                  <span class="auth-env-val">2.</span> you receive a one-time
+                  sign-in link
+                </div>
+                <div>
+                  <span class="auth-env-val">3.</span> one tap opens your
+                  workspace
+                </div>
+              </div>
+            </>
+          )
+        }
+      </div>
+      {
+        enabled ? (
+          <p class="auth-aside-footer">
+            Already invited? <a href="/app/login">Use the login screen</a>{" "}
+            instead.
+          </p>
+        ) : (
+          <p class="auth-aside-footer">
+            Looking for the managed product? Visit{" "}
+            <a href="https://pages.vegastack.com">pages.vegastack.com</a>.
+          </p>
+        )
+      }
+    </aside>
+  </main>
+  <script>
+    const form = document.querySelector("[data-signup-form]");
+    const result = document.querySelector("[data-signup-result]");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!(form instanceof HTMLFormElement)) return;
+      const button = form.querySelector("button[type='submit']");
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = true;
+        button.textContent = "Creating...";
+      }
+      const data = new FormData(form);
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          display_name: data.get("display_name"),
+          email: data.get("email"),
+          workspace_name: data.get("workspace_name"),
+        }),
+      });
+      const payload = await response.json();
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = false;
+        button.textContent = "Create workspace";
+      }
+      if (!(result instanceof HTMLElement)) return;
+      result.hidden = false;
+      if (response.ok && payload.debug_verify_url) {
+        const message = document.createElement("p");
+        const link = document.createElement("a");
+        message.textContent = "Workspace created. Development magic link:";
+        link.href = String(payload.debug_verify_url);
+        link.textContent = "Open workspace";
+        result.replaceChildren(message, link);
+        return;
+      }
+      if (response.ok) {
+        result.textContent =
+          "Workspace created. Check your email for a magic link.";
+        return;
+      }
+      result.textContent = payload?.error?.message ?? "Signup failed.";
+    });
+  </script>
+</AppLayout>

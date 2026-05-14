@@ -1,0 +1,379 @@
+---
+import { AppError, hasPermission } from "@vegastack/pages-core";
+import { CommandPalette } from "../../components/CommandPalette";
+import FolderPageList from "../../components/FolderPageList.astro";
+import MobileTabBar from "../../components/MobileTabBar.astro";
+import PageHeader from "../../components/PageHeader.astro";
+import PublicFolderSidebar from "../../components/PublicFolderSidebar.astro";
+import { SharePasswordPrompt } from "../../components/SharePasswordPrompt";
+import Sidebar from "../../components/Sidebar.astro";
+import type {
+  BreadcrumbSegment,
+  BreadcrumbSibling,
+} from "../../components/BreadcrumbCascade";
+import {
+  getRequestActor,
+  resolveActorPermission,
+  resolveFolderAccess,
+  resolveFolderActorPermission,
+  type PageAccess,
+} from "../../lib/access";
+import { publicSignupEnabled } from "../../lib/deployment";
+import {
+  canReadFolderOrVisibleDescendants,
+  listVisibleFoldersForActor,
+} from "../../lib/workspace-visibility";
+import {
+  commentService,
+  ensureSeedData,
+  favoriteService,
+  pageService,
+  workspaceService,
+} from "../../lib/runtime";
+import AppLayout from "../../layouts/AppLayout.astro";
+
+export const prerender = false;
+
+const { slugId } = Astro.params;
+if (!publicSignupEnabled()) await ensureSeedData();
+const folder = slugId ? workspaceService.getFolderBySlugId(slugId) : null;
+if (!folder) return new Response("Folder not found", { status: 404 });
+
+let access: PageAccess | null = null;
+let passwordPrompt: { publicationId: string } | null = null;
+try {
+  access = await resolveFolderAccess({
+    cookies: Astro.cookies,
+    url: Astro.url,
+    folder,
+    required: "read",
+  });
+} catch (error) {
+  if (
+    error instanceof AppError &&
+    error.code === "PUBLICATION_PASSWORD_REQUIRED"
+  ) {
+    const publicationId =
+      typeof error.details?.publication_id === "string"
+        ? error.details.publication_id
+        : null;
+    if (publicationId) passwordPrompt = { publicationId };
+  }
+  if (!passwordPrompt)
+    return new Response("Permission denied", { status: 403 });
+}
+
+const folderAccess =
+  access ??
+  ({
+    actor: getRequestActor(Astro.cookies),
+    permission: "none",
+    publicationId: null,
+    publication: null,
+    guestNameRequired: false,
+  } as PageAccess);
+const actor = folderAccess.actor;
+const isPublicPublication = Boolean(
+  passwordPrompt || (folderAccess.publicationId && !actor.user),
+);
+const currentFolderId = folder.id;
+if (
+  !isPublicPublication &&
+  !canReadFolderOrVisibleDescendants(actor, currentFolderId)
+) {
+  return new Response("Permission denied", { status: 403 });
+}
+
+const sidebarUser = actor.user ?? {
+  id: "guest",
+  email: "guest@local",
+  displayName: "Guest",
+};
+const workspaceRecord = workspaceService.getWorkspace(folder.workspaceId);
+const sidebarWorkspace = workspaceRecord ?? {
+  id: folder.workspaceId,
+  name: "Workspace",
+  slug: "workspace",
+  versionRetentionDays: null,
+  createdAt: folder.createdAt,
+  updatedAt: folder.updatedAt,
+};
+const sidebarWorkspaces =
+  !isPublicPublication && actor.user
+    ? workspaceService.listWorkspacesForUser(actor.user.id)
+    : [];
+
+const workspaceFolders = workspaceService.listFolders(folder.workspaceId);
+const ancestorFolders = workspaceService.folderAncestors(folder.id);
+const publicRootFolder =
+  folderAccess.publication?.resourceType === "folder"
+    ? workspaceService.getFolder(folderAccess.publication.resourceId)
+    : isPublicPublication
+      ? folder
+      : null;
+const publicFolderPrefix = publicRootFolder
+  ? `${publicRootFolder.path}/`
+  : null;
+const visibleFolders = isPublicPublication
+  ? publicRootFolder
+    ? workspaceFolders.filter(
+        (node) =>
+          node.id === publicRootFolder.id ||
+          node.path.startsWith(publicFolderPrefix!),
+      )
+    : [folder]
+  : listVisibleFoldersForActor(actor, folder.workspaceId);
+const workspacePages = pageService
+  .listPages(folder.workspaceId)
+  .filter((page) =>
+    isPublicPublication
+      ? Boolean(
+          page.folderPath &&
+          (page.folderPath === publicRootFolder?.path ||
+            page.folderPath.startsWith(publicFolderPrefix ?? "")),
+        )
+      : hasPermission(resolveActorPermission({ actor, page }), "read"),
+  )
+  .sort(
+    (left, right) =>
+      left.folderPath.localeCompare(right.folderPath) ||
+      left.title.localeCompare(right.title),
+  );
+
+const childFolders = visibleFolders.filter(
+  (node) => node.parentFolderId === folder.id,
+);
+const childPages = workspacePages.filter(
+  (page) => page.folderPath === folder.path,
+);
+const threadCounts = new Map<string, number>();
+for (const page of childPages) {
+  threadCounts.set(page.id, commentService.listForPage(page.id, "open").length);
+}
+const listRows = [
+  ...childFolders.map((node) => ({
+    kind: "folder" as const,
+    id: node.id,
+    name: node.name,
+    href: `/f/${node.slugId}`,
+    threadCount: 0,
+    author: null,
+    updatedAt: node.updatedAt,
+    childCount:
+      workspaceFolders.filter((sub) => sub.parentFolderId === node.id).length +
+      workspacePages.filter((page) => page.folderPath === node.path).length,
+  })),
+  ...childPages.map((page) => ({
+    kind: "page" as const,
+    id: page.id,
+    name: page.title,
+    href: `/p/${page.slugId}`,
+    threadCount: threadCounts.get(page.id) ?? 0,
+    author: null,
+    updatedAt: page.updatedAt,
+    childCount: 0,
+  })),
+];
+
+const MAX_BREADCRUMB_SUBMENU_DEPTH = 6;
+
+function childrenOf(
+  folderPath: string,
+  parentId: string | null,
+  depth = 0,
+): BreadcrumbSibling[] {
+  const pages = workspacePages
+    .filter((page) => page.folderPath === folderPath)
+    .map(
+      (page) =>
+        ({
+          id: page.id,
+          name: page.title,
+          href: `/p/${page.slugId}`,
+          isCurrent: false,
+          isFolder: false,
+        }) satisfies BreadcrumbSibling,
+    );
+  const subFolders = visibleFolders
+    .filter((node) =>
+      parentId
+        ? node.parentFolderId === parentId
+        : node.parentFolderId === null,
+    )
+    .map(
+      (node) =>
+        ({
+          id: node.id,
+          name: node.name,
+          href: `/f/${node.slugId}`,
+          isCurrent: node.id === currentFolderId,
+          isFolder: true,
+          children:
+            depth < MAX_BREADCRUMB_SUBMENU_DEPTH
+              ? childrenOf(node.path, node.id, depth + 1)
+              : [],
+        }) satisfies BreadcrumbSibling,
+    );
+  return [...subFolders, ...pages];
+}
+
+const segments: BreadcrumbSegment[] = ancestorFolders
+  .filter((node) =>
+    isPublicPublication && publicRootFolder
+      ? node.id === publicRootFolder.id ||
+        node.path.startsWith(publicFolderPrefix!)
+      : true,
+  )
+  .map((node, index, list) => {
+    const isCurrent = node.id === folder.id;
+    return {
+      id: node.id,
+      name: node.name,
+      href: `/f/${node.slugId}`,
+      isCurrent,
+      siblings: childrenOf(node.path, node.parentFolderId).filter(
+        (sibling) => !isCurrent || sibling.id !== folder.id,
+      ),
+      allChildrenHref:
+        index === list.length - 1 ? `/f/${node.slugId}` : undefined,
+    } satisfies BreadcrumbSegment;
+  });
+
+const workspaceHref = workspaceRecord
+  ? `/app?workspace_id=${encodeURIComponent(sidebarWorkspace.id)}`
+  : "/app";
+const sidebarPages = workspacePages.map((page) => ({
+  id: page.id,
+  slugId: page.slugId,
+  title: page.title,
+  folderPath: page.folderPath || null,
+}));
+const sidebarPageIds = new Set(sidebarPages.map((page) => page.id));
+const initialFavoriteIds =
+  actor.user && !isPublicPublication
+    ? favoriteService
+        .listForWorkspace(actor.user.id, sidebarWorkspace.id)
+        .map((favorite) => favorite.pageId)
+        .filter((pageId) => sidebarPageIds.has(pageId))
+    : [];
+const sidebarFoldersForTree = visibleFolders.map((node) => ({
+  id: node.id,
+  slugId: node.slugId,
+  name: node.name,
+  path: node.path,
+  parentFolderId: node.parentFolderId,
+}));
+const canWrite =
+  !isPublicPublication &&
+  hasPermission(resolveFolderActorPermission({ actor, folder }), "write");
+const canManageAccess = hasPermission(folderAccess.permission, "admin");
+const publicIndexable = Boolean(
+  folderAccess.publication?.indexingEnabled &&
+  !folderAccess.publication.passwordHash,
+);
+---
+
+<AppLayout
+  title={`${folder.name} - VegaStack Pages`}
+  robots={publicIndexable ? "index,follow" : "noindex"}
+>
+  {
+    passwordPrompt ? (
+      <SharePasswordPrompt
+        client:load
+        publicationId={passwordPrompt.publicationId}
+        workspaceId={folder.workspaceId}
+      />
+    ) : (
+      <div
+        class:list={[
+          "vpg-shell",
+          "vpg-shell--has-mtab",
+          isPublicPublication && "vpg-shell--public-share",
+        ]}
+      >
+        {!isPublicPublication && (
+          <Sidebar
+            workspace={{
+              id: sidebarWorkspace.id,
+              name: sidebarWorkspace.name,
+              slug: sidebarWorkspace.slug,
+            }}
+            workspaces={sidebarWorkspaces.map((w) => ({
+              id: w.id,
+              name: w.name,
+              slug: w.slug,
+            }))}
+            currentUser={sidebarUser}
+            pages={sidebarPages}
+            folders={sidebarFoldersForTree}
+            canWrite={canWrite}
+            currentFolderId={folder.id}
+            initialFavoriteIds={initialFavoriteIds}
+          />
+        )}
+        {isPublicPublication && publicRootFolder && (
+          <PublicFolderSidebar
+            rootFolderId={publicRootFolder.id}
+            currentFolderId={folder.id}
+            folders={sidebarFoldersForTree}
+            pages={sidebarPages}
+          />
+        )}
+
+        <div class="vpg-shell-right">
+          <PageHeader
+            workspaceId={sidebarWorkspace.id}
+            workspaceName={sidebarWorkspace.name}
+            workspaceHref={workspaceHref}
+            segments={segments}
+            pageId={folder.id}
+            resourceType="folder"
+            slugId={folder.slugId}
+            title={folder.name}
+            sourceType="markdown"
+            canEdit={false}
+            canExportSource={false}
+            canComment={false}
+            canFavorite={false}
+            canManageAccess={canManageAccess}
+            showNavigationToggle={!isPublicPublication}
+            renderedHtml=""
+            updatedAt={folder.updatedAt}
+          />
+
+          <div class="vpg-shell-body">
+            <main class="vpg-shell-main">
+              <article class="vpg-shell-article prose-article">
+                <p class="prose-eyebrow">Folder</p>
+                <h1 class="prose-title">{folder.name}</h1>
+
+                <FolderPageList
+                  rows={listRows}
+                  workspaceId={sidebarWorkspace.id}
+                  folderId={folder.id}
+                  canWrite={canWrite}
+                />
+              </article>
+            </main>
+          </div>
+        </div>
+
+        {!isPublicPublication && (
+          <CommandPalette
+            client:only="react"
+            workspaceId={sidebarWorkspace.id}
+          />
+        )}
+
+        {!isPublicPublication && (
+          <MobileTabBar
+            pageId={undefined}
+            showComments={false}
+            commentsBadge={0}
+          />
+        )}
+      </div>
+    )
+  }
+</AppLayout>

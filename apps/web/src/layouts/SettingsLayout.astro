@@ -1,0 +1,678 @@
+---
+import AppLayout from "./AppLayout.astro";
+import { CommandPalette } from "../components/CommandPalette";
+import SettingsSidebar from "../components/SettingsSidebar.astro";
+import type { SettingsContext } from "../lib/settings-data";
+
+interface Props {
+  title: string;
+  context: SettingsContext;
+  currentSection:
+    | "general"
+    | "folders"
+    | "members"
+    | "attachments"
+    | "templates"
+    | "mcp"
+    | "audit"
+    | "profile";
+  sectionLabel: string;
+  description?: string;
+}
+
+const { title, context, currentSection, sectionLabel, description } =
+  Astro.props;
+const { workspace, workspaces, pages, currentUser } = context;
+
+const navItems: Array<{
+  id: Props["currentSection"];
+  label: string;
+  href: string;
+}> = [
+  { id: "general", label: "General", href: "/app/settings/general" },
+  { id: "folders", label: "Folders", href: "/app/settings/folders" },
+  { id: "templates", label: "Templates", href: "/app/settings/templates" },
+  { id: "members", label: "Members", href: "/app/settings/members" },
+  {
+    id: "attachments",
+    label: "Attachments",
+    href: "/app/settings/attachments",
+  },
+  { id: "mcp", label: "MCP", href: "/app/settings/mcp" },
+  { id: "audit", label: "Audit", href: "/app/settings/audit" },
+];
+
+const firstPage = pages[0];
+const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
+---
+
+<AppLayout title={title}>
+  <div
+    class="vpg-shell"
+    data-workspace-id={workspace.id}
+    data-current-section={currentSection}
+    data-open-pages={openPagesHref}
+  >
+    <SettingsSidebar
+      workspace={workspace}
+      workspaces={workspaces}
+      currentUser={currentUser}
+      currentSection={currentSection}
+      pages={pages.map((page) => ({ id: page.id, slugId: page.slugId }))}
+    />
+
+    <div class="vpg-shell-right">
+      <section class="settings-main">
+        <header class="settings-pageheader">
+          <button
+            type="button"
+            class="vpg-pheader-btn vpg-pheader-toggle"
+            data-vpg-sidebar-toggle
+            aria-controls="vpg-sidebar"
+            aria-expanded="false"
+            aria-label="Open settings navigation"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 12h18"></path>
+              <path d="M3 6h18"></path>
+              <path d="M3 18h18"></path>
+            </svg>
+          </button>
+          <div class="settings-pageheader-text">
+            <p class="settings-kicker">{workspace.name} &middot; Settings</p>
+            <h1>{sectionLabel}</h1>
+            {description && <p class="settings-description">{description}</p>}
+          </div>
+          <div class="settings-pageheader-actions">
+            <slot name="actions" />
+          </div>
+        </header>
+
+        <script is:inline define:vars={{ workspaceId: workspace.id }}>
+          (() => {
+            if (window.settingsHelpers) return;
+            const prefersReducedMotion = window.matchMedia(
+              "(prefers-reduced-motion: reduce)",
+            ).matches;
+            function toast(message, tone, action) {
+              const sonner = window.vpgToast;
+              const options = action
+                ? { action: { label: action.label, onClick: action.onClick } }
+                : undefined;
+              if (!sonner) {
+                console.info("[toast]", message);
+                return;
+              }
+              if (tone === "error") return sonner.error(message, options);
+              return sonner.success(message, options);
+            }
+            function setStatus(selector, state, message) {
+              const node = document.querySelector(selector);
+              if (!node) return;
+              if (state === "success") {
+                delete node.dataset.state;
+                node.textContent = "";
+                return;
+              }
+              if (state) node.dataset.state = state;
+              else delete node.dataset.state;
+              node.textContent = message;
+            }
+            async function withSubmit(form, fn) {
+              const button = form.querySelector("button[type='submit']");
+              if (button) {
+                button.dataset.pending = "true";
+                button.disabled = true;
+              }
+              try {
+                await fn();
+              } finally {
+                if (button) {
+                  delete button.dataset.pending;
+                  button.disabled = false;
+                }
+              }
+            }
+            function withTransition(fn) {
+              if (
+                prefersReducedMotion ||
+                typeof document.startViewTransition !== "function"
+              ) {
+                fn();
+                return;
+              }
+              document.startViewTransition(fn);
+            }
+            function removeRow(tr) {
+              tr.dataset.leaving = "true";
+              window.setTimeout(
+                () => tr.remove(),
+                prefersReducedMotion ? 0 : 220,
+              );
+            }
+            function fadeReload() {
+              if (prefersReducedMotion) {
+                window.location.reload();
+                return;
+              }
+              document.body.style.transition = "opacity 180ms ease-out";
+              document.body.style.opacity = "0.4";
+              window.setTimeout(() => window.location.reload(), 180);
+            }
+            function closestRow(node) {
+              return node && node.closest ? node.closest("tr") : null;
+            }
+            function confirmAction(options) {
+              return new Promise((resolve) => {
+                const dialog = document.createElement("dialog");
+                dialog.className = "settings-modal settings-confirm-modal";
+                const form = document.createElement("form");
+                form.className = "settings-modal-form";
+                form.method = "dialog";
+                const header = document.createElement("header");
+                header.className = "settings-modal-header";
+                const text = document.createElement("div");
+                text.className = "settings-modal-header-text";
+                const title = document.createElement("h2");
+                title.textContent = options.title || "Confirm action";
+                const description = document.createElement("p");
+                description.textContent =
+                  options.description || "This action cannot be undone.";
+                text.append(title, description);
+                header.append(text);
+                const footer = document.createElement("footer");
+                footer.className = "settings-modal-footer";
+                const cancel = document.createElement("button");
+                cancel.type = "button";
+                cancel.className = "vpg-button vpg-button-ghost vpg-button-md";
+                cancel.textContent = options.cancelLabel || "Cancel";
+                const confirm = document.createElement("button");
+                confirm.type = "button";
+                confirm.className =
+                  options.tone === "danger"
+                    ? "vpg-button vpg-button-destructive vpg-button-md"
+                    : "vpg-button vpg-button-primary vpg-button-md";
+                confirm.textContent = options.confirmLabel || "Confirm";
+                footer.append(cancel, confirm);
+                form.append(header, footer);
+                dialog.append(form);
+                document.body.append(dialog);
+                let settled = false;
+                function finish(value) {
+                  if (settled) return;
+                  settled = true;
+                  resolve(value);
+                  dialog.close();
+                }
+                cancel.addEventListener("click", () => finish(false));
+                confirm.addEventListener("click", () => finish(true));
+                dialog.addEventListener("cancel", (event) => {
+                  event.preventDefault();
+                  finish(false);
+                });
+                dialog.addEventListener("close", () => {
+                  if (!settled) resolve(false);
+                  dialog.remove();
+                });
+                dialog.showModal();
+                cancel.focus();
+              });
+            }
+            window.settingsHelpers = {
+              toast,
+              setStatus,
+              withSubmit,
+              withTransition,
+              removeRow,
+              fadeReload,
+              closestRow,
+              confirmAction,
+              workspaceId,
+              prefersReducedMotion,
+            };
+          })();
+        </script>
+
+        <div class="settings-content">
+          <slot />
+        </div>
+      </section>
+    </div>
+  </div>
+  <CommandPalette client:only="react" workspaceId={workspace.id} />
+
+  <script
+    is:inline
+    define:vars={{ workspaceId: workspace.id, openPagesHref, navItems }}
+  >
+    (() => {
+      const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+
+      function toast(message, tone, action) {
+        const sonner = window.vpgToast;
+        const options = action
+          ? { action: { label: action.label, onClick: action.onClick } }
+          : undefined;
+        if (!sonner) {
+          // Fallback before sonner mounts (very early in page load)
+          console.info("[toast]", message);
+          return;
+        }
+        if (tone === "error") return sonner.error(message, options);
+        return sonner.success(message, options);
+      }
+
+      function setStatus(selector, state, message) {
+        const node = document.querySelector(selector);
+        if (!node) return;
+        if (state === "success") {
+          delete node.dataset.state;
+          node.textContent = "";
+          return;
+        }
+        if (state) node.dataset.state = state;
+        else delete node.dataset.state;
+        node.textContent = message;
+      }
+
+      async function withSubmit(form, fn) {
+        const button = form.querySelector("button[type='submit']");
+        if (button) {
+          button.dataset.pending = "true";
+          button.disabled = true;
+        }
+        try {
+          await fn();
+        } finally {
+          if (button) {
+            delete button.dataset.pending;
+            button.disabled = false;
+          }
+        }
+      }
+
+      function withTransition(fn) {
+        if (
+          prefersReducedMotion ||
+          typeof document.startViewTransition !== "function"
+        ) {
+          fn();
+          return;
+        }
+        document.startViewTransition(fn);
+      }
+
+      function removeRow(tr) {
+        tr.dataset.leaving = "true";
+        const delay = prefersReducedMotion ? 0 : 220;
+        window.setTimeout(() => tr.remove(), delay);
+      }
+
+      function fadeReload() {
+        if (prefersReducedMotion) {
+          window.location.reload();
+          return;
+        }
+        document.body.style.transition = "opacity 180ms ease-out";
+        document.body.style.opacity = "0.4";
+        window.setTimeout(() => window.location.reload(), 180);
+      }
+
+      function closestRow(node) {
+        const tr = node && node.closest ? node.closest("tr") : null;
+        return tr || null;
+      }
+
+      function confirmAction(options) {
+        return new Promise((resolve) => {
+          const dialog = document.createElement("dialog");
+          dialog.className = "settings-modal settings-confirm-modal";
+
+          const form = document.createElement("form");
+          form.className = "settings-modal-form";
+          form.method = "dialog";
+
+          const header = document.createElement("header");
+          header.className = "settings-modal-header";
+          const text = document.createElement("div");
+          text.className = "settings-modal-header-text";
+          const title = document.createElement("h2");
+          title.textContent = options.title || "Confirm action";
+          const description = document.createElement("p");
+          description.textContent =
+            options.description || "This action cannot be undone.";
+          text.append(title, description);
+          header.append(text);
+
+          const footer = document.createElement("footer");
+          footer.className = "settings-modal-footer";
+          const cancel = document.createElement("button");
+          cancel.type = "button";
+          cancel.className = "vpg-button vpg-button-ghost vpg-button-md";
+          cancel.textContent = options.cancelLabel || "Cancel";
+          const confirm = document.createElement("button");
+          confirm.type = "button";
+          confirm.className =
+            options.tone === "danger"
+              ? "vpg-button vpg-button-destructive vpg-button-md"
+              : "vpg-button vpg-button-primary vpg-button-md";
+          confirm.textContent = options.confirmLabel || "Confirm";
+          footer.append(cancel, confirm);
+          form.append(header, footer);
+          dialog.append(form);
+          document.body.append(dialog);
+
+          let settled = false;
+          function finish(value) {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+            dialog.close();
+          }
+          cancel.addEventListener("click", () => finish(false));
+          confirm.addEventListener("click", () => finish(true));
+          dialog.addEventListener("cancel", (event) => {
+            event.preventDefault();
+            finish(false);
+          });
+          dialog.addEventListener("close", () => {
+            if (!settled) resolve(false);
+            dialog.remove();
+          });
+
+          dialog.showModal();
+          cancel.focus();
+        });
+      }
+
+      // Expose helpers to per-section scripts
+      window.settingsHelpers = {
+        toast,
+        setStatus,
+        withSubmit,
+        withTransition,
+        removeRow,
+        fadeReload,
+        closestRow,
+        confirmAction,
+        workspaceId,
+        prefersReducedMotion,
+      };
+
+      // Workspace switcher
+      const switcher = document.querySelector("[data-workspace-switcher]");
+      if (switcher) {
+        switcher.addEventListener("change", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLSelectElement)) return;
+          const url = new URL(window.location.href);
+          url.searchParams.set("workspace_id", target.value);
+          if (!prefersReducedMotion) {
+            document.body.style.transition = "opacity 160ms ease-out";
+            document.body.style.opacity = "0.4";
+            window.setTimeout(() => {
+              window.location.href = url.toString();
+            }, 160);
+          } else {
+            window.location.href = url.toString();
+          }
+        });
+      }
+
+      // Top search + command palette
+      const searchInput = document.querySelector("[data-search-input]");
+      const searchPopover = document.querySelector("[data-search-popover]");
+      const searchResults = document.querySelector("[data-search-results]");
+      const searchRoot = document.querySelector("[data-search-root]");
+
+      const commands = [
+        {
+          kind: "action",
+          id: "invite",
+          label: "Invite member",
+          hint: "Members",
+          shortcut: null,
+          run: () => {
+            window.location.href = "/app/settings/members?focus=invite";
+          },
+        },
+        {
+          kind: "action",
+          id: "create-folder",
+          label: "Create folder",
+          hint: "Folders",
+          shortcut: null,
+          run: () => {
+            window.location.href = "/app/settings/folders?focus=create";
+          },
+        },
+        {
+          kind: "action",
+          id: "export",
+          label: "Export workspace as ZIP",
+          hint: "Downloads an archive",
+          shortcut: null,
+          run: () => {
+            window.location.href = "/api/workspaces/" + workspaceId + "/export";
+          },
+        },
+        {
+          kind: "action",
+          id: "open-pages",
+          label: "Open pages",
+          hint: "Back to documents",
+          shortcut: null,
+          run: () => {
+            window.location.href = openPagesHref;
+          },
+        },
+        {
+          kind: "action",
+          id: "logout",
+          label: "Log out",
+          hint: "End your session",
+          shortcut: null,
+          run: () => {
+            fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+              window.location.href = "/app/login";
+            });
+          },
+        },
+      ];
+      navItems.forEach((item, i) => {
+        commands.push({
+          kind: "section",
+          id: "goto-" + item.id,
+          label: item.label,
+          hint: "Settings page",
+          shortcut: "⌘" + (i + 1),
+          run: () => {
+            window.location.href = item.href;
+          },
+        });
+      });
+
+      let visible = commands.slice();
+      let selectedIndex = 0;
+
+      function renderResults() {
+        if (!searchResults) return;
+        searchResults.innerHTML = "";
+        if (visible.length === 0) {
+          const empty = document.createElement("p");
+          empty.className = "settings-search-empty";
+          empty.textContent = "No matching action.";
+          searchResults.append(empty);
+          return;
+        }
+        let lastKind = null;
+        visible.forEach((cmd, i) => {
+          if (cmd.kind !== lastKind) {
+            const groupLabel = document.createElement("div");
+            groupLabel.className = "settings-search-group";
+            groupLabel.textContent =
+              cmd.kind === "section" ? "Jump to section" : "Quick actions";
+            searchResults.append(groupLabel);
+            lastKind = cmd.kind;
+          }
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = "settings-search-item";
+          item.dataset.index = String(i);
+          if (i === selectedIndex) item.setAttribute("aria-selected", "true");
+          const left = document.createElement("span");
+          left.className = "settings-search-item-label";
+          const main = document.createElement("strong");
+          main.textContent = cmd.label;
+          left.append(main);
+          if (cmd.hint) {
+            const hint = document.createElement("small");
+            hint.textContent = cmd.hint;
+            left.append(hint);
+          }
+          item.append(left);
+          if (cmd.shortcut) {
+            const kbd = document.createElement("kbd");
+            kbd.textContent = cmd.shortcut;
+            item.append(kbd);
+          }
+          item.addEventListener("mouseenter", () => {
+            selectedIndex = i;
+            updateSelection();
+          });
+          item.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+          });
+          item.addEventListener("click", () => {
+            closeSearch();
+            cmd.run();
+          });
+          searchResults.append(item);
+        });
+      }
+
+      function updateSelection() {
+        if (!searchResults) return;
+        const items = searchResults.querySelectorAll(".settings-search-item");
+        items.forEach((node, i) => {
+          if (i === selectedIndex) {
+            node.setAttribute("aria-selected", "true");
+            node.scrollIntoView({ block: "nearest" });
+          } else {
+            node.removeAttribute("aria-selected");
+          }
+        });
+      }
+
+      function filterResults(query) {
+        const q = (query || "").trim().toLowerCase();
+        visible = q
+          ? commands.filter(
+              (cmd) =>
+                cmd.label.toLowerCase().includes(q) ||
+                (cmd.hint || "").toLowerCase().includes(q),
+            )
+          : commands.slice();
+        if (selectedIndex >= visible.length) selectedIndex = 0;
+        renderResults();
+      }
+
+      function openSearch() {
+        if (!searchPopover || !searchInput) return;
+        searchPopover.hidden = false;
+        if (searchRoot) searchRoot.dataset.open = "true";
+        if (visible.length === 0) filterResults(searchInput.value);
+      }
+
+      function closeSearch() {
+        if (!searchPopover) return;
+        searchPopover.hidden = true;
+        if (searchRoot) delete searchRoot.dataset.open;
+        if (searchInput instanceof HTMLInputElement) searchInput.blur();
+      }
+
+      if (searchInput instanceof HTMLInputElement) {
+        filterResults("");
+        searchInput.addEventListener("focus", openSearch);
+        searchInput.addEventListener("input", () =>
+          filterResults(searchInput.value),
+        );
+        searchInput.addEventListener("keydown", (event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            if (visible.length > 0) {
+              selectedIndex = (selectedIndex + 1) % visible.length;
+              updateSelection();
+            }
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            if (visible.length > 0) {
+              selectedIndex =
+                (selectedIndex - 1 + visible.length) % visible.length;
+              updateSelection();
+            }
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            const cmd = visible[selectedIndex];
+            if (cmd) {
+              closeSearch();
+              cmd.run();
+            }
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            closeSearch();
+          }
+        });
+      }
+
+      document.addEventListener("mousedown", (event) => {
+        if (!searchRoot) return;
+        if (event.target instanceof Node && !searchRoot.contains(event.target))
+          closeSearch();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        const tag = event.target && event.target.tagName;
+        const inField =
+          tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          event.key.toLowerCase() === "k"
+        ) {
+          event.preventDefault();
+          if (searchInput instanceof HTMLInputElement) {
+            searchInput.focus();
+            searchInput.select();
+          }
+          return;
+        }
+        if ((event.metaKey || event.ctrlKey) && /^[1-8]$/.test(event.key)) {
+          const idx = Number(event.key) - 1;
+          const item = navItems[idx];
+          if (item) {
+            event.preventDefault();
+            window.location.href = item.href;
+          }
+          return;
+        }
+        if (event.key === "/" && !inField && !event.metaKey && !event.ctrlKey) {
+          event.preventDefault();
+          if (searchInput instanceof HTMLInputElement) {
+            searchInput.focus();
+            searchInput.select();
+          }
+        }
+      });
+    })();
+  </script>
+</AppLayout>

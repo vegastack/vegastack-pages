@@ -1,0 +1,48 @@
+---
+import { getRequestActor } from "../../lib/access";
+import { publicSignupEnabled } from "../../lib/deployment";
+import {
+  ensureRuntimeReady,
+  pageService,
+  seedWorkspace,
+  setupService,
+  workspaceService,
+} from "../../lib/runtime";
+
+export const prerender = false;
+
+if (publicSignupEnabled()) {
+  const actor = getRequestActor(Astro.cookies);
+  if (!actor.user || actor.devFallback) {
+    return Astro.redirect("/app/signup");
+  }
+  const workspace =
+    workspaceService.listWorkspacesForUser(actor.user.id)[0] ?? null;
+  const firstPage = workspace ? pageService.listPages(workspace.id)[0] : null;
+  if (firstPage) {
+    return Astro.redirect(`/p/${firstPage.slugId}`);
+  }
+  return Astro.redirect("/app/signup");
+}
+
+await ensureRuntimeReady();
+const setupStatus = setupService.status();
+if (!setupStatus.setupComplete || !setupStatus.firstWorkspaceId) {
+  return Astro.redirect("/app/setup");
+}
+
+let firstPage: ReturnType<typeof pageService.listPages>[number] | null =
+  pageService.listPages(setupStatus.firstWorkspaceId)[0] ?? null;
+if (!firstPage) {
+  const seeded = await seedWorkspace({
+    workspaceId: setupStatus.firstWorkspaceId,
+    actorUserId: setupStatus.firstAdminUserId,
+  });
+  firstPage =
+    pageService
+      .listPages(setupStatus.firstWorkspaceId)
+      .find((page) => page.slugId === seeded.firstPageSlugId) ?? null;
+}
+
+return Astro.redirect(firstPage ? `/p/${firstPage.slugId}` : "/app/setup");
+---

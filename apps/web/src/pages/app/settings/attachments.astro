@@ -1,0 +1,118 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { loadSettings, formatDate } from "../../../lib/settings-data";
+import { attachmentService } from "../../../lib/runtime";
+import { UploadAttachmentDialog } from "../../../components/settings/UploadAttachmentDialog";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace, pages } = result.context;
+
+const attachments = pages.flatMap((page) =>
+  attachmentService.listForPage(page.id).map((attachment) => ({
+    ...attachment,
+    pageTitle: page.title,
+    pageSlugId: page.slugId,
+  })),
+);
+
+const pageOptions = pages.map((page) => ({
+  id: page.id,
+  label: `${page.folderPath ? `${page.folderPath}/` : ""}${page.title}`,
+}));
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+---
+
+<SettingsLayout
+  title={`Attachments · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="attachments"
+  sectionLabel="Attachments"
+  description="Files attached to pages. Each download is checked against the parent page's permissions."
+>
+  {
+    pages.length > 0 && (
+      <UploadAttachmentDialog
+        slot="actions"
+        client:load
+        workspaceId={workspace.id}
+        pages={pageOptions}
+      />
+    )
+  }
+
+  <section class="settings-card settings-card-table">
+    <div class="settings-table-wrap">
+      <table class="settings-table" aria-label="Attachments">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Page</th>
+            <th>Type</th>
+            <th>Size</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            attachments.length === 0 ? (
+              <tr>
+                <td colspan="5">
+                  <div class="settings-empty">
+                    <div class="settings-empty-glyph" aria-hidden="true">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M13.234 20.252 21 12.3a4.5 4.5 0 0 0-6.364-6.364L4.95 15.622a3 3 0 0 0 4.243 4.243L18.39 10.67a1.5 1.5 0 0 0-2.121-2.121L7.61 17.21" />
+                      </svg>
+                    </div>
+                    <p>
+                      <strong>No attachments yet</strong>Upload a file and
+                      attach it to a page in this workspace.
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              attachments.map((attachment) => (
+                <tr>
+                  <td>
+                    <a
+                      href={`/api/attachments/${attachment.id}?workspace_id=${encodeURIComponent(workspace.id)}`}
+                    >
+                      {attachment.filename}
+                    </a>
+                  </td>
+                  <td>
+                    <a href={`/p/${attachment.pageSlugId}`}>
+                      {attachment.pageTitle}
+                    </a>
+                  </td>
+                  <td>
+                    <code class="settings-code-path">
+                      {attachment.contentType}
+                    </code>
+                  </td>
+                  <td>{formatBytes(attachment.byteSize)}</td>
+                  <td>{formatDate(attachment.createdAt)}</td>
+                </tr>
+              ))
+            )
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+</SettingsLayout>
