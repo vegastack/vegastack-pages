@@ -1,5 +1,24 @@
 # @vegastack/pages-config
 
+## 0.1.4
+
+### Patch Changes
+
+- `/oauth/*` + `/.well-known/oauth-*` now bypass the runtime persistence
+  middleware. v0.1.3's Anthropic well-known short-circuit responded in
+  single-digit ms inside the handler but the global middleware still ran
+  `refreshRuntimeState()` + `persistRuntimeState()` around every POST,
+  which adds ~1.4s of wall time per request. claude.ai's connector broker
+  times out before that completes. Bypassing for OAuth endpoints — none of
+  which need the global persist sweep — drops `/register` end-to-end to
+  the handler's own latency.
+
+  Also: simplified `/oauth/register` to call `auditService.record` directly
+  (it's a sync in-memory push) instead of wrapping it in a
+  `Promise.resolve().then(...)` / `waitUntil()` chain. v0.1.3's version
+  was returning 500 from the handler's catch — root cause traced to the
+  extra promise dance combined with the middleware lock, both unnecessary.
+
 ## 0.1.3
 
 ### Patch Changes

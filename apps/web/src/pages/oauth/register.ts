@@ -36,30 +36,19 @@ function oauthError(error: string, description: string, status = 400) {
   );
 }
 
-// Best-effort access to Cloudflare's ExecutionContext.waitUntil. When the
-// adapter exposes it via Astro.locals.runtime.ctx we use it to defer the
-// audit-log INSERT until after the response has been sent; otherwise we fall
-// back to fire-and-forget. The point is to keep /register response time well
-// under the ~1.5s window claude.ai's connector broker waits for DCR before
-// it cancels the request.
-function deferOnRuntime(
-  locals: Record<string, unknown> | undefined,
-  promise: Promise<unknown>,
-): void {
-  const runtime = locals && (locals.runtime as { ctx?: unknown } | undefined);
-  const ctx = runtime?.ctx as
-    | { waitUntil?: (p: Promise<unknown>) => void }
-    | undefined;
-  if (typeof ctx?.waitUntil === "function") {
-    ctx.waitUntil(promise.catch(() => undefined));
-    return;
+// auditService.record is a synchronous in-memory push (see
+// @vegastack/pages-core's AuditService). We deliberately don't wrap it in
+// any promise / waitUntil dance — that earlier attempt was both unnecessary
+// and the apparent cause of an opaque 500 on the Cloudflare runtime.
+function recordAudit(input: Parameters<typeof auditService.record>[0]): void {
+  try {
+    auditService.record(input);
+  } catch (error) {
+    console.error("[oauth.register] audit log push failed:", error);
   }
-  // Node adapter / dev: no ExecutionContext, just swallow the rejection so an
-  // audit-log failure doesn't surface as an unhandled rejection.
-  promise.catch(() => undefined);
 }
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   try {
     const ip = clientIp(request);
     let body: Record<string, unknown> = {};
@@ -96,27 +85,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // touching D1 or the rate limiter so the response lands inside the
     // broker's ~1.5s timeout window.
     if (matchesAnthropicConnector({ redirectUris })) {
-      deferOnRuntime(
-        locals as unknown as Record<string, unknown> | undefined,
-        Promise.resolve().then(() =>
-          auditService.record({
-            workspaceId: null,
-            actorUserId: null,
-            action: "oauth.client_registered",
-            targetType: "oauth_client",
-            targetId: ANTHROPIC_CONNECTOR_CLIENT_ID,
-            metadata: {
-              client_name: clientName || "Claude",
-              redirect_uris: redirectUris,
-              software_id: softwareId,
-              software_version: softwareVersion,
-              ua: request.headers.get("user-agent"),
-              ip,
-              well_known: true,
-            },
-          }),
-        ),
-      );
+      recordAudit({
+        workspaceId: null,
+        actorUserId: null,
+        action: "oauth.client_registered",
+        targetType: "oauth_client",
+        targetId: ANTHROPIC_CONNECTOR_CLIENT_ID,
+        metadata: {
+          client_name: clientName || "Claude",
+          redirect_uris: redirectUris,
+          software_id: softwareId,
+          software_version: softwareVersion,
+          ua: request.headers.get("user-agent"),
+          ip,
+          well_known: true,
+        },
+      });
       return Response.json(
         {
           client_id: ANTHROPIC_CONNECTOR_CLIENT_ID,
@@ -147,31 +131,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       registeredUserAgent: request.headers.get("user-agent"),
       registeredIp: ip,
     });
-    // Defer audit-log INSERT so the 201 response lands sooner. Two D1 writes
-    // (client INSERT + audit INSERT) was pushing us past claude.ai's broker
-    // timeout. The client INSERT is load-bearing (subsequent /authorize and
-    // /token calls look up the client by id and must find it), the audit row
-    // is not.
-    deferOnRuntime(
-      locals as unknown as Record<string, unknown> | undefined,
-      Promise.resolve().then(() =>
-        auditService.record({
-          workspaceId: null,
-          actorUserId: null,
-          action: "oauth.client_registered",
-          targetType: "oauth_client",
-          targetId: client.id,
-          metadata: {
-            client_name: client.clientName,
-            redirect_uris: client.redirectUris,
-            software_id: client.softwareId,
-            software_version: client.softwareVersion,
-            ua: client.registeredUserAgent,
-            ip: client.registeredIp,
-          },
-        }),
-      ),
-    );
+    recordAudit({
+      workspaceId: null,
+      actorUserId: null,
+      action: "oauth.client_registered",
+      targetType: "oauth_client",
+      targetId: client.id,
+      metadata: {
+        client_name: client.clientName,
+        redirect_uris: client.redirectUris,
+        software_id: client.softwareId,
+        software_version: client.softwareVersion,
+        ua: client.registeredUserAgent,
+        ip: client.registeredIp,
+      },
+    });
     return Response.json(
       {
         client_id: client.id,
@@ -187,6 +161,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       { status: 201, headers: corsHeaders },
     );
   } catch (error) {
+    console.error("[oauth.register] handler failed:", error);
     if (error instanceof OAuthClientRegistrationError) {
       return oauthError(error.oauthError, error.message, error.status);
     }

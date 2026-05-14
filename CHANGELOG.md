@@ -2,6 +2,36 @@
 
 All notable changes to VegaStack Pages are documented here.
 
+## 0.1.4
+
+Hotfix for v0.1.3. The well-known + waitUntil change shipped in v0.1.3
+broke `/oauth/register` (500 on every request) and didn't measurably
+speed it up either — root cause was twofold: (1) the audit-log wrapped
+in `Promise.resolve().then(...)` was the source of the 500, and (2) the
+real wall-time hog was the `defineMiddleware` runtime-persistence
+sweep around every mutating request, not the handler itself.
+
+### Fixed
+
+- `/oauth/register` no longer returns 500. The audit-log push is now
+  called directly — it's a sync in-memory array push from `AuditService`,
+  not an async D1 write, and the earlier promise-defer indirection was
+  both unnecessary and surfacing as a 500 from the handler's catch.
+
+### Changed
+
+- All `/oauth/*` and `/.well-known/oauth-*` endpoints now bypass the
+  runtime-persistence middleware. The global middleware wraps every
+  mutating request in `acquireRuntimeMutationLock()` +
+  `refreshRuntimeState()` + `persistRuntimeState()`, which adds ~1.4s
+  of wall time per POST regardless of how fast the handler is. OAuth
+  endpoints either touch no runtime state (PRM / AS metadata,
+  /register fast path) or do their own narrow D1 writes (the generic
+  /register slow path, /token, /authorize/{consent,resume}) and don't
+  need the global persist sweep. claude.ai's connector broker cancels
+  DCR at ~1.5s; without this bypass we were structurally over the
+  timeout even when the handler returned in 10ms.
+
 ## 0.1.3
 
 Make `/register` fast enough to fit inside claude.ai's connector-broker
