@@ -553,15 +553,21 @@ textarea {
 .vpg-select-item {
   position: relative;
   display: flex;
+  width: 100%;
   height: var(--control-h-md);
   align-items: center;
   gap: var(--control-gap);
+  border: 0;
   border-radius: var(--vsk-radius-row);
+  background: transparent;
   color: var(--vsk-text);
   padding: 0 var(--control-px-sm);
+  font: inherit;
   font-size: var(--text-sm);
+  text-align: left;
   outline: 0;
   cursor: pointer;
+  appearance: none;
 }
 
 .vpg-dropdown-item:not(:first-child),

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { mcpToolNames } from "@vegastack/pages-mcp";
-import { GET, POST } from "../mcp";
+import { GET, HEAD, POST } from "../mcp";
 import {
   auditService,
   authService,
@@ -41,7 +41,40 @@ describe("MCP route", () => {
     const response = await GET({} as never);
 
     expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("POST");
+    expect(response.headers.get("allow")).toBe("POST, GET, HEAD, OPTIONS");
+    expect(response.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+  });
+
+  it("answers HEAD with 200 and the MCP protocol version for connector discovery", async () => {
+    const response = await HEAD({} as never);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await response.text()).toBe("");
+  });
+
+  it("includes MCP protocol version on the 401 used to start OAuth discovery", async () => {
+    delete process.env.VPG_DEV_AUTO_LOGIN;
+
+    const response = await POST({
+      request: new Request("http://127.0.0.1:4322/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {},
+        }),
+      }),
+    } as never);
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+    expect(response.headers.get("www-authenticate")).toContain(
+      "resource_metadata=",
+    );
   });
 
   it("accepts initialized notifications without a response body", async () => {

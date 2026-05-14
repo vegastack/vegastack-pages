@@ -10,6 +10,10 @@ vegastack-pages --help
 Auth options:
 
 ```sh
+# Browser device-code login (default — opens consent page, picks workspace):
+vpg login --base-url https://pages.example.com
+
+# Manual token (CI / headless / agent):
 vpg login --base-url https://pages.example.com --workspace wks_123 --token "$VPG_TOKEN"
 vpg --base-url https://pages.example.com --workspace wks_123 --token "$VPG_TOKEN" whoami
 ```
@@ -21,7 +25,9 @@ The CLI uses standalone VegaStack Pages API routes over HTTP. It does not call M
 ## Account And Workspace
 
 ```sh
-vpg login --token "$VPG_TOKEN" --workspace wks_123
+vpg login                                           # browser device-code flow
+vpg login --no-browser                              # print URL only, don't open browser
+vpg login --token "$VPG_TOKEN" --workspace wks_123  # paste a token (CI / agents)
 vpg logout
 vpg whoami
 vpg workspaces
@@ -29,7 +35,7 @@ vpg use wks_123
 vpg doctor
 ```
 
-`vpg login` stores the token in the OS keychain where available, otherwise in an owner-only local token file. `vpg use` sets the default workspace.
+`vpg login` (no `--token`) starts an RFC 8628 device-code flow against the configured `--base-url`, opens the verification URL in your default browser, and writes the workspace returned by the server. With `--token`, it stores a workspace-scoped manual bearer. Either flow persists the token in the OS keychain where available, otherwise in an owner-only local token file. `vpg use` sets the default workspace. Set `VPG_NO_OPEN=1` to disable the automatic browser launch globally.
 
 ## Page Editing
 

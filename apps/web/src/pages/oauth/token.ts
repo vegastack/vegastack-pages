@@ -186,6 +186,7 @@ async function handleAuthorizationCode(
       expires_in: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
       refresh_token: issued.refreshToken,
       scope: row.scope ?? "mcp",
+      workspace_id: row.workspaceId,
     },
     { status: 200, headers: corsHeaders },
   );
@@ -327,6 +328,7 @@ async function handleDeviceCode(
       expires_in: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
       refresh_token: issued.refreshToken,
       scope: row.scope ?? "mcp",
+      workspace_id: row.workspaceId,
     },
     { status: 200, headers: corsHeaders },
   );

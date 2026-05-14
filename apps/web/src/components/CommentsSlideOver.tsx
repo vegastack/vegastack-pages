@@ -15,18 +15,23 @@ type CommentsRailProps = {
   guestNameRequired?: boolean;
   currentUserName?: string;
   initialThreads?: ThreadPayload[];
+  initialExpanded?: boolean;
 };
 
 type TabKey = "open" | "resolved" | "all";
 const RAIL_STORAGE_KEY = "vpg_comments_rail_expanded";
+const RAIL_COOKIE_KEY = "vpg_comments_rail";
 
-function initialRailExpanded() {
-  if (typeof window === "undefined") return true;
+function resolveInitialRailExpanded(fallback: boolean) {
+  if (typeof window === "undefined") return fallback;
   try {
-    return window.localStorage.getItem(RAIL_STORAGE_KEY) !== "false";
+    const stored = window.localStorage.getItem(RAIL_STORAGE_KEY);
+    if (stored === "true") return true;
+    if (stored === "false") return false;
   } catch {
-    return true;
+    // localStorage can be unavailable in restricted contexts.
   }
+  return fallback;
 }
 
 function persistRailExpanded(expanded: boolean) {
@@ -34,6 +39,17 @@ function persistRailExpanded(expanded: boolean) {
     window.localStorage.setItem(RAIL_STORAGE_KEY, String(expanded));
   } catch {
     // localStorage can be unavailable in restricted contexts.
+  }
+  try {
+    const value = expanded ? "open" : "collapsed";
+    document.cookie = `${RAIL_COOKIE_KEY}=${value}; path=/; max-age=31536000; samesite=lax`;
+  } catch {
+    // document.cookie can throw in sandboxed contexts.
+  }
+  if (typeof document !== "undefined") {
+    document.documentElement.dataset.commentsRail = expanded
+      ? "open"
+      : "collapsed";
   }
 }
 
@@ -49,8 +65,11 @@ export function CommentsRail({
   guestNameRequired = false,
   currentUserName,
   initialThreads,
+  initialExpanded = true,
 }: CommentsRailProps) {
-  const [expanded, setExpanded] = useState(initialRailExpanded);
+  const [expanded, setExpanded] = useState(() =>
+    resolveInitialRailExpanded(initialExpanded),
+  );
   const [tab, setTab] = useState<TabKey>("open");
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [stats, setStats] = useState<ThreadStats>({
@@ -76,6 +95,14 @@ export function CommentsRail({
       return next;
     });
   }
+
+  useEffect(() => {
+    // Sync cookie + root attribute on mount so SSR on the next navigation
+    // matches the persisted state. Cheap idempotent write.
+    persistRailExpanded(expanded);
+    // Intentionally runs once; persistence on later toggles is handled inline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     function onOpenComments(event: Event) {

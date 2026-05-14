@@ -26,6 +26,15 @@
   display: none;
 }
 
+/* Pre-paint fallback for legacy clients that have localStorage but no cookie:
+   SSR may emit the expanded branch but the inline script knows the user wants
+   it collapsed. Hide the SSR'd expanded chrome until React hydrates and
+   re-renders into the collapsed branch. */
+:root[data-comments-rail="collapsed"] .comments-rail .comments-rail-header,
+:root[data-comments-rail="collapsed"] .comments-rail .comments-rail-body {
+  display: none;
+}
+
 @media (min-width: 1180px) {
   .comments-rail {
     display: block;

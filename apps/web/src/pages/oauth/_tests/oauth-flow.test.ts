@@ -814,6 +814,58 @@ describe("Device authorization grant", () => {
     } as never);
     expect(reuse.status).toBe(400);
   }, 15_000);
+
+  it("accepts the well-known vpg-cli client_id without registration and returns workspace_id", async () => {
+    const { workspace, user } = await seedWorkspaceAndUser();
+    const deviceResp = await devicePost({
+      request: new Request("https://pages.example.test/oauth/device", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "oac_vpg_cli",
+          scope: "mcp",
+        }).toString(),
+      }),
+    } as never);
+    expect(deviceResp.status).toBe(200);
+    const device = (await deviceResp.json()) as {
+      device_code: string;
+      user_code: string;
+      interval: number;
+    };
+
+    const { approveDeviceCode } = await import("../../../lib/oauth/codes");
+    expect(
+      await approveDeviceCode({
+        userCode: device.user_code,
+        userId: user.id,
+        workspaceId: workspace.id,
+      }),
+    ).toBe(true);
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, (device.interval + 1) * 1000),
+    );
+    const granted = await tokenPost({
+      request: new Request("https://pages.example.test/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: device.device_code,
+          client_id: "oac_vpg_cli",
+        }).toString(),
+      }),
+    } as never);
+    expect(granted.status).toBe(200);
+    const body = (await granted.json()) as {
+      access_token: string;
+      refresh_token: string;
+      workspace_id: string;
+    };
+    expect(body.access_token).toMatch(/^mcp_/);
+    expect(body.workspace_id).toBe(workspace.id);
+  }, 15_000);
 });
 
 describe("Authorize GET flow", () => {

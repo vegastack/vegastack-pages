@@ -13,6 +13,7 @@ import {
   DELETE as removeMember,
   PATCH as updateMember,
 } from "../[workspaceId]/members/[memberId]";
+import { POST as leaveWorkspaceRoute } from "../[workspaceId]/leave";
 import { GET as listWorkspaces, POST as createWorkspace } from "../index";
 import {
   authService,
@@ -404,6 +405,84 @@ describe("workspace invite and member routes", () => {
       ),
     } as never);
     expect(selfRemoval.status).toBe(400);
+  });
+
+  it("allows a member to edit their own display name without admin permission", async () => {
+    const fixture = await createWorkspaceFixture({ memberRole: "reader" });
+    const response = await updateMember({
+      cookies: fixture.cookies,
+      params: {
+        workspaceId: fixture.workspace.id,
+        memberId: fixture.member.id,
+      },
+      request: jsonRequest(
+        `${workspacePath(fixture.workspace.id, "/members")}/${fixture.member.id}`,
+        { role: "reader", display_name: "Renamed Self" },
+        { method: "PATCH" },
+      ),
+    } as never);
+    const body = (await response.json()) as {
+      member: { user: { displayName: string }; role: string };
+    };
+    expect(response.status).toBe(200);
+    expect(body.member.user.displayName).toBe("Renamed Self");
+    expect(body.member.role).toBe("reader");
+  });
+
+  it("lets a member leave a workspace and revokes grants and MCP sessions", async () => {
+    const owner = await createWorkspaceFixture();
+    const leavingEmail = `leaver-${crypto.randomUUID()}@example.test`;
+    const invite = await inviteMember({
+      cookies: owner.cookies,
+      params: { workspaceId: owner.workspace.id },
+      request: jsonRequest(workspacePath(owner.workspace.id, "/invites"), {
+        email: leavingEmail,
+        display_name: "Leaving User",
+        role: "editor",
+        send_magic_link: false,
+      }),
+      url: new URL(
+        `https://pages.example.test${workspacePath(owner.workspace.id, "/invites")}`,
+      ),
+    } as never);
+    const invited = (await invite.json()) as {
+      user: { id: string };
+      member: { id: string };
+    };
+    expect(invite.status).toBe(200);
+
+    permissionService.setGrant({
+      workspaceId: owner.workspace.id,
+      subjectId: invited.user.id,
+      scope: "workspace",
+      targetId: owner.workspace.id,
+      level: "write",
+    });
+    const leavingSession = authService.createSession(invited.user.id);
+
+    const leaveResponse = await leaveWorkspaceRoute({
+      cookies: sessionCookies(leavingSession.id),
+      params: { workspaceId: owner.workspace.id },
+      request: jsonRequest(workspacePath(owner.workspace.id, "/leave"), {}),
+    } as never);
+    const leaveBody = (await leaveResponse.json()) as {
+      removed_grants: number;
+    };
+    expect(leaveResponse.status).toBe(200);
+    expect(leaveBody.removed_grants).toBe(1);
+    expect(
+      workspaceService.getMember(owner.workspace.id, invited.user.id),
+    ).toBeNull();
+  });
+
+  it("blocks the last admin from leaving the workspace", async () => {
+    const { workspace, cookies } = await createWorkspaceFixture();
+    const response = await leaveWorkspaceRoute({
+      cookies,
+      params: { workspaceId: workspace.id },
+      request: jsonRequest(workspacePath(workspace.id, "/leave"), {}),
+    } as never);
+    expect(response.status).toBe(400);
   });
 });
 

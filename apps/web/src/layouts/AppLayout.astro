@@ -35,15 +35,19 @@ const canonicalUrl = canonicalPath
     />
     <meta name="robots" content={robots} />
     <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="VegaStack Pages" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
+    <meta property="og:image" content={`${baseUrl}/favicon.svg`} />
     {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={`${baseUrl}/favicon.svg`} />
 
     <script is:inline>
       (() => {
@@ -55,6 +59,34 @@ const canonicalUrl = canonicalPath
         if (document.documentElement.dataset.theme !== theme) {
           document.documentElement.dataset.theme = theme;
         }
+      })();
+    </script>
+
+    <script is:inline>
+      // Pre-paint: pick the comments-rail width before first paint so the
+      // shell grid track and rail visuals match the user's persisted choice.
+      // Reads localStorage first, then falls back to the cookie SSR also reads.
+      (() => {
+        let collapsed = false;
+        try {
+          const stored = window.localStorage.getItem(
+            "vpg_comments_rail_expanded",
+          );
+          if (stored === "false") collapsed = true;
+          else if (stored !== "true") {
+            const prefix = "vpg_comments_rail=";
+            const part = document.cookie
+              .split(";")
+              .map((p) => p.trim())
+              .find((p) => p.startsWith(prefix));
+            if (part && part.slice(prefix.length) === "collapsed") {
+              collapsed = true;
+            }
+          }
+        } catch {}
+        document.documentElement.dataset.commentsRail = collapsed
+          ? "collapsed"
+          : "open";
       })();
     </script>
 
@@ -95,22 +127,44 @@ const canonicalUrl = canonicalPath
           }
         };
         const nativeFetch = window.fetch.bind(window);
-        window.fetch = (input, init = {}) => {
-          const method = String(
-            init.method ?? (input instanceof Request ? input.method : "GET"),
-          ).toUpperCase();
-          const token =
-            unsafe.has(method) && sameOriginUrl(input)
-              ? readCookie("vpg_csrf")
-              : "";
-          if (!token) return nativeFetch(input, init);
+        let mintInFlight = null;
+        const mintCsrfCookie = () => {
+          if (mintInFlight) return mintInFlight;
+          mintInFlight = nativeFetch("/api/csrf", {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+          })
+            .catch(() => undefined)
+            .finally(() => {
+              mintInFlight = null;
+            });
+          return mintInFlight;
+        };
+        const withCsrfHeader = (init, input, token) => {
           const headers = new Headers(
             init.headers ??
               (input instanceof Request ? input.headers : undefined),
           );
           if (!headers.has("x-vpg-csrf-token"))
             headers.set("x-vpg-csrf-token", token);
-          return nativeFetch(input, { ...init, headers });
+          return { ...init, headers };
+        };
+        window.fetch = async (input, init = {}) => {
+          const method = String(
+            init.method ?? (input instanceof Request ? input.method : "GET"),
+          ).toUpperCase();
+          if (!unsafe.has(method) || !sameOriginUrl(input)) {
+            return nativeFetch(input, init);
+          }
+          let token = readCookie("vpg_csrf");
+          if (!token) {
+            // Cookie was wiped or never seeded for this tab — mint one and retry.
+            await mintCsrfCookie();
+            token = readCookie("vpg_csrf");
+          }
+          if (!token) return nativeFetch(input, init);
+          return nativeFetch(input, withCsrfHeader(init, input, token));
         };
       })();
     </script>

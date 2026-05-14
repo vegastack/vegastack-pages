@@ -70,13 +70,21 @@ function assertCanChangeMember(input: {
   action: "update" | "remove";
 }) {
   if (input.target.userId === input.actorUserId) {
-    throw new AppError(
-      "VALIDATION_ERROR",
-      input.action === "remove"
-        ? "You cannot remove yourself from the workspace."
-        : "Use another workspace admin to change your own role.",
-      400,
-    );
+    if (input.action === "remove") {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "You cannot remove yourself from the workspace.",
+        400,
+      );
+    }
+    if (input.nextRole !== input.target.role) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "Use another workspace admin to change your own role.",
+        400,
+      );
+    }
+    return;
   }
 
   const removesAdmin =
@@ -91,11 +99,45 @@ function assertCanChangeMember(input: {
   }
 }
 
+async function resolveActorForUpdate(
+  cookies: Parameters<typeof getApiRequestActor>[0],
+  request: Request,
+  workspaceId: string,
+  target: NonNullable<ReturnType<typeof workspaceService.getMemberById>>,
+  nextRole: WorkspaceRole,
+) {
+  const actor = await getApiRequestActor(cookies, request);
+  const workspace = workspaceService.getWorkspace(workspaceId);
+  if (!workspace)
+    throw new AppError("WORKSPACE_NOT_FOUND", "Workspace was not found.", 404, {
+      parameter: "workspaceId",
+      location: "path",
+    });
+  // Self-edits that don't change role are allowed for any workspace member —
+  // editing your own display name is a profile change, not a privileged action.
+  const isSelfNameOnly =
+    target.userId === actor.user?.id && nextRole === target.role;
+  if (isSelfNameOnly) return actor;
+
+  const member = actor.user
+    ? workspaceService.getMember(workspaceId, actor.user.id)
+    : null;
+  const permission =
+    actor.workspaceId && actor.workspaceId !== workspaceId
+      ? "none"
+      : permissionService.resolve({
+          user: actor.user,
+          member,
+          workspaceId,
+        });
+  permissionService.assert({ actual: permission, required: "admin" });
+  return actor;
+}
+
 export const PATCH: APIRoute = async ({ cookies, params, request }) => {
   try {
     await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    const actor = await assertWorkspaceAdmin(cookies, request, workspaceId);
     const target = workspaceService.getMemberById(params.memberId ?? "");
     if (!target || target.workspaceId !== workspaceId) {
       throw new AppError(
@@ -106,6 +148,13 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
     }
     const body = await request.json();
     const role = coerceRole(body.role);
+    const actor = await resolveActorForUpdate(
+      cookies,
+      request,
+      workspaceId,
+      target,
+      role,
+    );
     assertCanChangeMember({
       actorUserId: actor.user?.id,
       workspaceId,

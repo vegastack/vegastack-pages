@@ -74,9 +74,15 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Sign in to VegaStack Pages. With no flags, opens a browser via RFC 8628
+    /// device-code; with `--token`, stores the provided workspace token.
     Login {
+        /// Use a pasted workspace-scoped token instead of the browser flow.
         #[arg(long, env = "VPG_TOKEN")]
         token: Option<String>,
+        /// Skip the automatic browser launch (still prints the URL).
+        #[arg(long)]
+        no_browser: bool,
     },
     Logout,
     Whoami,
@@ -1312,6 +1318,268 @@ fn remove_stored_token() -> Result<PathBuf, String> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// RFC 8628 device-code login flow.
+//
+// Server side (apps/web/src/pages/oauth/device.ts + token.ts) is workspace-
+// aware: the verification page asks the user to pick a workspace, and the
+// token-issuance response returns `workspace_id` alongside the access token.
+// That lets the CLI store the workspace without an extra round-trip.
+// ---------------------------------------------------------------------------
+
+const VPG_CLI_CLIENT_ID: &str = "oac_vpg_cli";
+const DEVICE_MIN_POLL_INTERVAL_S: u64 = 5;
+const DEVICE_DEFAULT_EXPIRES_S: u64 = 600;
+const DEVICE_SLOW_DOWN_BUMP_S: u64 = 5;
+
+#[derive(Debug, Deserialize)]
+struct DeviceAuthResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    verification_uri_complete: Option<String>,
+    #[serde(default = "default_device_expires")]
+    expires_in: u64,
+    #[serde(default = "default_device_interval")]
+    interval: u64,
+}
+
+fn default_device_expires() -> u64 {
+    DEVICE_DEFAULT_EXPIRES_S
+}
+
+fn default_device_interval() -> u64 {
+    DEVICE_MIN_POLL_INTERVAL_S
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceTokenSuccess {
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    expires_in: Option<u64>,
+    #[serde(default)]
+    workspace_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OAuthErrorBody {
+    error: String,
+    #[serde(default)]
+    error_description: Option<String>,
+}
+
+fn device_authorize(client: &Client, base_url: &str) -> Result<DeviceAuthResponse, String> {
+    let url = format!("{}/oauth/device", base_url.trim_end_matches('/'));
+    let response = client
+        .post(&url)
+        .header(CONTENT_TYPE, "application/json")
+        .json(&json!({
+            "client_id": VPG_CLI_CLIENT_ID,
+            "scope": "mcp",
+        }))
+        .send()
+        .map_err(|error| format!("device authorization request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body: OAuthErrorBody = response
+            .json()
+            .unwrap_or(OAuthErrorBody {
+                error: "server_error".to_string(),
+                error_description: Some(format!("HTTP {status}")),
+            });
+        return Err(format!(
+            "device authorization failed ({}): {}",
+            body.error,
+            body.error_description
+                .unwrap_or_else(|| "no description".to_string()),
+        ));
+    }
+    response
+        .json::<DeviceAuthResponse>()
+        .map_err(|error| format!("device authorization response was not valid JSON: {error}"))
+}
+
+fn poll_device_token(
+    client: &Client,
+    base_url: &str,
+    device_code: &str,
+    initial_interval_s: u64,
+    expires_in_s: u64,
+) -> Result<DeviceTokenSuccess, String> {
+    let url = format!("{}/oauth/token", base_url.trim_end_matches('/'));
+    let deadline = Instant::now() + Duration::from_secs(expires_in_s);
+    let mut interval_s = initial_interval_s.max(DEVICE_MIN_POLL_INTERVAL_S);
+    loop {
+        if Instant::now() >= deadline {
+            return Err(
+                "device code expired before authorization completed. Run `vpg login` again."
+                    .to_string(),
+            );
+        }
+        thread::sleep(Duration::from_secs(interval_s));
+        // Use JSON instead of application/x-www-form-urlencoded so the request
+        // is not treated as a cross-site form POST by Astro's built-in CSRF
+        // protection on adapter=node. Both content types are accepted by
+        // apps/web/src/pages/oauth/token.ts; JSON works against every adapter.
+        let response = client
+            .post(&url)
+            .json(&json!({
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code,
+                "client_id": VPG_CLI_CLIENT_ID,
+            }))
+            .send()
+            .map_err(|error| format!("device token poll failed: {error}"))?;
+        let status = response.status();
+        if status.is_success() {
+            return response
+                .json::<DeviceTokenSuccess>()
+                .map_err(|error| format!("device token response was not valid JSON: {error}"));
+        }
+        let body: OAuthErrorBody = response.json().unwrap_or(OAuthErrorBody {
+            error: "server_error".to_string(),
+            error_description: Some(format!("HTTP {status}")),
+        });
+        match body.error.as_str() {
+            "authorization_pending" => {
+                // Keep polling at the current interval.
+            }
+            "slow_down" => {
+                interval_s = interval_s.saturating_add(DEVICE_SLOW_DOWN_BUMP_S);
+            }
+            "access_denied" => {
+                return Err(
+                    "authorization denied. Re-run `vpg login` to try again.".to_string(),
+                );
+            }
+            "expired_token" => {
+                return Err(
+                    "device code expired before authorization completed. Run `vpg login` again."
+                        .to_string(),
+                );
+            }
+            other => {
+                return Err(format!(
+                    "device token error ({}): {}",
+                    other,
+                    body.error_description
+                        .unwrap_or_else(|| "no description".to_string())
+                ));
+            }
+        }
+    }
+}
+
+fn try_open_browser(url: &str) -> bool {
+    if env::var("VPG_NO_OPEN").is_ok() {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    let opener = ("open", &[url][..]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opener = ("xdg-open", &[url][..]);
+    #[cfg(target_os = "windows")]
+    let opener = ("cmd", &["/C", "start", "", url][..]);
+    #[cfg(not(any(target_os = "macos", unix, target_os = "windows")))]
+    {
+        let _ = url;
+        return false;
+    }
+    #[cfg(any(target_os = "macos", unix, target_os = "windows"))]
+    {
+        ProcessCommand::new(opener.0)
+            .args(opener.1)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|mut child| {
+                // Don't wait — the browser may stay attached for a while.
+                let _ = child.try_wait();
+                true
+            })
+            .unwrap_or(false)
+    }
+}
+
+fn run_device_login(cli: &Cli, no_browser: bool) -> Result<Value, String> {
+    let base_url = cli.base_url.trim_end_matches('/').to_string();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("failed to build HTTP client: {error}"))?;
+    let auth = device_authorize(&client, &base_url)?;
+    let visit_url = auth
+        .verification_uri_complete
+        .clone()
+        .unwrap_or_else(|| auth.verification_uri.clone());
+
+    // Human-readable progress goes to stderr so JSON output stays parseable
+    // when scripts pipe stdout.
+    eprintln!();
+    eprintln!("Sign in to VegaStack Pages");
+    eprintln!("──────────────────────────");
+    eprintln!();
+    eprintln!("  1. Open this URL in your browser:");
+    eprintln!("       {visit_url}");
+    eprintln!();
+    eprintln!("  2. Confirm the code matches:");
+    eprintln!("       {}", auth.user_code);
+    eprintln!();
+    eprintln!("  3. Pick a workspace and click Allow.");
+    eprintln!();
+    let opened = if no_browser {
+        false
+    } else {
+        try_open_browser(&visit_url)
+    };
+    if opened {
+        eprintln!("  (Your browser should open automatically. Waiting…)");
+    } else {
+        eprintln!("  (Waiting for authorization in your browser…)");
+    }
+    eprintln!();
+
+    let token = poll_device_token(
+        &client,
+        &base_url,
+        &auth.device_code,
+        auth.interval,
+        auth.expires_in,
+    )?;
+
+    let workspace = token
+        .workspace_id
+        .clone()
+        .or_else(|| cli.workspace.clone())
+        .ok_or_else(|| {
+            "login completed but the server did not return a workspace_id".to_string()
+        })?;
+
+    let token_storage = write_stored_token(&token.access_token)?;
+    let path = update_stored_config(|config| {
+        config.token = None;
+        config.base_url = Some(base_url.clone());
+        config.workspace = Some(workspace.clone());
+    })?;
+
+    eprintln!("✓ Logged in. Workspace: {workspace}");
+    eprintln!();
+
+    Ok(json!({
+        "status": "ok",
+        "message": "Signed in via browser device flow. Use vpg logout to remove the token.",
+        "config": path.display().to_string(),
+        "token_storage": token_storage,
+        "base_url": base_url,
+        "workspace": workspace,
+        "expires_in": token.expires_in,
+        "has_refresh_token": token.refresh_token.is_some(),
+        "flow": "device"
+    }))
+}
+
 fn resolved_workspace(cli: &Cli) -> Result<String, String> {
     cli.workspace
         .clone()
@@ -2325,7 +2593,7 @@ fn run(cli: &Cli) -> Result<Value, String> {
                 dry_run,
             } => install_skill(*agent, *scope, &None, true, *dry_run),
         },
-        Some(Command::Login { token }) => {
+        Some(Command::Login { token, no_browser }) => {
             if let Some(token) = token.as_ref().or(cli.token.as_ref()) {
                 let active_workspace = resolved_workspace(cli)?;
                 let token_storage = write_stored_token(token)?;
@@ -2340,13 +2608,11 @@ fn run(cli: &Cli) -> Result<Value, String> {
                     "config": path.display().to_string(),
                     "token_storage": token_storage,
                     "base_url": cli.base_url,
-                    "workspace": active_workspace
+                    "workspace": active_workspace,
+                    "flow": "manual"
                 }))
             } else {
-                Ok(json!({
-                    "status": "manual_step_required",
-                    "message": "Create or copy a workspace-scoped token from VegaStack Pages, then run: vpg login --token <token>. VPG_TOKEN and --token still work for one-off non-interactive runs."
-                }))
+                run_device_login(cli, *no_browser)
             }
         }
         Some(Command::Logout) => {
@@ -2682,6 +2948,39 @@ mod tests {
             default_title(&Some("plans/api-review.md".to_string()), &None),
             "api review"
         );
+    }
+
+    #[test]
+    fn device_auth_response_defaults_apply_when_server_omits_them() {
+        // The server is required to send expires_in + interval, but a robust
+        // client should fall back if a deployment ever forgets.
+        let body = r#"{
+            "device_code": "abc",
+            "user_code": "AAAA-BBBB",
+            "verification_uri": "https://example.test/oauth/device/verify"
+        }"#;
+        let parsed: DeviceAuthResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(parsed.device_code, "abc");
+        assert_eq!(parsed.user_code, "AAAA-BBBB");
+        assert_eq!(parsed.expires_in, DEVICE_DEFAULT_EXPIRES_S);
+        assert_eq!(parsed.interval, DEVICE_MIN_POLL_INTERVAL_S);
+        assert!(parsed.verification_uri_complete.is_none());
+    }
+
+    #[test]
+    fn device_token_success_extracts_workspace_id_when_server_returns_it() {
+        let body = r#"{
+            "access_token": "mcp_abc",
+            "refresh_token": "mcp_def",
+            "expires_in": 3600,
+            "workspace_id": "wks_42",
+            "scope": "mcp"
+        }"#;
+        let parsed: DeviceTokenSuccess = serde_json::from_str(body).unwrap();
+        assert_eq!(parsed.access_token, "mcp_abc");
+        assert_eq!(parsed.refresh_token.as_deref(), Some("mcp_def"));
+        assert_eq!(parsed.workspace_id.as_deref(), Some("wks_42"));
+        assert_eq!(parsed.expires_in, Some(3600));
     }
 
     #[test]

@@ -83,6 +83,8 @@ const pageAccess =
 const canExportSource = hasPermission(pageAccess.permission, "write");
 const canWrite = hasPermission(pageAccess.permission, "write");
 const canComment = hasPermission(pageAccess.permission, "comment");
+const commentsRailInitialExpanded =
+  Astro.cookies.get("vpg_comments_rail")?.value !== "collapsed";
 const canManageAccess = hasPermission(pageAccess.permission, "admin");
 const isPublicPublication = Boolean(
   passwordPrompt || (pageAccess.publicationId && !pageAccess.actor.user),
@@ -1154,6 +1156,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                 guestNameRequired={pageAccess.guestNameRequired}
                 currentUserName={sidebarUser.displayName}
                 initialThreads={initialThreads}
+                initialExpanded={commentsRailInitialExpanded}
               />
             )}
           </div>

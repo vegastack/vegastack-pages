@@ -160,8 +160,8 @@ Auth:
 - 401 emits `WWW-Authenticate: Bearer realm="VegaStack Pages MCP", resource_metadata="<origin>/.well-known/oauth-protected-resource", error="invalid_token"` so MCP 2025-06-18 clients self-onboard.
 - Three flows, one storage shape:
   - **OAuth 2.1 + PKCE** for browser MCP clients via `/.well-known/oauth-protected-resource` (RFC 9728), `/.well-known/oauth-authorization-server` (RFC 8414), `/oauth/register` (RFC 7591 public-client DCR, PKCE S256 mandatory), `/oauth/authorize` + `/oauth/authorize/consent`, `/oauth/token` (1h access, 60d refresh, refresh rotation), `/oauth/revoke` (RFC 7009), `/oauth/device` + `/oauth/device/verify` (RFC 8628).
-  - **Manual bearer** issued from **Settings → Sessions** by a workspace member (creator owns it; admin can revoke any).
-  - **CLI login** via `vpg login --token`, stored in OS keychain (file fallback).
+  - **`vpg` CLI device-code (default `vpg login`)** uses the well-known client `oac_vpg_cli` baked into the server (no dynamic registration round-trip) and POSTs to `/oauth/device`, prints/opens the verification URL, polls `/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` until the user picks a workspace and clicks Allow. Token response includes a non-standard `workspace_id` field so the CLI persists the workspace without an extra call. Sessions appear with `kind=oauth`.
+  - **Manual bearer** issued from **Settings → Sessions** by a workspace member (creator owns it; admin can revoke any). Used by `vpg login --token`, `VPG_TOKEN`, and `--token` per-call. Sessions appear with `kind=cli` when stored via the CLI, `kind=manual` when used directly.
 - Static bearer-token fallback (`VPG_MCP_TOKEN`) is local/debug only and stays disabled in production unless `VPG_ALLOW_STATIC_MCP_TOKEN=true`.
 - Every issued token lives in `mcp_sessions` with `agent_sessions.kind ∈ {manual, cli, oauth}`. `Settings → Sessions` reads from the same table.
 

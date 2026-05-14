@@ -15,6 +15,26 @@ export type OAuthClientRow = {
 
 const fallbackClients = new Map<string, OAuthClientRow>();
 
+// Well-known client_id used by the @vegastack/pages CLI ("vpg") for the
+// RFC 8628 device-code login flow. It is shipped baked into the binary so
+// `vpg login` works against any VegaStack Pages deployment without a
+// dynamic-registration round-trip. Public client (no secret), no redirect
+// URIs (device flow has no browser callback), token_endpoint_auth_method=none.
+export const VPG_CLI_CLIENT_ID = "oac_vpg_cli";
+
+const VPG_CLI_CLIENT: OAuthClientRow = {
+  id: VPG_CLI_CLIENT_ID,
+  clientName: "VegaStack Pages CLI (vpg)",
+  redirectUris: [],
+  softwareId: "vpg-cli",
+  softwareVersion: null,
+  tokenEndpointAuthMethod: "none",
+  registeredUserAgent: null,
+  registeredIp: null,
+  createdAt: "1970-01-01T00:00:00.000Z",
+  updatedAt: "1970-01-01T00:00:00.000Z",
+};
+
 type StoredRow = Omit<OAuthClientRow, "redirectUris"> & {
   redirectUrisJson: string;
 };
@@ -169,6 +189,7 @@ export async function getOAuthClient(
   clientId: string,
 ): Promise<OAuthClientRow | null> {
   if (!clientId) return null;
+  if (clientId === VPG_CLI_CLIENT_ID) return VPG_CLI_CLIENT;
   await ensureRuntimeReady();
   if (runtimeIsD1()) {
     const rows = await d1All<StoredRow>(

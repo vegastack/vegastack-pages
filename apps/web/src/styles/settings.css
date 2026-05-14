@@ -834,14 +834,13 @@
 }
 
 .members-manager {
-  display: block;
+  display: grid;
+  gap: var(--space-md);
 }
 
-.members-table-toolbar {
+.members-toolbar {
   display: flex;
-  justify-content: flex-end;
-  padding: var(--space-sm) var(--space-lg);
-  border-bottom: var(--vsk-line);
+  justify-content: flex-start;
 }
 
 .members-search {
@@ -932,11 +931,6 @@
   color: var(--vsk-muted);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
-}
-
-.member-role-cell {
-  display: block;
-  min-width: 0;
 }
 
 .member-role-cell .settings-inline-select {

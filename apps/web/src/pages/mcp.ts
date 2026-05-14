@@ -116,9 +116,11 @@ type McpActor = {
 
 const MCP_CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, GET, HEAD, OPTIONS",
   "Access-Control-Allow-Headers":
     "authorization, content-type, mcp-protocol-version, mcp-session-id",
+  "Access-Control-Expose-Headers":
+    "mcp-protocol-version, mcp-session-id, www-authenticate",
   "Access-Control-Max-Age": "86400",
 } as const;
 
@@ -126,11 +128,22 @@ function withMcpCors(response: Response): Response {
   for (const [key, value] of Object.entries(MCP_CORS_HEADERS)) {
     if (!response.headers.has(key)) response.headers.set(key, value);
   }
+  if (!response.headers.has("MCP-Protocol-Version")) {
+    response.headers.set("MCP-Protocol-Version", protocolVersion);
+  }
   return response;
 }
 
 export const OPTIONS: APIRoute = () =>
   new Response(null, { status: 204, headers: MCP_CORS_HEADERS });
+
+export const HEAD: APIRoute = () =>
+  withMcpCors(
+    new Response(null, {
+      status: 200,
+      headers: { Allow: "POST, GET, HEAD, OPTIONS" },
+    }),
+  );
 
 export const GET: APIRoute = () => {
   return withMcpCors(
@@ -142,7 +155,7 @@ export const GET: APIRoute = () => {
             "VegaStack Pages MCP uses Streamable HTTP POST requests at this endpoint.",
         },
       },
-      { status: 405, headers: { Allow: "POST" } },
+      { status: 405, headers: { Allow: "POST, GET, HEAD, OPTIONS" } },
     ),
   );
 };

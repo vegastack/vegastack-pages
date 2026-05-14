@@ -7,6 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { VegaStackMark } from "./VegaStackMark";
 
 type Workspace = { id: string; name: string; slug: string };
 
@@ -27,20 +28,19 @@ function initialsOf(name: string) {
 }
 
 /**
- * Compact workspace switcher for the sidebar head. Shows the workspace
- * mark + name on a single line; opens a dropdown when there are multiple
- * workspaces so the user can switch. No "X pages" meta line — the tree
- * itself conveys workspace size.
+ * Compact workspace switcher for the sidebar head. Shows the VegaStack
+ * brand mark + workspace name on a single line; opens a dropdown when
+ * there are multiple workspaces so the user can switch. Per-workspace
+ * initials still appear inside the dropdown so workspaces remain
+ * distinguishable; the trigger uses the brand so the app shell carries a
+ * consistent VegaStack identity.
  */
 export function SidebarWorkspace({ current, workspaces }: Props) {
-  const initials = initialsOf(current.name);
   const hasOthers = workspaces.length > 1;
 
   const Inner = (
     <>
-      <span className="vpg-sidebar-workspace-mark" aria-hidden="true">
-        {initials}
-      </span>
+      <VegaStackMark className="vpg-sidebar-workspace-mark" />
       <span className="vpg-sidebar-workspace-name">{current.name}</span>
       {hasOthers ? (
         <ChevronsUpDown

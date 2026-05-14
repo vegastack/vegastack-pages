@@ -1,4 +1,4 @@
-import { Search, Trash2, UserRoundPen } from "lucide-react";
+import { LogOut, Search, Trash2, UserRoundPen } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { WorkspaceRole } from "@vegastack/pages-core";
@@ -75,6 +75,7 @@ export function WorkspaceMembersManager({
   const [pendingRoleChange, setPendingRoleChange] =
     useState<PendingRoleChange | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<MemberRow | null>(null);
+  const [pendingLeave, setPendingLeave] = useState<MemberRow | null>(null);
   const [pendingEdit, setPendingEdit] = useState<MemberRow | null>(null);
   const [editDisplayName, setEditDisplayName] = useState("");
 
@@ -118,20 +119,12 @@ export function WorkspaceMembersManager({
   }
 
   function requestMemberEdit(member: MemberRow) {
-    if (isCurrentMember(member)) {
-      toast.error("Use profile settings to change your own name.");
-      return;
-    }
     setEditDisplayName(member.user?.displayName ?? "");
     setPendingEdit(member);
   }
 
   async function saveMemberEdit() {
     if (!pendingEdit) return;
-    if (isCurrentMember(pendingEdit)) {
-      toast.error("Use profile settings to change your own name.");
-      return;
-    }
 
     setBusyMemberId(pendingEdit.id);
     try {
@@ -211,6 +204,36 @@ export function WorkspaceMembersManager({
     void commitRole(member, role);
   }
 
+  async function leaveWorkspace(member: MemberRow) {
+    if (!isCurrentMember(member)) return;
+    if (isLastAdmin(member)) {
+      toast.error(
+        "Promote another admin before leaving — a workspace must keep at least one admin.",
+      );
+      return;
+    }
+    setBusyMemberId(member.id);
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/leave`, {
+        method: "POST",
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          payload?.error?.message ?? "Could not leave the workspace.",
+        );
+      }
+      toast.success("You left the workspace.");
+      window.location.assign("/app");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Leaving workspace failed.",
+      );
+      setBusyMemberId(null);
+      setPendingLeave(null);
+    }
+  }
+
   async function removeMember(member: MemberRow) {
     if (isCurrentMember(member)) {
       toast.error("You cannot remove yourself from the workspace.");
@@ -260,11 +283,8 @@ export function WorkspaceMembersManager({
   }
 
   return (
-    <section
-      className="settings-card settings-card-table members-manager"
-      aria-label="Workspace members"
-    >
-      <div className="members-table-toolbar">
+    <div className="members-manager">
+      <div className="members-toolbar">
         <label className="members-search">
           <Search size={15} aria-hidden="true" />
           <span className="sr-only">Search members</span>
@@ -277,137 +297,156 @@ export function WorkspaceMembersManager({
         </label>
       </div>
 
-      <div className="settings-table-wrap">
-        <table className="settings-table members-table" aria-label="Members">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th className="settings-cell-fit">Role</th>
-              <th className="settings-actions-cell" aria-label="Actions"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredMembers.length === 0 ? (
+      <section
+        className="settings-card settings-card-table"
+        aria-label="Workspace members"
+      >
+        <div className="settings-table-wrap">
+          <table className="settings-table members-table" aria-label="Members">
+            <thead>
               <tr>
-                <td colSpan={3}>
-                  <div className="settings-empty" role="status">
-                    <div className="settings-empty-glyph" aria-hidden="true">
-                      <UserRoundPen size={18} aria-hidden="true" />
-                    </div>
-                    <p>
-                      <strong>No matching members</strong>
-                      Adjust the search or invite a teammate.
-                    </p>
-                  </div>
-                </td>
+                <th>Member</th>
+                <th className="settings-cell-fit">Role</th>
+                <th className="settings-actions-cell" aria-label="Actions"></th>
               </tr>
-            ) : (
-              filteredMembers.map((member) => {
-                const current = isCurrentMember(member);
-                const lastAdmin = isLastAdmin(member);
-                const busy = busyMemberId === member.id;
-                const roleLocked = current || lastAdmin;
-                const removeLocked = current || lastAdmin;
-                return (
-                  <tr data-pending={busy ? "true" : undefined} key={member.id}>
-                    <td>
-                      <div className="member-identity">
-                        <span className="member-avatar" aria-hidden="true">
-                          {memberName(member).slice(0, 1).toUpperCase()}
-                        </span>
-                        <div>
-                          <div className="member-name-line">
-                            <strong>{memberName(member)}</strong>
-                            {current ? (
-                              <span className="member-pill">You</span>
-                            ) : null}
-                          </div>
-                          <span>{memberEmail(member)}</span>
-                        </div>
+            </thead>
+            <tbody>
+              {filteredMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={3}>
+                    <div className="settings-empty" role="status">
+                      <div className="settings-empty-glyph" aria-hidden="true">
+                        <UserRoundPen size={18} aria-hidden="true" />
                       </div>
-                    </td>
-                    <td className="member-role-cell settings-cell-fit">
-                      <Select
-                        value={member.role}
-                        disabled={roleLocked || busy}
-                        onValueChange={(value) =>
-                          requestRoleChange(member, value as WorkspaceRole)
-                        }
-                      >
-                        <SelectTrigger
-                          className="settings-inline-select"
-                          aria-label={`Role for ${memberEmail(member)}`}
-                          title={
-                            current
-                              ? "Use another admin to change your role."
-                              : lastAdmin
-                                ? "A workspace must keep at least one admin."
-                                : roleDescriptions[member.role]
+                      <p>
+                        <strong>No matching members</strong>
+                        Adjust the search or invite a teammate.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredMembers.map((member) => {
+                  const current = isCurrentMember(member);
+                  const lastAdmin = isLastAdmin(member);
+                  const busy = busyMemberId === member.id;
+                  const roleLocked = current || lastAdmin;
+                  const removeLocked = lastAdmin;
+                  return (
+                    <tr
+                      data-pending={busy ? "true" : undefined}
+                      key={member.id}
+                    >
+                      <td>
+                        <div className="member-identity">
+                          <span className="member-avatar" aria-hidden="true">
+                            {memberName(member).slice(0, 1).toUpperCase()}
+                          </span>
+                          <div>
+                            <div className="member-name-line">
+                              <strong>{memberName(member)}</strong>
+                              {current ? (
+                                <span className="member-pill">You</span>
+                              ) : null}
+                            </div>
+                            <span>{memberEmail(member)}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="member-role-cell settings-cell-fit">
+                        <Select
+                          value={member.role}
+                          disabled={roleLocked || busy}
+                          onValueChange={(value) =>
+                            requestRoleChange(member, value as WorkspaceRole)
                           }
                         >
-                          {/* Render the label directly. Radix's SelectValue only
+                          <SelectTrigger
+                            className="settings-inline-select"
+                            aria-label={`Role for ${memberEmail(member)}`}
+                            title={
+                              current
+                                ? "Use another admin to change your role."
+                                : lastAdmin
+                                  ? "A workspace must keep at least one admin."
+                                  : roleDescriptions[member.role]
+                            }
+                          >
+                            {/* Render the label directly. Radix's SelectValue only
                               populates from ItemText after the dropdown's portal
                               has mounted at least once, which never happens for
                               locked rows (disabled trigger). Showing the label
                               inline guarantees it's visible in every state. */}
-                          <SelectValue placeholder={roleLabels[member.role]}>
-                            {roleLabels[member.role]}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {roles.map((role) => (
-                            <SelectItem
-                              key={role}
-                              value={role}
-                              title={roleDescriptions[role]}
+                            <SelectValue placeholder={roleLabels[member.role]}>
+                              {roleLabels[member.role]}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {roles.map((role) => (
+                              <SelectItem
+                                key={role}
+                                value={role}
+                                title={roleDescriptions[role]}
+                              >
+                                {roleLabels[role]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="settings-actions-cell">
+                        <div className="settings-row-actions-group">
+                          <button
+                            aria-label={`Edit ${memberEmail(member)}`}
+                            className="settings-row-action"
+                            disabled={busy}
+                            onClick={() => requestMemberEdit(member)}
+                            title="Edit member"
+                            type="button"
+                          >
+                            <UserRoundPen aria-hidden="true" />
+                          </button>
+                          {current ? (
+                            <button
+                              aria-label="Leave workspace"
+                              className="settings-row-action danger"
+                              disabled={lastAdmin || busy}
+                              onClick={() => setPendingLeave(member)}
+                              title={
+                                lastAdmin
+                                  ? "Promote another admin before leaving."
+                                  : "Leave workspace"
+                              }
+                              type="button"
                             >
-                              {roleLabels[role]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="settings-actions-cell">
-                      <div className="settings-row-actions-group">
-                        <button
-                          aria-label={`Edit ${memberEmail(member)}`}
-                          className="settings-row-action"
-                          disabled={current || busy}
-                          onClick={() => requestMemberEdit(member)}
-                          title={
-                            current
-                              ? "Use profile settings to change your own name."
-                              : "Edit member"
-                          }
-                          type="button"
-                        >
-                          <UserRoundPen aria-hidden="true" />
-                        </button>
-                        <button
-                          aria-label={`Remove ${memberEmail(member)}`}
-                          className="settings-row-action danger"
-                          disabled={removeLocked || busy}
-                          onClick={() => setPendingRemoval(member)}
-                          title={
-                            current
-                              ? "You cannot remove yourself."
-                              : lastAdmin
-                                ? "A workspace must keep at least one admin."
-                                : "Remove member"
-                          }
-                          type="button"
-                        >
-                          <Trash2 aria-hidden="true" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                              <LogOut aria-hidden="true" />
+                            </button>
+                          ) : (
+                            <button
+                              aria-label={`Remove ${memberEmail(member)}`}
+                              className="settings-row-action danger"
+                              disabled={removeLocked || busy}
+                              onClick={() => setPendingRemoval(member)}
+                              title={
+                                lastAdmin
+                                  ? "A workspace must keep at least one admin."
+                                  : "Remove member"
+                              }
+                              type="button"
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="members-dialogs">
         <Dialog
@@ -541,7 +580,43 @@ export function WorkspaceMembersManager({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Dialog
+          open={Boolean(pendingLeave)}
+          onOpenChange={(open) => {
+            if (!open) setPendingLeave(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Leave workspace?</DialogTitle>
+              <DialogDescription>
+                You will lose access to this workspace. Explicit page
+                permissions and your MCP sessions for this workspace will be
+                revoked. An admin can re-invite you later.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setPendingLeave(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  if (pendingLeave) void leaveWorkspace(pendingLeave);
+                }}
+              >
+                Leave workspace
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
-    </section>
+    </div>
   );
 }

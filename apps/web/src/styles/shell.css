@@ -523,16 +523,18 @@
 }
 
 .vpg-sidebar-workspace-mark {
-  display: grid;
+  display: inline-grid;
   place-items: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: var(--vsk-radius-control-compact);
-  background: var(--vsk-text-on-bg-hover);
-  color: var(--vsk-bg);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-subtle);
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--vsk-text);
+  flex-shrink: 0;
+}
+
+.vpg-sidebar-workspace-mark > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .vpg-sidebar-workspace-name {
@@ -1044,6 +1046,15 @@
 
   .vpg-shell--has-comments
     .vpg-shell-body:has(.comments-rail[data-collapsed="true"]) {
+    grid-template-columns: minmax(0, 1fr) var(--vsk-comments-rail-collapsed-w);
+  }
+
+  /* Pre-paint fallback: the inline script in AppLayout sets the root
+     attribute before first paint so the grid track lands at the right width
+     even before the React island has hydrated. */
+  :root[data-comments-rail="collapsed"]
+    .vpg-shell--has-comments
+    .vpg-shell-body {
     grid-template-columns: minmax(0, 1fr) var(--vsk-comments-rail-collapsed-w);
   }
 }
