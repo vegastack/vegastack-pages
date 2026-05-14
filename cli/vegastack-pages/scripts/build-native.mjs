@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,8 @@ if (!existsSync(source)) {
 }
 
 const targetDir = join(root, "dist", platform);
+const target = join(targetDir, binaryName);
 mkdirSync(targetDir, { recursive: true });
-copyFileSync(source, join(targetDir, binaryName));
-console.log(`Built ${join(targetDir, binaryName)}`);
+copyFileSync(source, target);
+if (process.platform !== "win32") chmodSync(target, 0o755);
+console.log(`Built ${target}`);

@@ -2846,6 +2846,7 @@ function normalizeFtsQuery(query: string) {
 
 async function indexSearchDocument(document: SearchDocument) {
   if (!runtimeD1) return;
+  if (!(await searchDocumentParentExists(document))) return;
   await d1Batch(async () => {
     await d1Run(
       "INSERT INTO search_documents (resource_type, resource_id, workspace_id, page_id, folder_id, title, path, headings_text, frontmatter_text, body_text, comment_text, tags, url, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(resource_type, resource_id) DO UPDATE SET workspace_id = excluded.workspace_id, page_id = excluded.page_id, folder_id = excluded.folder_id, title = excluded.title, path = excluded.path, headings_text = excluded.headings_text, frontmatter_text = excluded.frontmatter_text, body_text = excluded.body_text, comment_text = excluded.comment_text, tags = excluded.tags, url = excluded.url, updated_at = excluded.updated_at",
@@ -2885,6 +2886,32 @@ async function indexSearchDocument(document: SearchDocument) {
       document.tags ?? "",
     );
   });
+}
+
+async function searchDocumentParentExists(document: SearchDocument) {
+  if (!runtimeD1) return false;
+  if (document.type === "page") {
+    return Boolean(
+      await runtimeD1
+        .prepare("SELECT 1 FROM pages WHERE id = ?")
+        .bind(document.id)
+        .first(),
+    );
+  }
+  if (document.type === "folder") {
+    return Boolean(
+      await runtimeD1
+        .prepare("SELECT 1 FROM folders WHERE id = ?")
+        .bind(document.id)
+        .first(),
+    );
+  }
+  return Boolean(
+    await runtimeD1
+      .prepare("SELECT 1 FROM comment_threads WHERE id = ?")
+      .bind(document.id)
+      .first(),
+  );
 }
 
 function folderSearchDocument(folder: FolderRecord): SearchDocument {

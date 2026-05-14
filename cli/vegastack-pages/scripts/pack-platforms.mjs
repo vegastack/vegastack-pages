@@ -15,6 +15,7 @@ import {
   statSync,
   renameSync,
   rmSync,
+  chmodSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +71,11 @@ for (const name of readdirSync(stage)) {
     process.exit(1);
   }
   found.add(name);
+  const binaryName = name.startsWith("win32") ? "vpg.exe" : "vpg";
+  const binaryPath = join(dir, "bin", binaryName);
+  if (existsSync(binaryPath) && !name.startsWith("win32")) {
+    chmodSync(binaryPath, 0o755);
+  }
   console.log(`pack-platforms: ok ${sub.name}@${sub.version} (${name})`);
 }
 

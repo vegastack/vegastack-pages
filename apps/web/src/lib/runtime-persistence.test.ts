@@ -151,6 +151,36 @@ describe("runtime D1 persistence", () => {
     db.close();
   });
 
+  it("defers D1 search writes until newly created pages are persisted", async () => {
+    const { runtime, sqlitePath } = await freshNodeRuntime();
+    const workspace = runtime.workspaceService.createWorkspace({
+      id: "wks_search_defer",
+      name: "Search Defer",
+      slug: "search-defer",
+    });
+    const created = await runtime.pageService.createPage({
+      id: "pg_search_defer",
+      workspaceId: workspace.id,
+      folderPath: "",
+      title: "Search Defer Page",
+      sourceType: "markdown",
+      source: "# Search Defer Page\n\nCreated before D1 parent row exists.",
+    });
+
+    await expect(runtime.indexPage(created.page.id)).resolves.toBeUndefined();
+    await runtime.persistRuntimeState();
+
+    const db = await openSqlite(sqlitePath);
+    expect(
+      db
+        .prepare(
+          "SELECT resource_id as resourceId FROM search_documents WHERE resource_type = 'page' AND resource_id = ?",
+        )
+        .get(created.page.id),
+    ).toMatchObject({ resourceId: created.page.id });
+    db.close();
+  });
+
   it("rejects normalized D1 batches that exceed the configured statement cap", async () => {
     const { runtime } = await freshNodeRuntime();
     process.env.VPG_D1_MAX_BATCH_STATEMENTS = "1";

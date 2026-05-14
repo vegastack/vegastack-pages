@@ -61,6 +61,7 @@ export function jsonAppError(error: unknown, fallbackMessage: string) {
   if (error instanceof AppError) {
     return Response.json(error.toJSON(), { status: error.status });
   }
+  console.error(fallbackMessage, error);
   return Response.json(
     { error: { code: "INTERNAL_ERROR", message: fallbackMessage } },
     { status: 500 },

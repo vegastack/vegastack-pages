@@ -46,6 +46,11 @@ const result = spawnSync(binary, args, {
   stdio: "inherit",
   env: { ...process.env, VPG_INSTALL_BINARY: binary },
 });
+if (result.error) {
+  console.error(
+    `${pkg.name}: failed to launch ${binary}: ${result.error.message}`,
+  );
+}
 process.exit(result.status ?? 1);
 
 function resolveBinary() {

@@ -38,6 +38,7 @@ test("cross-build stages platform packages with license metadata", () => {
     script,
     /copyFileSync\(join\(repoRoot, "LICENSE"\), join\(outDir, "LICENSE"\)\)/,
   );
+  assert.match(script, /chmodSync\(binaryOut, 0o755\)/);
 });
 
 test("source manifest defers native optional packages until publish", () => {
@@ -64,6 +65,7 @@ test("pack-platforms injects exactly the supported native packages", () => {
     assert.match(script, new RegExp(`"${platform}"`));
   }
   assert.match(script, /umbrella\.optionalDependencies = refreshed/);
+  assert.match(script, /chmodSync\(binaryPath, 0o755\)/);
 });
 
 test("native build script uses platform path delimiters and Windows home fallback", () => {
@@ -76,4 +78,5 @@ test("native build script uses platform path delimiters and Windows home fallbac
   assert.match(script, /process\.env\.USERPROFILE/);
   assert.doesNotMatch(script, /\}\.cargo\/bin:\$\{process\.env\.PATH/);
   assert.match(script, /process\.platform === "win32" \? "vpg\.exe" : "vpg"/);
+  assert.match(script, /chmodSync\(target, 0o755\)/);
 });

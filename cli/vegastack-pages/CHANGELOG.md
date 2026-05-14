@@ -1,5 +1,11 @@
 # @vegastack/pages
 
+## 0.1.9
+
+### Patch Changes
+
+- Fix page creation when D1 search indexing runs before newly created page rows are persisted, and preserve executable permissions on packaged native `vpg` binaries.
+
 ## 0.1.8
 
 ### Patch Changes

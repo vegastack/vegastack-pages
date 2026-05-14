@@ -15,6 +15,7 @@
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  chmodSync,
   mkdirSync,
   writeFileSync,
   existsSync,
@@ -78,8 +79,10 @@ if (!existsSync(source)) {
 // 2. Stage into npm-publish/<platform>/
 const outDir = join(root, "npm-publish", args.platform);
 const binDir = join(outDir, "bin");
+const binaryOut = join(binDir, binaryName);
 mkdirSync(binDir, { recursive: true });
-copyFileSync(source, join(binDir, binaryName));
+copyFileSync(source, binaryOut);
+if (!isWindows) chmodSync(binaryOut, 0o755);
 
 // 3. Write the sub-package manifest
 const [osName, cpuName] = platformToOsCpu(args.platform);
