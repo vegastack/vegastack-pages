@@ -300,7 +300,7 @@ Show the maintainer the list of files that will be committed.
 Run:
 
 ```bash
-CI=true pnpm install --frozen-lockfile --no-optional
+CI=true pnpm install --frozen-lockfile
 pnpm format
 pnpm typecheck
 pnpm -r --if-present build
