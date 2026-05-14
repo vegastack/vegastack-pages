@@ -55,6 +55,12 @@ function toAllowedDomain(source) {
 export default defineConfig({
   output: "server",
   security: {
+    // OAuth token/device endpoints must accept standards-compliant
+    // application/x-www-form-urlencoded POSTs from MCP brokers. Astro's global
+    // origin check runs before our route middleware and blocks those requests,
+    // so CSRF enforcement lives in src/middleware.ts where OAuth/MCP routes can
+    // be deliberately excluded while browser mutations remain protected.
+    checkOrigin: false,
     allowedDomains: allowedDomainSources.map(toAllowedDomain),
   },
   adapter:

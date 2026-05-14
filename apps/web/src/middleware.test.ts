@@ -45,6 +45,19 @@ describe("security headers", () => {
     expect(config).not.toContain("styleDirective");
   });
 
+  it("keeps Astro's global form-origin check disabled for OAuth form posts", () => {
+    // Astro's checkOrigin runs before route middleware and rejects
+    // application/x-www-form-urlencoded cross-origin POSTs. OAuth token/device
+    // exchanges need that content type, while browser mutation CSRF remains
+    // enforced below by sameOrigin + validCsrfToken.
+    const config = readFileSync(
+      new URL("../astro.config.mjs", import.meta.url),
+      "utf8",
+    );
+
+    expect(config).toContain("checkOrigin: false");
+  });
+
   it("emits HSTS only for production HTTPS requests", () => {
     expect(
       strictTransportSecurityForRequest({

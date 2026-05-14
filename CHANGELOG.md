@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.1.6
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Seed the well-known `oac_anthropic_connector` OAuth client in D1 via new
+  migration `0021_oauth_well_known_anthropic_connector.sql`. v0.1.3 added the
+  runtime fallback that lets `/register` return the pre-baked client_id
+  without a D1 write, and v0.1.4 dropped `/register` latency below the
+  broker's 1.5s timeout — but when the user clicked **Allow** on the consent
+  screen, `/oauth/authorize/consent` tried to `INSERT INTO oauth_grants`
+  with `client_id = "oac_anthropic_connector"` and D1 rejected the foreign
+  key (the `oauth_grants.client_id REFERENCES oauth_clients(id)` constraint
+  fails because no matching row exists). This migration adds the row.
+
+  Same pattern as `0020_oauth_well_known_vpg_cli.sql` for the CLI device-code
+  flow client. The runtime fallback in `apps/web/src/lib/oauth/clients.ts`
+  stays in place as defense-in-depth for fresh deployments where the
+  migration hasn't run yet.
+
+- Disable Astro's pre-middleware `security.checkOrigin` form-origin check so
+  standards-compliant OAuth token exchanges from browser MCP brokers can POST
+  `application/x-www-form-urlencoded` bodies to `/oauth/token` and `/token`.
+  The app-level CSRF middleware remains in force for browser mutations, while
+  OAuth/MCP routes keep their deliberate bypass.
+
+### @vegastack/pages-db
+
+#### Patch Changes
+
+- Seed the well-known `oac_anthropic_connector` OAuth client in D1 via new
+  migration `0021_oauth_well_known_anthropic_connector.sql`. v0.1.3 added the
+  runtime fallback that lets `/register` return the pre-baked client_id
+  without a D1 write, and v0.1.4 dropped `/register` latency below the
+  broker's 1.5s timeout — but when the user clicked **Allow** on the consent
+  screen, `/oauth/authorize/consent` tried to `INSERT INTO oauth_grants`
+  with `client_id = "oac_anthropic_connector"` and D1 rejected the foreign
+  key (the `oauth_grants.client_id REFERENCES oauth_clients(id)` constraint
+  fails because no matching row exists). This migration adds the row.
+
+  Same pattern as `0020_oauth_well_known_vpg_cli.sql` for the CLI device-code
+  flow client. The runtime fallback in `apps/web/src/lib/oauth/clients.ts`
+  stays in place as defense-in-depth for fresh deployments where the
+  migration hasn't run yet.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.6
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Disable Astro's pre-middleware `security.checkOrigin` form-origin check so
+  standards-compliant OAuth token exchanges from browser MCP brokers can POST
+  `application/x-www-form-urlencoded` bodies to `/oauth/token` and `/token`.
+  The app-level CSRF middleware remains in force for browser mutations, while
+  OAuth/MCP routes keep their deliberate bypass.
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.6
+  - @vegastack/pages-mcp@0.1.6
+  - @vegastack/pages-renderer@0.1.6
+  - @vegastack/pages-ui@0.1.6
+
+
 All notable changes to VegaStack Pages are documented here.
 
 ## 0.1.5

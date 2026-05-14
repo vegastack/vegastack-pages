@@ -1,5 +1,21 @@
 # @vegastack/pages-web
 
+## 0.1.6
+
+### Patch Changes
+
+- Disable Astro's pre-middleware `security.checkOrigin` form-origin check so
+  standards-compliant OAuth token exchanges from browser MCP brokers can POST
+  `application/x-www-form-urlencoded` bodies to `/oauth/token` and `/token`.
+  The app-level CSRF middleware remains in force for browser mutations, while
+  OAuth/MCP routes keep their deliberate bypass.
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.6
+  - @vegastack/pages-mcp@0.1.6
+  - @vegastack/pages-renderer@0.1.6
+  - @vegastack/pages-ui@0.1.6
+
 ## 0.1.4
 
 ### Patch Changes
