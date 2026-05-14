@@ -27,6 +27,7 @@ import {
   authService,
   commentService,
   ensureSeedData,
+  acquireRuntimeMutationLock,
   getMcpSession,
   getMcpSessionFast,
   getUserFast,
@@ -34,7 +35,10 @@ import {
   indexPage,
   pageService,
   permissionService,
+  persistRuntimeState,
+  pruneExpiredVersions,
   publicationService,
+  refreshRuntimeState,
   reviewEventService,
   removeSearchResource,
   searchIndexedResources,
@@ -195,52 +199,92 @@ export const POST: APIRoute = async ({ request }) => {
       fast: !needsRuntimeData,
     });
     if (needsRuntimeData) {
-      await ensureSeedData();
-      hydrateActorUser(actor);
-    }
-    if (actor.authMode === "static_token") {
-      const methods = (Array.isArray(parsed) ? parsed : [parsed])
-        .map((message) => message.method)
-        .filter((method): method is string => typeof method === "string");
-      auditService.record({
-        workspaceId: actor.workspaceId,
-        actorUserId: actor.user?.id ?? null,
-        action: "mcp.static_token_used",
-        targetType: "mcp",
-        targetId: actor.user?.id ?? "static_token",
-        metadata: {
-          methods,
-          cf_connecting_ip: request.headers.get("cf-connecting-ip"),
-          origin: request.headers.get("origin"),
-        },
-      });
-    }
-    if (Array.isArray(parsed)) {
-      const responses = (
-        await Promise.all(
-          parsed.map((message) =>
-            handleMessage(message, { requestUrl: request.url, actor }),
-          ),
-        )
-      ).filter(Boolean);
       return withMcpCors(
-        responses.length > 0
-          ? Response.json(responses)
-          : new Response(null, { status: 202 }),
+        await handleRuntimeDataRequest(parsed, request, actor),
       );
     }
+    if (actor.authMode === "static_token") {
+      recordStaticTokenUse(parsed, request, actor);
+    }
 
-    const response = await handleMessage(parsed, {
-      requestUrl: request.url,
-      actor,
-    });
-    return withMcpCors(
-      response ? Response.json(response) : new Response(null, { status: 202 }),
-    );
+    return withMcpCors(await respondToMessages(parsed, request, actor));
   } catch (error) {
     return withMcpCors(errorResponse(error, request));
   }
 };
+
+async function handleRuntimeDataRequest(
+  parsed: JsonRpcMessage | JsonRpcMessage[],
+  request: Request,
+  actor: McpActor,
+) {
+  const lock = await acquireRuntimeMutationLock();
+  try {
+    await refreshRuntimeState();
+    await ensureSeedData();
+    hydrateActorUser(actor, { reload: true });
+    if (actor.authMode === "static_token") {
+      recordStaticTokenUse(parsed, request, actor);
+    }
+    const response = await respondToMessages(parsed, request, actor);
+    if (response.status < 400) {
+      await pruneExpiredVersions();
+      await persistRuntimeState();
+    }
+    return response;
+  } finally {
+    await lock.release();
+  }
+}
+
+async function respondToMessages(
+  parsed: JsonRpcMessage | JsonRpcMessage[],
+  request: Request,
+  actor: McpActor,
+) {
+  if (Array.isArray(parsed)) {
+    const responses = (
+      await Promise.all(
+        parsed.map((message) =>
+          handleMessage(message, { requestUrl: request.url, actor }),
+        ),
+      )
+    ).filter(Boolean);
+    return responses.length > 0
+      ? Response.json(responses)
+      : new Response(null, { status: 202 });
+  }
+
+  const response = await handleMessage(parsed, {
+    requestUrl: request.url,
+    actor,
+  });
+  return response
+    ? Response.json(response)
+    : new Response(null, { status: 202 });
+}
+
+function recordStaticTokenUse(
+  parsed: JsonRpcMessage | JsonRpcMessage[],
+  request: Request,
+  actor: McpActor,
+) {
+  const methods = (Array.isArray(parsed) ? parsed : [parsed])
+    .map((message) => message.method)
+    .filter((method): method is string => typeof method === "string");
+  auditService.record({
+    workspaceId: actor.workspaceId,
+    actorUserId: actor.user?.id ?? null,
+    action: "mcp.static_token_used",
+    targetType: "mcp",
+    targetId: actor.user?.id ?? "static_token",
+    metadata: {
+      methods,
+      cf_connecting_ip: request.headers.get("cf-connecting-ip"),
+      origin: request.headers.get("origin"),
+    },
+  });
+}
 
 function messagesNeedRuntimeData(body: JsonRpcMessage | JsonRpcMessage[]) {
   const messages = Array.isArray(body) ? body : [body];
@@ -2405,8 +2449,9 @@ async function validateAuth(
   throw new AppError("AUTH_REQUIRED", "MCP bearer token is required.", 401);
 }
 
-function hydrateActorUser(actor: McpActor) {
-  if (actor.user || !actor.userId) return;
+function hydrateActorUser(actor: McpActor, options: { reload?: boolean } = {}) {
+  if (actor.user && !options.reload) return;
+  if (!actor.userId) return;
   actor.user = workspaceService.getUser(actor.userId);
   if (!actor.user) {
     throw new AppError("AUTH_REQUIRED", "MCP session user was not found.", 401);

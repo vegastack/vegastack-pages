@@ -41,9 +41,7 @@ describe("MCP route", () => {
     const response = await GET({} as never);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain(
-      "text/event-stream",
-    );
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(response.headers.get("mcp-protocol-version")).toBe("2025-11-25");
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
   });

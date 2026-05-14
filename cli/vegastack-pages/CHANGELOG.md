@@ -1,5 +1,11 @@
 # @vegastack/pages
 
+## 0.1.11
+
+### Patch Changes
+
+- Bypass global runtime middleware for `/mcp` and let runtime-backed MCP calls manage refresh, locking, and persistence inside the MCP handler so Claude connector lifecycle probes return promptly.
+
 ## 0.1.10
 
 ### Patch Changes

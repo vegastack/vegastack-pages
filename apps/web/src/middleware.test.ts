@@ -116,7 +116,7 @@ describe("security headers", () => {
     expect(validCsrfToken(bearerOnly)).toBe(true);
   });
 
-  it("bypasses runtime persistence for static docs routes only", () => {
+  it("bypasses runtime persistence for static docs and MCP/OAuth routes", () => {
     expect(
       bypassesRuntimePersistence({ method: "GET", pathname: "/docs" }),
     ).toBe(true);
@@ -129,6 +129,18 @@ describe("security headers", () => {
     expect(
       bypassesRuntimePersistence({ method: "POST", pathname: "/docs" }),
     ).toBe(false);
+    expect(
+      bypassesRuntimePersistence({ method: "GET", pathname: "/mcp" }),
+    ).toBe(true);
+    expect(
+      bypassesRuntimePersistence({ method: "POST", pathname: "/mcp" }),
+    ).toBe(true);
+    expect(
+      bypassesRuntimePersistence({
+        method: "POST",
+        pathname: "/oauth/token",
+      }),
+    ).toBe(true);
     expect(
       bypassesRuntimePersistence({ method: "GET", pathname: "/app" }),
     ).toBe(false);

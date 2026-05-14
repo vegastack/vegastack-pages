@@ -10,6 +10,7 @@ const runtimeBypassPrefixes = ["/docs"];
 // /token, /authorize/consent, /authorize/resume) and doesn't need the
 // global persist sweep.
 const oauthBypassExactPaths = new Set([
+  "/mcp",
   "/register",
   "/token",
   "/revoke",
