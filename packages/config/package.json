@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "yaml": "^2.8.2",
+    "yaml": "^2.9.0",
     "zod": "^4.2.0"
   }
 }
