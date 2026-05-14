@@ -1399,7 +1399,19 @@
 
 /* Native <dialog> modal */
 .settings-modal {
+  /* Center the dialog defensively. Browsers default `<dialog>` to
+     `position: fixed; inset: 0; margin: auto`, but any ancestor with
+     `transform`, `filter`, `perspective`, or `contain: paint` establishes
+     a new containing block for fixed positioning and can push the dialog
+     to the top-left. We append the dialog directly to <body>, but stating
+     the rule here makes the centering deterministic regardless of where
+     the trigger lives in the tree. */
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(30rem, calc(100vw - 2rem));
+  height: max-content;
+  max-height: calc(100vh - 2rem);
   padding: 0;
   border: var(--vsk-line);
   border-radius: var(--vsk-radius-surface);
@@ -1822,4 +1834,95 @@
   .settings-card-form {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Sessions settings page ────────────────────────────────────────────────
+   Page-specific layout for /app/settings/sessions. Lives in the shared
+   settings stylesheet rather than the page's `<style>` block so it loads
+   render-blocking with the rest of the settings CSS and there is no
+   first-paint flash where the button stacks below the input. */
+
+.settings-tabs {
+  display: inline-flex;
+  gap: var(--space-3xs);
+  margin-bottom: var(--space-md);
+  padding: var(--space-3xs);
+  background: var(--vsk-surface);
+  border: var(--vsk-line);
+  border-radius: var(--vsk-radius-control);
+}
+.settings-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--vsk-radius-control);
+  color: var(--vsk-muted);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  transition:
+    background 120ms,
+    color 120ms;
+}
+.settings-tab:hover {
+  color: var(--vsk-text);
+}
+.settings-tab[data-active="true"] {
+  background: var(--vsk-tint-7);
+  color: var(--vsk-text);
+}
+
+.settings-chip {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  border-radius: 999px;
+  background: var(--vsk-tint-7);
+  border: var(--vsk-line);
+  color: var(--vsk-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Create-session row: input + button side-by-side on wide screens, stacked
+   on narrow. The flex container wraps naturally when the button can no
+   longer fit on the same row as the label/input. */
+.sessions-create-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-sm);
+}
+.sessions-create-field {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.sessions-create-submit {
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+@media (max-width: 32rem) {
+  .sessions-create-submit {
+    flex: 1 0 100%;
+  }
+}
+
+.settings-token-result {
+  display: grid;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+.settings-token-textarea {
+  font-family: var(--font-mono);
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+.settings-card-footnote {
+  margin-top: var(--space-md);
+  line-height: var(--leading-relaxed);
+}
+.settings-card-footnote code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
 }

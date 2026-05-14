@@ -9,8 +9,13 @@ Initial public release of VegaStack Pages.
 ### Added
 
 - Managed and self-hostable knowledge base app for pages, folders, rendered Markdown/HTML, attachments, public links, workspace settings, and role-based access.
-- Agent-facing MCP endpoint at `/mcp` with tools for creating, editing, searching, reviewing, publishing, and waiting on pages.
-- `@vegastack/pages` CLI (`vpg`) for auth, workspace selection, page CRUD, source updates, optimistic patches, rendered output, snapshots, version restore, comments, publications, search, exports, attachments, member invites, deploy helpers, and agent skill install/update.
+- Agent-facing MCP endpoint at `/mcp` with the **MCP 2025-06-18 authorization profile**: `WWW-Authenticate` includes `resource_metadata`, plus `GET /.well-known/oauth-protected-resource` (RFC 9728), `GET /.well-known/oauth-authorization-server` (RFC 8414), `POST /oauth/register` (RFC 7591 public clients, PKCE S256 mandatory), `/oauth/authorize` + `/oauth/authorize/consent` + `/oauth/authorize/resume`, `/oauth/token` (authorization_code, refresh_token with rotation, `urn:ietf:params:oauth:grant-type:device_code`), `/oauth/revoke` (RFC 7009), and `/oauth/device` + `/oauth/device/verify` (RFC 8628). Access tokens 1h; refresh tokens 60d rotating.
+- DNS-rebinding protection on `/mcp` via Host-header validation (MCP 2025-06-18 MUST). New `VPG_MCP_ALLOWED_HOSTS` env var; legacy `VPG_MCP_ALLOWED_ORIGINS` is now a no-op (bearer-only auth removes the CSRF surface).
+- Unified `/app/settings/sessions` page with Mine/Workspace tabs, vendor recognition (Claude, ChatGPT, Cursor, Windsurf, Continue, Cline, Codex, vpg CLI, generic), kind chip (`oauth | manual | cli`), last-seen, and self-revoke. Sidebar moves Sessions to the Activity group above Audit log.
+- Non-admin workspace members can create their own manual tokens and revoke their own sessions; admins keep full workspace-wide visibility and revocation.
+- MCP tools cover sessions (`list_workspaces`, `whoami`), page creation, templates, source reads, validation, patching, attachments, comments, wait conditions, review events, publishing, workspace search, tree reads, page moves, and member invites. `reply_to_thread` is user-attributed only (agent attribution moves to `complete_review_thread`).
+- `initialize.instructions` exposes a curated ≤8 KB playbook so browser-based MCP clients learn the safe edit workflow at handshake time.
+- `@vegastack/pages` CLI (`vpg`) for auth, workspace selection, page CRUD, source updates, optimistic patches, rendered output, snapshots, version restore, comments, publications, search, exports, attachments, member invites, deploy helpers, and agent skill install/update. `vpg wait` accepts `--after-id <event_id>` and emits status `matched`.
 - Workspace templates with structured sections, inline `<!-- guidance: ... -->` agent briefs, and typed frontmatter properties: text, longtext, number, date, datetime, boolean, single-select, and tags.
 - Template surfaces across Settings, the sidebar create flow, REST API, MCP, and CLI:
   - Settings: list, create, edit, and delete templates.
@@ -23,6 +28,7 @@ Initial public release of VegaStack Pages.
 - Page version history with snapshots, source validation, optimistic edit checks, restore flow, rendered/source split, and audit-friendly event records.
 - Backup to Git for workspace content, including GitHub OAuth setup, backup settings, and manual sync API.
 - Public page and folder links with optional password gates and comment-capable sharing.
+- Database migrations `0018_oauth_clients_and_sessions.sql` (adds `oauth_clients`, `oauth_auth_codes`, `oauth_device_codes`, plus columns on `agent_sessions` and `mcp_sessions`) and `0019_oauth_schema_cleanup.sql`.
 - Local Node/SQLite development runtime, Docker install path, Cloudflare install path, CI, Changesets, npm trusted publishing workflow, and Cloudflare Worker release workflow.
 - Open source project docs: README, CLI README, contributing guide, security policy, support guide, product notes, specs, install docs, public docs site content, and portable agent skill references.
 

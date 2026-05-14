@@ -665,12 +665,21 @@ describe("MCP route", () => {
       workspace_id: workspaceId,
       thread_id: threadId,
       body: "Acknowledged by local MCP test.",
+    });
+    const replyRecord = replied.reply as Record<string, unknown>;
+    expect(replyRecord.authorType).toBe("user");
+
+    const agentReply = await tool("complete_review_thread", {
+      workspace_id: workspaceId,
+      thread_id: threadId,
+      body: "Resolved by agent on its own.",
+      resolve: false,
       agent_name: "Vitest Agent",
       agent_model: "local",
       agent_session_id: `agt_${suffix}`,
     });
-    const replyRecord = replied.reply as Record<string, unknown>;
-    expect(replyRecord.agentName).toBe("Vitest Agent");
+    const agentReplyRecord = agentReply.reply as Record<string, unknown>;
+    expect(agentReplyRecord.agentName).toBe("Vitest Agent");
 
     const resolved = await tool("resolve_thread", {
       workspace_id: workspaceId,
@@ -1000,6 +1009,11 @@ describe("MCP route", () => {
       result?: { contents?: Array<{ text: string }> };
     };
     expect(treeResourceBody.result?.contents?.[0]?.text).toContain(pageId);
+
+    const whoami = await tool("whoami", {});
+    expect(whoami.user).toBeDefined();
+    const workspaces = await tool("list_workspaces", {});
+    expect(Array.isArray(workspaces.workspaces)).toBe(true);
 
     expect([...exercised].sort()).toEqual([...mcpToolNames].sort());
   });

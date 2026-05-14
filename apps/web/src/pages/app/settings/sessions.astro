@@ -1,50 +1,116 @@
 ---
 import SettingsLayout from "../../../layouts/SettingsLayout.astro";
 import { formatDate, loadSettings } from "../../../lib/settings-data";
-import { listMcpSessions } from "../../../lib/runtime";
+import {
+  listMcpSessions,
+  permissionService,
+  workspaceService,
+} from "../../../lib/runtime";
+import { vendorForClient } from "../../../lib/oauth/vendor-map";
 
 export const prerender = false;
 
 const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
-const { workspace } = result.context;
-const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
+const { workspace, currentUser } = result.context;
+
+const view =
+  Astro.url.searchParams.get("view") === "workspace" ? "workspace" : "mine";
+const member = workspaceService.getMember(workspace.id, currentUser.id);
+const permission = permissionService.resolve({
+  user: currentUser,
+  member,
+  workspaceId: workspace.id,
+});
+const isAdmin = permission === "admin";
+const effectiveView = view === "workspace" && isAdmin ? "workspace" : "mine";
+
+const sessions = await listMcpSessions(
+  effectiveView === "workspace"
+    ? { workspaceId: workspace.id }
+    : { workspaceId: workspace.id, userId: currentUser.id },
+);
+const rows = sessions.map((session) => {
+  const vendor = vendorForClient({
+    clientName: session.clientName,
+    redirectUris: null,
+  });
+  return {
+    ...session,
+    vendorId: vendor.id,
+    vendorLabel: vendor.label,
+  };
+});
 ---
 
 <SettingsLayout
-  title={`MCP · ${workspace.name} · VegaStack Pages`}
+  title={`Sessions · ${workspace.name} · VegaStack Pages`}
   context={result.context}
-  currentSection="mcp"
-  sectionLabel="MCP"
-  description="Workspace-scoped tokens for MCP-compatible agent clients. Tokens are shown once at creation and can be revoked at any time."
+  currentSection="sessions"
+  sectionLabel="Sessions"
+  description="Bearer tokens issued for MCP clients, CLI logins, and browser OAuth sign-ins. Tokens are shown once at creation and can be revoked at any time."
 >
+  {
+    isAdmin && (
+      <nav class="settings-tabs" aria-label="Session scope">
+        <a
+          class="settings-tab"
+          data-active={effectiveView === "mine" ? "true" : undefined}
+          href="/app/settings/sessions?view=mine"
+        >
+          Mine
+        </a>
+        <a
+          class="settings-tab"
+          data-active={effectiveView === "workspace" ? "true" : undefined}
+          href="/app/settings/sessions?view=workspace"
+        >
+          Workspace
+        </a>
+      </nav>
+    )
+  }
+
   <section class="settings-card" data-mcp-session-card>
     <header class="settings-card-header">
       <h2>New session</h2>
       <p>
-        Issue a bearer token bound to this workspace. Copy it once and paste it
-        into your agent client.
+        Issue a bearer token bound to this workspace for headless agents and CI.
+        Browser-based MCP clients (Claude, ChatGPT, Cursor, …) sign in via OAuth
+        automatically when you point them at the endpoint below.
       </p>
     </header>
 
-    <form class="settings-form compact" data-mcp-session-form>
-      <label>
-        Client label
-        <input name="client_name" value="Codex" autocomplete="off" />
+    <form class="sessions-create-form" data-mcp-session-form>
+      <label class="vpg-field sessions-create-field">
+        <span>Client label</span>
+        <input
+          class="vpg-input"
+          name="client_name"
+          value="Codex"
+          autocomplete="off"
+        />
       </label>
-      <button class="vpg-button vpg-button-primary vpg-button-md" type="submit"
-        >Create session</button
+      <button
+        class="vpg-button vpg-button-primary vpg-button-md sessions-create-submit"
+        type="submit"
       >
+        Create session
+      </button>
     </form>
 
     <div class="settings-token-result" data-mcp-token-result hidden>
-      <label>
-        Endpoint
-        <input data-mcp-url readonly />
+      <label class="vpg-field">
+        <span>Endpoint</span>
+        <input class="vpg-input" data-mcp-url readonly />
       </label>
-      <label>
-        Bearer token
-        <textarea data-mcp-token readonly rows="3"></textarea>
+      <label class="vpg-field">
+        <span>Bearer token</span>
+        <textarea
+          class="vpg-textarea settings-token-textarea"
+          data-mcp-token
+          readonly
+          rows="3"></textarea>
       </label>
       <div class="settings-inline-actions">
         <button
@@ -58,18 +124,27 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
           data-copy-mcp-json>Copy JSON config</button
         >
       </div>
-      <p class="settings-help-text">
+      <p class="settings-muted-line">
         Send requests with <code>Authorization: Bearer &lt;token&gt;</code>.
       </p>
     </div>
+
+    <p class="settings-muted-line settings-card-footnote">
+      <strong>Browser sign-in:</strong> point any OAuth-capable MCP client at
+      <code data-mcp-endpoint></code>. The client discovers the OAuth flow at
+      <code>/.well-known/oauth-authorization-server</code> and signs in with your
+      existing VegaStack login.
+    </p>
   </section>
 
   <section class="settings-card settings-card-table">
     <div class="settings-table-wrap">
-      <table class="settings-table" aria-label="MCP sessions">
+      <table class="settings-table" aria-label="Sessions">
         <thead>
           <tr>
             <th>Client</th>
+            <th>Kind</th>
+            <th>Last seen</th>
             <th>Created</th>
             <th>Expires</th>
             <th class="settings-actions-cell" aria-label="Actions"></th>
@@ -77,9 +152,9 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
         </thead>
         <tbody>
           {
-            mcpSessions.length === 0 ? (
+            rows.length === 0 ? (
               <tr>
-                <td colspan="4">
+                <td colspan="6">
                   <div class="settings-empty">
                     <div class="settings-empty-glyph" aria-hidden="true">
                       <svg
@@ -90,33 +165,38 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
                         stroke-linecap="round"
                         stroke-linejoin="round"
                       >
-                        <>
-                          <rect x="3" y="4" width="18" height="14" rx="2" />
-                          <path d="M8 22h8" />
-                          <path d="M12 18v4" />
-                        </>
+                        <path d="M12 22v-5" />
+                        <path d="M9 7V2" />
+                        <path d="M15 7V2" />
+                        <path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z" />
                       </svg>
                     </div>
                     <p>
-                      <>
-                        <strong>No active sessions</strong>
-                        <span>
-                          Create a token above, then point your agent client at
-                          the MCP endpoint.
-                        </span>
-                      </>
+                      <strong>No active sessions</strong>
+                      <span>
+                        Create a token above, or point your MCP client at the
+                        endpoint to start a browser OAuth flow.
+                      </span>
                     </p>
                   </div>
                 </td>
               </tr>
             ) : (
-              mcpSessions.map((session) => (
+              rows.map((session) => (
                 <tr data-mcp-session-row={session.id}>
                   <td>
-                    <strong>{session.clientName}</strong>
+                    <strong>{session.vendorLabel}</strong>
                     <small class="settings-muted-line">
-                      Session {session.id.slice(-6)}
+                      {session.clientName} · Session {session.id.slice(-6)}
                     </small>
+                  </td>
+                  <td>
+                    <span class="settings-chip">
+                      {session.kind ?? "manual"}
+                    </span>
+                  </td>
+                  <td>
+                    {session.lastSeenAt ? formatDate(session.lastSeenAt) : "—"}
                   </td>
                   <td>{formatDate(session.createdAt)}</td>
                   <td>{formatDate(session.expiresAt)}</td>
@@ -135,10 +215,8 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
                         stroke-linecap="round"
                         stroke-linejoin="round"
                       >
-                        <>
-                          <path d="M18 6 6 18" />
-                          <path d="m6 6 12 12" />
-                        </>
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
                       </svg>
                     </button>
                   </td>
@@ -151,7 +229,14 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
     </div>
   </section>
 
-  <script is:inline define:vars={{ workspaceId: workspace.id }}>
+  <script
+    is:inline
+    define:vars={{
+      workspaceId: workspace.id,
+      isAdmin,
+      currentView: effectiveView,
+    }}
+  >
     (() => {
       const {
         toast,
@@ -167,7 +252,12 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
       const tokenInput = document.querySelector("[data-mcp-token]");
       const copyToken = document.querySelector("[data-copy-mcp-token]");
       const copyJson = document.querySelector("[data-copy-mcp-json]");
+      const endpointCode = document.querySelector("[data-mcp-endpoint]");
       let latest = null;
+
+      if (endpointCode) {
+        endpointCode.textContent = `${window.location.origin}/mcp`;
+      }
 
       form?.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -182,14 +272,14 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
             body: JSON.stringify(payload),
           });
           if (!response.ok) {
-            toast("MCP session could not be created.", "error");
+            toast("Session could not be created.", "error");
             return;
           }
           latest = await response.json();
           if (urlInput) urlInput.value = latest.mcp_url;
           if (tokenInput) tokenInput.value = latest.token;
           if (result) result.hidden = false;
-          toast("MCP session created.");
+          toast("Session created.");
         });
       });
 
@@ -227,9 +317,9 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
         const sessionId = target.getAttribute("data-revoke-mcp-session");
         if (!sessionId) return;
         const confirmed = await confirmAction({
-          title: "Revoke MCP session",
+          title: "Revoke session",
           description:
-            "Agents using this token will lose access immediately. You can create a new session at any time.",
+            "Clients using this token will lose access immediately. You can create a new session at any time.",
           confirmLabel: "Revoke session",
           tone: "danger",
         });
@@ -246,10 +336,10 @@ const mcpSessions = await listMcpSessions({ workspaceId: workspace.id });
         });
         if (response.ok) {
           if (row) withTransition(() => removeRow(row));
-          toast("MCP session revoked.");
+          toast("Session revoked.");
         } else {
           if (row) delete row.dataset.pending;
-          toast("Could not revoke MCP session.", "error");
+          toast("Could not revoke session.", "error");
         }
       });
     })();

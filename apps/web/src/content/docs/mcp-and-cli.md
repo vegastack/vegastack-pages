@@ -6,18 +6,11 @@ order: 10
 lastUpdated: 2026-05-14
 ---
 
-VegaStack Pages exposes review workflows through a Remote MCP endpoint and a Rust CLI. MCP is the primary agent surface. The CLI is useful from a shell or CI job when the target deployment accepts the bearer token you provide.
+VegaStack Pages exposes review workflows through a Remote MCP endpoint and a Rust CLI. MCP is the primary agent surface. The CLI is useful from a shell or CI job when the target deployment accepts a bearer token.
 
 ## MCP endpoint
 
-The Remote MCP server is mounted at `/mcp` on the same app.
-
-1. Sign in to the web app.
-2. Open **Settings -> MCP**.
-3. Create a workspace-scoped session.
-4. Send requests to the returned endpoint with `Authorization: Bearer <token>`.
-
-Tokens are shown once and can be revoked from the same settings page.
+The Remote MCP server is mounted at `/mcp` on the same app and implements the MCP 2025-06-18 Streamable HTTP transport.
 
 Managed endpoint:
 
@@ -31,48 +24,70 @@ Self-hosted endpoint:
 https://pages.example.com/mcp
 ```
 
-`wait_for_review` accepts `timeout_ms` in milliseconds and defaults to/caps at 10 minutes per call.
+### Authentication
 
-Every workspace-scoped MCP tool call must include `workspace_id`, even when the token is scoped to one workspace. Page, thread, template, publication, and event tools use that value as an explicit guard against cross-workspace mistakes.
+The server accepts a bearer token on `Authorization: Bearer <token>`. Tokens come from one of three flows; all three land in the same `Sessions` table and behave identically once issued.
 
-Current tools:
+1. **Browser OAuth (Claude.ai, ChatGPT, Cursor remote, …).** The client discovers the auth server via `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, registers itself with `POST /oauth/register` (RFC 7591), runs an OAuth 2.1 authorization-code flow with PKCE S256 (RFC 7636), and exchanges the code at `/oauth/token`. The server issues a 1-hour access token and a 60-day rotating refresh token. No setup in the web app is required for this path — pasting the endpoint URL is enough.
+2. **Manual bearer.** Sign in to the web app, open **Settings → Sessions**, click **Create session**, copy the token. Use it for headless agents, CI runners, MCP-over-stdio bridges, or any environment without a browser. Tokens are shown once and revocable from the same page.
+3. **CLI login.** `vpg login --token <tok>` stores a manual bearer in the OS keychain (with file fallback). Tokens issued by the CLI flow appear under **Sessions** with `kind=cli`.
 
-- `create_page`, `get_page`, `prepare_page_edit`, `update_page`, `patch_page`
-- `validate_page_source`
-- `upload_attachment`
-- `wait_for_review` (see [wait conditions](/docs/wait-conditions))
-- `list_comments`, `create_comment`, `reply_to_thread`, `complete_review_thread`
-- `resolve_thread`, `unresolve_thread`, `update_comment_anchor`, `delete_thread`
-- `list_review_events`
-- `publish_page`, `publish_folder`, `update_publication`, `revoke_publication`
-- workspace search for pages, folders, and comment threads
-- page-only search compatibility
-- `list_workspace_tree`, `move_page`
-- `invite_workspace_member`
-- `list_templates`, `get_template`, `create_template`, `update_template`
-- `render_template`, `create_page_from_template`
+The `/mcp` endpoint returns `WWW-Authenticate: Bearer realm="VegaStack Pages MCP", resource_metadata="…/.well-known/oauth-protected-resource", error="invalid_token"` on 401 so spec-compliant browser clients can self-onboard.
 
-Common page loop:
+### initialize.instructions
+
+After `initialize`, the server sends a curated instruction block (≤8 KB) describing the safe edit workflow, agent-attribution rules, and review-loop pattern. MCP clients that honor `initialize.instructions` inject it into the model's system prompt automatically; clients that don't can still discover the same content under MCP resources at `vpg://skills/vegastack-pages/SKILL.md`.
+
+### Workspace scoping
+
+Every workspace-scoped MCP tool call must include `workspace_id`. The token is workspace-scoped server-side, but the explicit id is an explicit guard against cross-workspace mistakes. Use `list_workspaces` once at session start to discover the ids your session can access.
+
+### Tool surface
+
+| Category  | Tools                                                                                                                                                                                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session   | `list_workspaces`, `whoami`                                                                                                                                                                             |
+| Create    | `create_page`, `create_page_from_template`, `upload_attachment`                                                                                                                                         |
+| Read      | `get_page`, `get_rendered_page`, `list_page_versions`, `list_workspace_tree`                                                                                                                            |
+| Edit      | `prepare_page_edit`, `patch_page`, `update_page`, `validate_page_source`, `move_page`, `create_page_snapshot`, `restore_page_version`                                                                   |
+| Review    | `wait_for_review`, `list_comments`, `create_comment`, `reply_to_thread`, `complete_review_thread`, `resolve_thread`, `unresolve_thread`, `update_comment_anchor`, `delete_thread`, `list_review_events` |
+| Publish   | `publish_page`, `publish_folder`, `update_publication`, `revoke_publication`                                                                                                                            |
+| Search    | `search_workspace`, `search_pages`                                                                                                                                                                      |
+| Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `render_template`                                                                                                               |
+| Members   | `invite_workspace_member`                                                                                                                                                                               |
+
+`reply_to_thread` posts a reply as the authenticated user. For agent-attributed replies use `complete_review_thread`, which accepts `agent_name`, `agent_model`, and `agent_session_id` and can resolve the thread in the same call. `wait_for_review` accepts `timeout_ms` in milliseconds (default and cap: 10 minutes) and `after_event_id` for cursor-based polling.
+
+### Common page loop
 
 ```js
+const { workspaces } = await mcp.call("list_workspaces", {});
+const workspaceId = workspaces[0].id;
+
 await mcp.call("create_page_from_template", {
-  workspace_id: "wks_123",
-  template_id: "prd",
+  workspace_id: workspaceId,
+  template: "prd",
   title: "Search redesign",
   properties: { owner: "platform" },
 });
 
 await mcp.call("wait_for_review", {
-  workspace_id: "wks_123",
+  workspace_id: workspaceId,
   page_id: "pg_123",
   until: "first_response",
   timeout_ms: 600000,
 });
 
-await mcp.call("patch_page", {
-  workspace_id: "wks_123",
+const prep = await mcp.call("prepare_page_edit", {
+  workspace_id: workspaceId,
   page_id: "pg_123",
-  base_version_id: "ver_123",
+});
+
+await mcp.call("patch_page", {
+  workspace_id: workspaceId,
+  page_id: "pg_123",
+  base_version_id: prep.base_version_id,
+  base_content_hash: prep.base_content_hash,
   find: "old sentence",
   replace: "new sentence",
   expected_replacements: 1,
@@ -81,7 +96,7 @@ await mcp.call("patch_page", {
 
 ## CLI
 
-The CLI is a Rust binary distributed through the `@vegastack/pages` npm package. Two aliases work identically:
+The CLI is a Rust binary distributed through the `@vegastack/pages` npm package. Two aliases run the same binary:
 
 ```sh
 vpg --help
@@ -93,11 +108,13 @@ Examples:
 ```sh
 vpg --base-url https://pages.vegastack.com --workspace wks_123 create --file ./plan.md --title "Plan"
 vpg --base-url https://pages.vegastack.com --workspace wks_123 create --template prd --title "Search redesign" --set owner=platform
-vpg --base-url https://pages.vegastack.com --workspace wks_123 wait pg_123 --until first-response
+vpg --base-url https://pages.vegastack.com --workspace wks_123 wait pg_123 --until first-response --after-id evt_42
 vpg --base-url https://pages.vegastack.com --workspace wks_123 publish-page pg_123 --permission comment
+vpg --base-url https://pages.vegastack.com --workspace wks_123 whoami
+vpg --base-url https://pages.vegastack.com workspaces
 ```
 
-For equivalent shell workflows, call the standalone CLI commands:
+Equivalent surgical-edit workflow:
 
 ```sh
 vpg --base-url https://pages.example.com --workspace wks_123 pages prepare-edit pg_123
@@ -113,18 +130,26 @@ vpg --base-url https://pages.example.com --workspace wks_123 templates create --
 vpg --base-url https://pages.example.com --workspace wks_123 templates update tpl_123 --args-file ./template-update.json
 ```
 
-The CLI uses standalone API routes, not the MCP transport. It does not require
-an MCP client or MCP server calls, and it covers the same page, review, comment,
-publication, template, tree, attachment, and member workflows. Bearer tokens are
-resolved server-side and remain scoped to the workspace that issued them.
-Pass `--workspace <workspace_id>` or run `vpg use <workspace_id>` before
-workspace-scoped commands; the CLI includes `workspace_id` in every API call.
+The CLI calls the same standalone API routes the web app uses; it does not require an MCP client. Bearer tokens are workspace-scoped server-side. Pass `--workspace <workspace_id>` or run `vpg use <workspace_id>` before workspace-scoped commands; the CLI includes `workspace_id` in every API call.
 
 Authentication is explicit: use `--token`, `VPG_TOKEN`, or `vpg login --token <token> --workspace <workspace-id>`. Run `vpg <command> --help` for exact flags.
 
+### MCP/CLI parity
+
+Every MCP tool has a matching CLI command. `vpg wait` emits status `matched` (was `condition_met`) and accepts `--after-id <event_id>` to mirror `wait_for_review.after_event_id`. CLI-only commands are operator-scoped (`login`, `logout`, `use`, `doctor`, `deploy`, `export`, `update`, `skills`).
+
+## Active sessions
+
+Open **Settings → Sessions** to see every active token issued for a workspace.
+
+- **Mine** lists OAuth, manual, and CLI sessions issued for the signed-in user.
+- **Workspace** (admin only) lists every active session in the workspace.
+
+Each row shows the recognized vendor (Claude, ChatGPT, Cursor, Windsurf, Continue, Cline, Codex, vpg CLI, …), kind chip (`oauth | manual | cli`), last-seen timestamp, expiry, and a one-click revoke. Revoked tokens stop working on the next request.
+
 ## Agent skills
 
-The canonical portable agent skill is checked into the repository at `skills/vegastack-pages`. The CLI embeds that top-level skill at build time so installed npm binaries can still install it without a source checkout:
+The canonical portable agent skill is checked into the repository at `skills/vegastack-pages`. The CLI embeds the bundle at build time so installed npm binaries can install it without a source checkout:
 
 ```sh
 vpg skills doctor
@@ -134,9 +159,7 @@ vpg skills install --agent codex --scope project
 vpg skills install --agent cursor --scope project
 ```
 
-Codex and Claude receive the native `SKILL.md` bundle. Cursor receives a `.mdc` rules adapter. Gemini CLI receives an extension adapter. MCP clients can read the same guidance as resources under `vpg://skills/vegastack-pages/...` and can request prompts such as `vegastack_edit_page_safely`. npm installs do not mutate agent config automatically; run `vpg skills install --agent all --scope user` once, and run `vpg skills update --agent all --scope user` after package updates.
-
-MCP exposes skill guidance to the connected client, but it does not install files globally on the user's machine. Use the CLI skill installer for global Codex/Claude/Cursor/Gemini/etc. files.
+Codex and Claude receive the native `SKILL.md` bundle. Cursor receives a `.mdc` rules adapter. Gemini CLI receives an extension adapter. MCP clients can read the same guidance as resources under `vpg://skills/vegastack-pages/...` and request prompts such as `vegastack_edit_page_safely`. npm installs do not mutate agent config automatically; run `vpg skills install --agent all --scope user` once and `vpg skills update --agent all --scope user` after package updates.
 
 ## Deploy helper
 

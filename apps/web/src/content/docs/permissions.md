@@ -34,7 +34,7 @@ Workspace roles are managed in **Settings > Members**. Folder and page access is
 - **Workspace admin**: manages users, folders, page/folder access, publications, and workspace settings.
 - **Editor / Commenter / Reader**: standard content roles inside a workspace.
 - **Guest reviewer**: a user who arrived through a public link. Scoped to that page.
-- **MCP session**: a workspace-scoped bearer token created by an authenticated workspace admin for an agent client. Tokens are shown once and can be revoked.
+- **Agent session**: a workspace-scoped bearer token issued via OAuth 2.1 + PKCE (browser MCP clients), manual creation from **Settings > Sessions**, or `vpg login --token`. Every member can create their own (`kind=manual`); workspace admins can revoke any session in the workspace. Tokens are shown once and stored hashed.
 
 ## Search
 

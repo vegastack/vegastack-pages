@@ -2,6 +2,8 @@
 
 Use the Remote MCP endpoint at `/mcp` with `Authorization: Bearer <workspace-token>`. A workspace token is scoped to one workspace.
 
+Three issuance flows, one storage shape: OAuth 2.1 + PKCE for browser MCP clients (discover via `/.well-known/oauth-protected-resource`), manual tokens from **Settings → Sessions**, or CLI tokens from `vpg login --token`. Every session shows up at the same page and can be revoked from there.
+
 ## Editing
 
 - `create_page`: create Markdown, MDX, or HTML source in a workspace.
@@ -20,7 +22,7 @@ Use the Remote MCP endpoint at `/mcp` with `Authorization: Bearer <workspace-tok
 - `wait_for_review`: long-poll comments/events. `timeout_ms` defaults to and is capped at 600000.
 - `list_comments`: list open/resolved/all threads.
 - `create_comment`: create a Markdown/MDX text comment or HTML pin comment.
-- `reply_to_thread`: reply without resolving.
+- `reply_to_thread`: reply as the authenticated user without resolving. Use `complete_review_thread` for agent-attributed replies (it accepts `agent_name`, `agent_model`, `agent_session_id` and an optional `resolve`).
 - `resolve_thread`: resolve without reply.
 - `unresolve_thread`: reopen a resolved thread.
 - `complete_review_thread`: reply with optional agent metadata and optionally resolve.
@@ -38,6 +40,11 @@ Use the Remote MCP endpoint at `/mcp` with `Authorization: Bearer <workspace-tok
 - `list_workspace_tree`
 - `move_page`
 - `invite_workspace_member`
+
+## Session
+
+- `list_workspaces`: list workspaces the authenticated session can access with id, name, slug, and role.
+- `whoami`: return the authenticated session — user id, email, accessible workspaces, session kind (`manual` | `cli` | `oauth`), and client name.
 
 Argument notes:
 

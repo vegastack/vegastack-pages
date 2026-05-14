@@ -26,6 +26,13 @@ export const GET: APIRoute = async ({ cookies, redirect, url }) => {
   try {
     await ensureSeedData();
     const requestedEmail = url.searchParams.get("email");
+    const requestedRedirect = url.searchParams.get("redirect_to") ?? "/app";
+    const safeRedirect =
+      requestedRedirect.startsWith("/") &&
+      !requestedRedirect.startsWith("//") &&
+      !requestedRedirect.startsWith("/\\")
+        ? requestedRedirect
+        : "/app";
     const setup = setupService.status();
     const user = requestedEmail
       ? workspaceService.getUserByEmail(requestedEmail)
@@ -37,7 +44,7 @@ export const GET: APIRoute = async ({ cookies, redirect, url }) => {
     if (!user) throw new AppError("AUTH_REQUIRED", "User was not found.", 401);
     const magic = await authService.createMagicLink({
       email: user.email,
-      redirectTo: "/app",
+      redirectTo: safeRedirect,
     });
     const session = await authService.consumeMagicLink(magic.rawToken, user.id);
     await persistRuntimeState();
@@ -48,7 +55,7 @@ export const GET: APIRoute = async ({ cookies, redirect, url }) => {
       path: "/",
       expires: new Date(session.expiresAt),
     });
-    return redirect("/app");
+    return redirect(safeRedirect);
   } catch (error) {
     if (error instanceof AppError)
       return Response.json(error.toJSON(), { status: error.status });

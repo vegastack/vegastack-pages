@@ -52,7 +52,7 @@ const faqs = [
   },
   {
     q: "Do agents need separate accounts?",
-    a: "No. Workspace admins create workspace-scoped bearer tokens in Settings -> MCP. Tokens are shown once, can be revoked, and still resolve through workspace permissions.",
+    a: "No. Agents authenticate as the workspace member who connects them. Browser MCP clients run OAuth 2.1 + PKCE against /mcp; headless tools paste a workspace-scoped token from Settings -> Sessions or vpg login. Every issued token is revocable and enforced through normal workspace permissions.",
   },
   {
     q: "What are templates for?",

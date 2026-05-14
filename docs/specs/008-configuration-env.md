@@ -1,7 +1,7 @@
 # Configuration And Environment Specification
 
 Status: Draft  
-Date: 2026-05-10
+Date: 2026-05-14
 
 ## Config Philosophy
 
@@ -119,6 +119,17 @@ Optional GitHub backup:
 - `VPG_GITHUB_APP_CLIENT_ID`: GitHub App OAuth client id used to verify the installing GitHub user.
 - `VPG_GITHUB_APP_CLIENT_SECRET`: GitHub App OAuth client secret, stored as a runtime secret.
 - `VPG_GITHUB_SYNC_CRON`: deployment-level UTC cron, default `17 2 * * *`.
+
+MCP authorization:
+
+- `VPG_MCP_TOKEN`: optional static debug bearer. Disabled in production unless `VPG_ALLOW_STATIC_MCP_TOKEN=true`. Pair with `VPG_MCP_WORKSPACE_ID` to bind the static token to a workspace and optionally `VPG_MCP_STATIC_USER_EMAIL` to bind it to a user.
+- `VPG_ALLOW_STATIC_MCP_TOKEN`: must be `true` for `VPG_MCP_TOKEN` to be honored in production.
+- `VPG_MCP_STATIC_USER_EMAIL`: maps `VPG_MCP_TOKEN` to a user record.
+- `VPG_MCP_WORKSPACE_ID`: workspace bound to `VPG_MCP_TOKEN` (required when the static token is enabled).
+- `VPG_MCP_AUTH_REQUIRED`: force MCP bearer auth even when `devAutoLogin` is enabled.
+- `VPG_MCP_ALLOWED_HOSTS`: comma-separated Host-header allowlist for the `/mcp` DNS-rebinding guard. The request URL host and loopback addresses are always allowed; use this for reverse-proxy or split-DNS deployments that present a different Host.
+- `VPG_MCP_ALLOWED_ORIGINS`: **deprecated, no-op.** Bearer-only auth on `/mcp` removes the CSRF surface, so origin validation has been replaced by Host-header validation. The variable is read once at startup and logged as deprecated.
+- `VPG_MCP_MAX_BODY_BYTES`: maximum JSON-RPC body size for MCP requests; protects against large-attachment uploads exceeding the chosen budget.
 
 ## Cloudflare Bindings
 

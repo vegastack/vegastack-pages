@@ -27,10 +27,12 @@ describe("public docs hygiene", () => {
       /vpg auth login/,
       /vpg deploy cloudflare/,
       /vpg create --workspace docs plan\.md/,
-      /search_workspace/,
       /export_page/,
       /browser-based login/,
       /No separate agent(?:-level)? tokens/,
+      // The old MCP page lived at /app/settings/mcp; the new page is /app/settings/sessions.
+      /\/app\/settings\/mcp\b/,
+      /Settings\s*[->→]\s*MCP\b/,
     ];
 
     for (const path of publicDocs) {

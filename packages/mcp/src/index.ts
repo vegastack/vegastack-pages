@@ -1,3 +1,5 @@
+export { mcpInstructions, mcpInstructionsMaxBytes } from "./instructions";
+
 export const mcpToolNames = [
   "create_page",
   "update_page",
@@ -35,6 +37,8 @@ export const mcpToolNames = [
   "update_template",
   "render_template",
   "create_page_from_template",
+  "list_workspaces",
+  "whoami",
 ] as const;
 
 export type McpToolName = (typeof mcpToolNames)[number];
@@ -302,7 +306,8 @@ export const mcpToolSpecs: McpToolSpec[] = [
   },
   {
     name: "reply_to_thread",
-    description: "Reply to a comment thread with optional agent metadata.",
+    description:
+      "Reply to a comment thread as the authenticated user. Use complete_review_thread for agent-attributed replies.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "thread_id", "body"],
@@ -310,9 +315,6 @@ export const mcpToolSpecs: McpToolSpec[] = [
         workspace_id: { type: "string" },
         thread_id: { type: "string" },
         body: { type: "string" },
-        agent_name: { type: "string" },
-        agent_model: { type: "string" },
-        agent_session_id: { type: "string" },
       },
     },
   },
@@ -740,7 +742,8 @@ export const mcpToolSpecs: McpToolSpec[] = [
   },
   {
     name: "invite_workspace_member",
-    description: "Create or update a workspace member invite.",
+    description:
+      "Invite a workspace member by email. Creates the user if missing, adds them at the requested role, and emails a magic link when email delivery is configured.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "email"],
@@ -754,6 +757,18 @@ export const mcpToolSpecs: McpToolSpec[] = [
         },
       },
     },
+  },
+  {
+    name: "list_workspaces",
+    description:
+      "List workspaces the authenticated session can access. Returns id, name, slug, and the user's role for each.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "whoami",
+    description:
+      "Return the authenticated MCP session: user id, email, accessible workspaces, session kind (manual | cli | oauth), and client name.",
+    inputSchema: { type: "object", properties: {} },
   },
 ];
 

@@ -1,7 +1,7 @@
 # MCP And CLI Specification
 
 Status: Draft  
-Date: 2026-05-10
+Date: 2026-05-14
 
 ## Summary
 
@@ -115,10 +115,12 @@ Supported wait conditions:
 - `all_threads_resolved`: every open thread is resolved.
 - `timeout`: end after timeout.
 
+Status field on the matched return is `matched`. On timeout it is `timeout`. Pass `--after-id <event_id>` (CLI) or `after_event_id` (MCP) to resume from a known cursor.
+
 Example:
 
 ```sh
-vpg wait page-title-abc123 --until first_response --timeout 30m --json
+vpg wait page-title-abc123 --until first_response --timeout 30m --after-id evt_42 --json
 ```
 
 Return payload includes:
@@ -148,52 +150,67 @@ https://pages.vegastack.com/mcp
 
 Transport:
 
-- Streamable HTTP where supported.
+- Streamable HTTP (MCP 2025-06-18) over POST. OPTIONS preflight returns 204 with `Access-Control-Allow-Origin: *`.
 - Server-Sent Events only if compatibility requires it later.
+- Host-header validation rejects mismatched hosts (DNS-rebinding guard). Loopback hosts and entries in `VPG_MCP_ALLOWED_HOSTS` are permitted regardless.
 
 Auth:
 
-- Workspace-scoped MCP bearer sessions created from the web app by an authenticated workspace admin.
-- Tokens are shown once and can be revoked from workspace settings.
-- Static bearer-token fallback is for local/debug use only and must stay disabled in production by default.
-- Workspace-scoped tools after session creation.
+- Bearer-only on `Authorization: Bearer <token>`. No cookie auth, no CSRF surface, so `Access-Control-Allow-Origin: *` with no credentials.
+- 401 emits `WWW-Authenticate: Bearer realm="VegaStack Pages MCP", resource_metadata="<origin>/.well-known/oauth-protected-resource", error="invalid_token"` so MCP 2025-06-18 clients self-onboard.
+- Three flows, one storage shape:
+  - **OAuth 2.1 + PKCE** for browser MCP clients via `/.well-known/oauth-protected-resource` (RFC 9728), `/.well-known/oauth-authorization-server` (RFC 8414), `/oauth/register` (RFC 7591 public-client DCR, PKCE S256 mandatory), `/oauth/authorize` + `/oauth/authorize/consent`, `/oauth/token` (1h access, 60d refresh, refresh rotation), `/oauth/revoke` (RFC 7009), `/oauth/device` + `/oauth/device/verify` (RFC 8628).
+  - **Manual bearer** issued from **Settings → Sessions** by a workspace member (creator owns it; admin can revoke any).
+  - **CLI login** via `vpg login --token`, stored in OS keychain (file fallback).
+- Static bearer-token fallback (`VPG_MCP_TOKEN`) is local/debug only and stays disabled in production unless `VPG_ALLOW_STATIC_MCP_TOKEN=true`.
+- Every issued token lives in `mcp_sessions` with `agent_sessions.kind ∈ {manual, cli, oauth}`. `Settings → Sessions` reads from the same table.
 
 ## MCP Tools
 
-Tool names should mirror CLI verbs but use MCP-friendly snake case:
+Tool names mirror CLI verbs in snake_case:
 
-- `create_page`
-- `update_page`
-- `prepare_page_edit`
-- `patch_page`
-- `get_page`
+Session:
+
+- `list_workspaces`
+- `whoami`
+
+Page lifecycle:
+
+- `create_page`, `create_page_from_template`
+- `get_page`, `get_rendered_page`, `list_page_versions`
+- `prepare_page_edit`, `patch_page`, `update_page`, `validate_page_source`
+- `move_page`, `create_page_snapshot`, `restore_page_version`
 - `upload_attachment`
-- `validate_page_source`
-- `wait_for_review`
-- `list_comments`
-- `create_comment`
-- `reply_to_thread`
-- `resolve_thread`
-- `unresolve_thread`
-- `complete_review_thread`
-- `update_comment_anchor`
-- `delete_thread`
-- `publish_page`
-- `publish_folder`
-- `update_publication`
-- `revoke_publication`
+
+Review:
+
+- `wait_for_review` (accepts `after_event_id` cursor; emits `status: matched | timeout`)
+- `list_comments`, `create_comment`
+- `reply_to_thread` (user attribution only)
+- `complete_review_thread` (agent-attributed; accepts `agent_name`, `agent_model`, `agent_session_id`; optional `resolve` in one call)
+- `resolve_thread`, `unresolve_thread`, `update_comment_anchor`, `delete_thread`
 - `list_review_events`
-- `search_workspace`
-- `search_pages` (page-only compatibility alias)
+
+Publishing:
+
+- `publish_page`, `publish_folder`, `update_publication`, `revoke_publication`
+
+Search and navigation:
+
+- `search_workspace`, `search_pages` (page-only compatibility alias)
 - `list_workspace_tree`
-- `move_page`
-- `list_templates`
-- `get_template`
-- `create_template`
-- `update_template`
-- `render_template`
-- `create_page_from_template`
-- `invite_workspace_member`
+
+Templates:
+
+- `list_templates`, `get_template`, `create_template`, `update_template`, `render_template`
+
+Members:
+
+- `invite_workspace_member` (creates user if missing, adds member, emails magic link when email is configured)
+
+## initialize.instructions
+
+The `initialize` response includes an `instructions` string (≤8 KB) distilled from `skills/vegastack-pages/SKILL.md`. Clients that honor the field inject it into the model's system prompt. The same content is available as MCP resources under `vpg://skills/vegastack-pages/...`.
 
 ## MCP Resources
 

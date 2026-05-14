@@ -14,6 +14,7 @@ import {
   getMcpSession,
   permissionService,
   publicationService,
+  touchMcpSession,
   workspaceService,
 } from "./runtime";
 import { devAutoLoginUser } from "./dev-auth";
@@ -151,6 +152,13 @@ export async function getApiRequestActor(
     const session = await getMcpSession(bearer);
     const user = session ? workspaceService.getUser(session.userId) : null;
     if (session && user) {
+      const userAgent = request?.headers.get("user-agent") ?? null;
+      const origin = request?.headers.get("origin") ?? null;
+      void touchMcpSession({
+        sessionId: session.id,
+        userAgent,
+        origin,
+      }).catch(() => undefined);
       return {
         user,
         sessionId: session.id,

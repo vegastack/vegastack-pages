@@ -67,6 +67,42 @@ async function assertWorkspaceAdmin(
   return actor as AuthenticatedActor;
 }
 
+async function assertWorkspaceMember(
+  cookies: Parameters<APIRoute>[0]["cookies"],
+  request: Request,
+  workspaceId: string,
+) {
+  await ensureSeedData();
+  const actor = await getApiRequestActor(cookies, request);
+  if (!actor.user || actor.devFallback || actor.authMode !== "session") {
+    throw new AppError(
+      "AUTH_REQUIRED",
+      "Log in before viewing your sessions.",
+      401,
+    );
+  }
+  const member = workspaceService.getMember(workspaceId, actor.user.id);
+  const permission =
+    actor.workspaceId && actor.workspaceId !== workspaceId
+      ? "none"
+      : permissionService.resolve({
+          user: actor.user,
+          member,
+          workspaceId,
+        });
+  if (permission === "none") {
+    throw new AppError(
+      "PERMISSION_DENIED",
+      "You are not a member of this workspace.",
+      403,
+    );
+  }
+  return {
+    actor: actor as AuthenticatedActor,
+    permission,
+  };
+}
+
 export const GET: APIRoute = async ({ cookies, request, url }) => {
   try {
     const workspaceId = requireWorkspaceId(
@@ -74,9 +110,22 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       "query",
       "Pass workspace_id when listing MCP sessions.",
     );
-    await assertWorkspaceAdmin(cookies, request, workspaceId);
-    const sessions = await listMcpSessions({ workspaceId });
-    return Response.json({ sessions });
+    const view = (url.searchParams.get("view") ?? "mine").toLowerCase();
+    if (view === "workspace") {
+      await assertWorkspaceAdmin(cookies, request, workspaceId);
+      const sessions = await listMcpSessions({ workspaceId });
+      return Response.json({ sessions, view: "workspace" });
+    }
+    const { actor } = await assertWorkspaceMember(
+      cookies,
+      request,
+      workspaceId,
+    );
+    const sessions = await listMcpSessions({
+      workspaceId,
+      userId: actor.user.id,
+    });
+    return Response.json({ sessions, view: "mine" });
   } catch (error) {
     return jsonAppError(error, "Could not list MCP sessions.");
   }
@@ -90,7 +139,11 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
       "body",
       "Pass workspace_id when creating an MCP session.",
     );
-    const actor = await assertWorkspaceAdmin(cookies, request, workspaceId);
+    const { actor } = await assertWorkspaceMember(
+      cookies,
+      request,
+      workspaceId,
+    );
     await checkRateLimit({
       key: `mcp-session:${actor.user.id}:${workspaceId}`,
       limit: 10,
@@ -103,6 +156,7 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
       protocolVersion: body.protocol_version
         ? String(body.protocol_version)
         : null,
+      kind: "manual",
     });
     const { session, rawToken } = created;
     auditService.record({
@@ -145,7 +199,23 @@ export const DELETE: APIRoute = async ({ cookies, request }) => {
         hint: "Pass the MCP session_id returned when the session was created.",
       });
     }
-    const actor = await assertWorkspaceAdmin(cookies, request, workspaceId);
+    const { actor, permission } = await assertWorkspaceMember(
+      cookies,
+      request,
+      workspaceId,
+    );
+    const ownedSessions = await listMcpSessions({
+      workspaceId,
+      userId: actor.user.id,
+    });
+    const owned = ownedSessions.some((session) => session.id === sessionId);
+    if (!owned && permission !== "admin") {
+      throw new AppError(
+        "PERMISSION_DENIED",
+        "You can only revoke your own sessions.",
+        403,
+      );
+    }
     const revoked = await revokeMcpSession({ workspaceId, sessionId });
     if (!revoked)
       throw new AppError(
@@ -159,7 +229,7 @@ export const DELETE: APIRoute = async ({ cookies, request }) => {
       action: "mcp_session.revoked",
       targetType: "mcp_session",
       targetId: sessionId,
-      metadata: {},
+      metadata: { self: owned },
     });
     return Response.json({ status: "ok" });
   } catch (error) {

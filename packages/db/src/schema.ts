@@ -355,6 +355,24 @@ export const pageVersions = sqliteTable(
   (table) => [index("page_versions_page_idx").on(table.pageId)],
 );
 
+export const oauthClients = sqliteTable(
+  "oauth_clients",
+  {
+    id: text("id").primaryKey(),
+    clientName: text("client_name").notNull(),
+    redirectUrisJson: text("redirect_uris_json").notNull(),
+    softwareId: text("software_id"),
+    softwareVersion: text("software_version"),
+    tokenEndpointAuthMethod: text("token_endpoint_auth_method")
+      .notNull()
+      .default("none"),
+    registeredUserAgent: text("registered_user_agent"),
+    registeredIp: text("registered_ip"),
+    ...timestamps,
+  },
+  (table) => [index("oauth_clients_client_name_idx").on(table.clientName)],
+);
+
 export const agentSessions = sqliteTable(
   "agent_sessions",
   {
@@ -369,6 +387,14 @@ export const agentSessions = sqliteTable(
     clientVersion: text("client_version"),
     model: text("model"),
     lastSeenAt: text("last_seen_at").notNull(),
+    kind: text("kind", { enum: ["manual", "cli", "oauth"] })
+      .notNull()
+      .default("manual"),
+    userAgent: text("user_agent"),
+    lastOrigin: text("last_origin"),
+    oauthClientId: text("oauth_client_id").references(() => oauthClients.id, {
+      onDelete: "set null",
+    }),
     ...timestamps,
   },
   (table) => [
@@ -376,6 +402,7 @@ export const agentSessions = sqliteTable(
       table.workspaceId,
       table.userId,
     ),
+    index("agent_sessions_kind_idx").on(table.kind),
   ],
 );
 
@@ -393,6 +420,9 @@ export const mcpSessions = sqliteTable(
     ),
     protocolVersion: text("protocol_version"),
     expiresAt: text("expires_at"),
+    refreshTokenHash: text("refresh_token_hash"),
+    refreshTokenExpiresAt: text("refresh_token_expires_at"),
+    scope: text("scope"),
     ...timestamps,
   },
   (table) => [
@@ -400,6 +430,42 @@ export const mcpSessions = sqliteTable(
       table.workspaceId,
       table.userId,
     ),
+    uniqueIndex("mcp_sessions_refresh_hash_unique").on(table.refreshTokenHash),
+  ],
+);
+
+export const oauthGrants = sqliteTable(
+  "oauth_grants",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    kind: text("kind", { enum: ["auth_code", "device_code"] }).notNull(),
+    status: text("status", {
+      enum: ["pending", "approved", "denied", "consumed"],
+    })
+      .notNull()
+      .default("pending"),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClients.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    workspaceId: text("workspace_id").references(() => workspaces.id, {
+      onDelete: "cascade",
+    }),
+    scope: text("scope"),
+    redirectUri: text("redirect_uri"),
+    codeChallenge: text("code_challenge"),
+    codeChallengeMethod: text("code_challenge_method"),
+    userCode: text("user_code"),
+    lastPolledAt: text("last_polled_at"),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("oauth_grants_expires_idx").on(table.expiresAt),
+    index("oauth_grants_kind_status_idx").on(table.kind, table.status),
+    uniqueIndex("oauth_grants_user_code_unique").on(table.userCode),
   ],
 );
 

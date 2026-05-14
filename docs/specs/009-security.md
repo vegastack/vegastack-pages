@@ -1,7 +1,7 @@
 # Security And Trust Boundaries Specification
 
 Status: Draft  
-Date: 2026-05-10
+Date: 2026-05-14
 
 ## Security Goals
 
@@ -48,9 +48,46 @@ Session requirements:
 
 - HttpOnly cookies for browser sessions.
 - Secure cookies in production.
-- SameSite policy appropriate to MCP/browser auth flow.
+- SameSite=Lax cookies so the OAuth consent popup at `/oauth/authorize` resolves the user session on top-level navigation.
 - Session rotation after login.
 - Logout destroys server-side session where applicable.
+
+## MCP authorization (OAuth 2.1 + PKCE)
+
+The MCP endpoint is bearer-only and supports three issuance flows that all share the `mcp_sessions` storage table.
+
+Spec surface:
+
+- `GET /.well-known/oauth-protected-resource` returns RFC 9728 metadata pointing at `<origin>/mcp` and the authorization server at `<origin>`.
+- `GET /.well-known/oauth-authorization-server` returns RFC 8414 metadata advertising the endpoints below.
+- `POST /oauth/register` is RFC 7591 dynamic client registration. Public clients only (`token_endpoint_auth_method=none`); `client_secret` is rejected. `redirect_uris` must be `https://` or RFC 8252 loopback (`http://127.0.0.1[:port]`, `http://localhost[:port]`, `http://[::1][:port]`). IP-keyed rate limit 20/h.
+- `GET /oauth/authorize` renders a consent screen after the user is signed in (magic-link flow resumes via a 5-minute `vpg_oauth_pending` cookie + `/oauth/authorize/resume`). PKCE S256 is mandatory; `code_challenge_method=plain` is rejected.
+- `POST /oauth/authorize/consent` mints a 60-second single-use authorization code bound to client + redirect_uri + workspace + PKCE challenge.
+- `POST /oauth/token` exchanges code → 1-hour access token + 60-day rotating refresh token. Refresh-token rotation invalidates the prior refresh token on every use (one-step replay protection); attempts to reuse the rotated token return `invalid_grant`.
+- `POST /oauth/revoke` follows RFC 7009 and accepts either an access token or a refresh token.
+- `POST /oauth/device` + `GET/POST /oauth/device/verify` implement RFC 8628 device-authorization grant for CLI / SSH-bound clients.
+
+Token storage:
+
+- All bearer tokens (`oauth`, `manual`, `cli`) live in `mcp_sessions` keyed by `mcp_${sha256(rawToken)}`. The raw token is shown once at issuance and never persisted.
+- Refresh tokens are stored as `mcp_${sha256(rawRefresh)}` in `mcp_sessions.refresh_token_hash` with a `UNIQUE` index. Rotation atomically replaces the hash and updates `mcp_sessions.id` to the new access-token hash.
+- Workspace-admin override allows revoking any session in the workspace; non-admin members can only revoke their own sessions.
+
+Rate limits:
+
+- `oauth.register`: 20/h/IP.
+- `oauth.token`: 60/min/IP.
+- `oauth.device`: 60/h/IP.
+- Device-code poll respects RFC 8628 interval/`slow_down`.
+
+## DNS rebinding (MCP Streamable HTTP)
+
+Per MCP 2025-06-18, the server validates the Host header on `/mcp` to prevent DNS-rebinding attacks against local self-host deployments:
+
+- Accept the request if the Host header (or `X-Forwarded-Host`) matches the request URL host, is loopback (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`), or is enumerated in `VPG_MCP_ALLOWED_HOSTS`.
+- Reject with 403 otherwise.
+
+The legacy `VPG_MCP_ALLOWED_ORIGINS` is now a no-op; bearer auth has no CSRF surface so the origin check has been removed. CORS on `/mcp` is `Access-Control-Allow-Origin: *` without credentials.
 
 ## Authorization
 
@@ -170,6 +207,9 @@ App-level rate limits:
 - Attachment uploads.
 - MCP wait/session creation.
 - CLI login attempts.
+- `oauth.register` (DCR) per IP.
+- `oauth.token` per IP.
+- `oauth.device` per IP.
 
 Use simple D1/SQLite-backed counters first if no platform feature is available.
 
@@ -184,7 +224,8 @@ Audit admin-sensitive actions:
 - Publication create/update/revoke.
 - OAuth provider config change.
 - Retention setting change.
-- MCP login/session creation.
+- MCP login/session creation (`mcp_session.created`, `mcp_session.revoked`).
+- OAuth lifecycle (`oauth.client_registered`, `oauth.session_issued`, `oauth.session_refreshed`, `oauth.session_revoked`).
 - Deploy/update metadata if app can observe it.
 
 Audit logs should not store raw secrets or full page content.
@@ -217,11 +258,11 @@ Public Pagefind is only for explicitly public/indexable exports later.
 
 ## Agent Security
 
-Agents act through workspace-scoped MCP bearer sessions created by an authenticated workspace admin.
+Agents act through workspace-scoped MCP bearer sessions. Three issuance flows (OAuth, manual, CLI) share the same `mcp_sessions` table and the same revocation surface at **Settings → Sessions**.
 
 MCP tokens are shown once, stored hashed, scoped to one workspace, and revocable from settings.
 
-Agent replies must record:
+Agent attribution is recorded only when the agent uses `complete_review_thread` (MCP) or `vpg complete-thread` (CLI). `reply_to_thread` / `vpg reply` post as the authenticated user. Recorded fields:
 
 - User ID.
 - Agent name.
@@ -229,4 +270,4 @@ Agent replies must record:
 - Agent session ID.
 - MCP or CLI client metadata where available.
 
-MCP tools are workspace-scoped after login.
+MCP tools are workspace-scoped after the bearer is bound. Vendor recognition on the Sessions page is a curated `(client_name, redirect_host)` map covering Claude, ChatGPT, Cursor, Windsurf, Continue, Cline, Codex, vpg CLI, with a `generic` fallback for unknown clients.

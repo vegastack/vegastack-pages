@@ -11,7 +11,7 @@ type SectionId =
   | "members"
   | "attachments"
   | "templates"
-  | "mcp"
+  | "sessions"
   | "audit"
   | "profile";
 
@@ -101,12 +101,17 @@ const groups: Array<{
         href: "/app/settings/attachments",
         icon: "paperclip",
       },
-      { id: "mcp", label: "MCP", href: "/app/settings/mcp", icon: "plug" },
     ],
   },
   {
     label: "Activity",
     items: [
+      {
+        id: "sessions",
+        label: "Sessions",
+        href: "/app/settings/sessions",
+        icon: "plug",
+      },
       {
         id: "audit",
         label: "Audit log",

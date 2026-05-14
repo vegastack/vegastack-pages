@@ -124,6 +124,8 @@ enum Command {
         timeout_seconds: u64,
         #[arg(long, default_value_t = 2)]
         poll_seconds: u64,
+        #[arg(long)]
+        after_id: Option<String>,
     },
     Comments {
         page: String,
@@ -2286,6 +2288,7 @@ fn run(cli: &Cli) -> Result<Value, String> {
             until,
             timeout_seconds,
             poll_seconds,
+            after_id,
         }) => {
             let active_workspace = resolved_workspace(cli)?;
             wait_for_review(
@@ -2295,6 +2298,7 @@ fn run(cli: &Cli) -> Result<Value, String> {
                 until,
                 *timeout_seconds,
                 *poll_seconds,
+                after_id.as_deref(),
             )
         }
         Some(Command::Doctor) => api.get("/api/setup/status", &[]),
@@ -2424,19 +2428,21 @@ fn wait_for_review(
     until: &WaitCondition,
     timeout_seconds: u64,
     poll_seconds: u64,
+    after_id: Option<&str>,
 ) -> Result<Value, String> {
     let page_id = resolve_page_id(api, page, workspace)?;
     let timeout_seconds = timeout_seconds.min(600);
     let started = Instant::now();
     loop {
+        let mut event_params: Vec<(&str, String)> = vec![
+            ("limit", "50".to_string()),
+            ("workspace_id", workspace.to_string()),
+        ];
+        if let Some(after) = after_id {
+            event_params.push(("after_id", after.to_string()));
+        }
         let events = api
-            .get(
-                &format!("/api/pages/{page_id}/events"),
-                &[
-                    ("limit", "50".to_string()),
-                    ("workspace_id", workspace.to_string()),
-                ],
-            )
+            .get(&format!("/api/pages/{page_id}/events"), &event_params)
             .unwrap_or_else(|_| json!({ "events": [] }));
         let comments = api.get(
             &format!("/api/pages/{page_id}/comments"),
@@ -2481,7 +2487,7 @@ fn wait_for_review(
         };
         if condition_met {
             return Ok(json!({
-                "status": "condition_met",
+                "status": "matched",
                 "page_id": page_id,
                 "condition": format!("{until:?}"),
                 "timeout_seconds": timeout_seconds,

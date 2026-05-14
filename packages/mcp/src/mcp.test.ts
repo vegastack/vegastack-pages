@@ -35,8 +35,10 @@ describe("mcp tool registry", () => {
     expect(jsonRpcError(1, -32601, "Nope").error.code).toBe(-32601);
   });
 
-  it("requires workspace_id on every tool schema", () => {
+  it("requires workspace_id on every workspace-scoped tool schema", () => {
+    const sessionScopedTools = new Set(["list_workspaces", "whoami"]);
     for (const tool of mcpToolSpecs) {
+      if (sessionScopedTools.has(tool.name)) continue;
       expect(tool.inputSchema.required).toContain("workspace_id");
       expect(tool.inputSchema.properties).toHaveProperty("workspace_id");
     }

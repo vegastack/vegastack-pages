@@ -59,20 +59,22 @@ The CLI accepts `--token` or `VPG_TOKEN` and sends it as `Authorization: Bearer 
 vpg login --base-url https://pages.example.com --workspace wks_123 --token "$VPG_TOKEN"
 ```
 
-`vpg login` stores the token in the OS keychain where available, otherwise in an owner-only local file. Workspace-scoped tokens created in the web app are accepted by the standalone API routes and are enforced against their workspace scope.
+`vpg login` stores the token in the OS keychain where available, otherwise in an owner-only local file. Workspace-scoped tokens created in the web app are accepted by the standalone API routes and enforced against their workspace scope.
+
+Get a token from **Settings > Sessions** in the web app, or — for browser-based agents like Claude.ai — let the agent run the OAuth 2.1 + PKCE flow against `/.well-known/oauth-protected-resource`. CLI tokens issued via `vpg login --token` appear on the same Sessions page with `kind=cli` and can be revoked from there.
 
 The CLI talks to standalone VegaStack Pages API routes. It does not call MCP and does not need an MCP client to create/edit pages, handle comments, wait for review, manage templates, update publications, upload attachments, or invite members.
-
-Workspace-scoped MCP tokens created in **Settings > MCP** are valid for the CLI API routes too. The server still enforces the token's workspace.
 
 ## Common Commands
 
 ```sh
+vpg whoami
+vpg workspaces
 vpg --workspace wks_123 create --file ./plan.md --title "Plan"
 vpg --workspace wks_123 create --template prd --title "Search redesign" --set owner=platform
 vpg --workspace wks_123 templates list
 vpg --workspace wks_123 templates render prd --title "Search redesign" --set owner=platform
-vpg --workspace wks_123 wait pg_123 --until first-response
+vpg --workspace wks_123 wait pg_123 --until first-response --after-id evt_42
 vpg --workspace wks_123 publish-page pg_123 --permission comment
 vpg --workspace wks_123 comments pg_123 --status all
 vpg --workspace wks_123 comment pg_123 --body "Clarify this." --selected-text "old phrase"
@@ -80,6 +82,7 @@ vpg --workspace wks_123 comment pg_html --body "Move this CTA." --anchor-file ht
 vpg --workspace wks_123 pages prepare-edit pg_123
 vpg --workspace wks_123 pages patch pg_123 --base-version-id ver_123 --find old --replace new
 vpg --workspace wks_123 pages validate --page pg_123
+vpg --workspace wks_123 reply cmt_123 --body "Done."
 vpg --workspace wks_123 complete-thread cmt_123 --body "Fixed." --resolve --agent-name Codex
 vpg --workspace wks_123 update-anchor cmt_123 --anchor-file html-pin.json
 vpg --workspace wks_123 search "runbook" --type page
@@ -89,6 +92,11 @@ vpg --workspace wks_123 revoke-publication pub_123
 vpg --workspace wks_123 templates create --args-file ./template.json
 vpg --workspace wks_123 members invite --email teammate@example.com --role editor
 ```
+
+Notes:
+
+- `vpg wait` emits status `matched` when the condition fires (or `timeout`). Use `--after-id <event_id>` to resume from a known event cursor without re-processing earlier ones.
+- `vpg reply` posts as the authenticated user. Use `vpg complete-thread` for agent-attributed replies (sets `agent_name`/`agent_model`/`agent_session_id`) and optionally `--resolve` in the same call.
 
 Template create/update commands accept JSON objects matching the standalone template API. `--set key=value` can patch simple fields, including dotted paths such as `--set properties.owner=platform`.
 

@@ -53,7 +53,7 @@ vpg pages move pg_123 --title "New title" --folder-path guides/setup
 ## Review
 
 ```sh
-vpg wait pg_123 --until first-response --timeout-seconds 600
+vpg wait pg_123 --until first-response --timeout-seconds 600 --after-id evt_42
 vpg comments pg_123 --status all
 vpg comment pg_123 --body "Please clarify this." --selected-text "unclear phrase" --source-start 40 --source-end 54
 vpg comment pg_html --body "Move this CTA." --anchor-file html-pin.json
@@ -66,7 +66,9 @@ vpg delete-thread cmt_123
 vpg events --page pg_123 --limit 50
 ```
 
-`vpg wait` defaults to 600 seconds and clamps larger values to 600 seconds so review waits do not block an agent indefinitely.
+`vpg wait` defaults to 600 seconds and clamps larger values to 600 seconds so review waits do not block an agent indefinitely. The matched return uses `status: "matched"`; timeout returns `status: "timeout"`. Use `--after-id <event_id>` to resume from a known cursor.
+
+`vpg reply` posts as the authenticated user. For agent-attributed replies (sets `agent_name`/`agent_model`/`agent_session_id` server-side, with optional `--resolve`), use `vpg complete-thread`.
 
 For Markdown/MDX comments, prefer `--selected-text` plus source offsets and prefix/suffix. For HTML pages, use `--anchor-json` or `--anchor-file` with a point selector; see `references/comments.md`.
 

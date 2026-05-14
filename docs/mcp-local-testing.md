@@ -54,7 +54,13 @@ For normal local development, use the seeded dev user and the local app. For tun
 VPG_MCP_TOKEN=dev-secret pnpm dev -- --host 127.0.0.1 --port 4322
 ```
 
-Production deployments should create workspace-scoped MCP sessions in **Settings > MCP**. Static MCP tokens are a local/debug path and require `VPG_ALLOW_STATIC_MCP_TOKEN=true` plus `VPG_MCP_WORKSPACE_ID` if explicitly enabled outside dev.
+Production deployments should issue tokens through one of:
+
+- OAuth 2.1 + PKCE from a browser MCP client (Claude.ai, ChatGPT, Cursor remote, …). The client auto-discovers `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` and registers itself; no setup required.
+- Manual bearer from **Settings > Sessions** in the web app.
+- `vpg login --token <token>` for headless CLI use.
+
+Static MCP tokens (`VPG_MCP_TOKEN`) are a local/debug path and require `VPG_ALLOW_STATIC_MCP_TOKEN=true` plus `VPG_MCP_WORKSPACE_ID` outside dev.
 
 Claude Code:
 
@@ -82,6 +88,33 @@ curl -s http://127.0.0.1:4322/mcp \
 
 The server enforces `VPG_MCP_MAX_BODY_BYTES`, defaulting to 2 MiB.
 
+## Host Validation
+
+`/mcp` validates the Host header per MCP 2025-06-18 to prevent DNS-rebinding attacks. When running behind a reverse proxy, set `VPG_MCP_ALLOWED_HOSTS` to the public host(s) you'll present:
+
+```sh
+export VPG_MCP_ALLOWED_HOSTS=pages.example.com,pages-staging.example.com
+```
+
+Loopback hosts (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`) and any host that matches the request URL are always allowed. The legacy `VPG_MCP_ALLOWED_ORIGINS` is a no-op (Bearer-only auth removes the CSRF surface).
+
+## OAuth Endpoints
+
+Verify the full OAuth surface is reachable in dev:
+
+```sh
+curl -s http://127.0.0.1:4322/.well-known/oauth-protected-resource | jq
+curl -s http://127.0.0.1:4322/.well-known/oauth-authorization-server | jq
+```
+
+For a quick end-to-end probe of the 401 contract (should include `resource_metadata` and `error="invalid_token"`):
+
+```sh
+curl -i -X POST http://127.0.0.1:4322/mcp \
+  -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+```
+
 ## Agent Edit Flow
 
 Use this sequence for reliable edits:
@@ -96,3 +129,5 @@ Use this sequence for reliable edits:
 Every content change advances `version_id`, even when no checkpoint record is created.
 
 For structured new pages, prefer `create_page_from_template` so the agent starts from the workspace's expected format.
+
+`reply_to_thread` (MCP) and `vpg reply` (CLI) post as the authenticated user. Use `complete_review_thread` / `vpg complete-thread` when the agent needs `agent_name`/`agent_model`/`agent_session_id` attribution.

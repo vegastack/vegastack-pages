@@ -347,6 +347,8 @@ export const templateService = new TemplateService(objectStore);
 
 export const rateLimiter = new RateLimiter();
 
+export type McpSessionKind = "manual" | "cli" | "oauth";
+
 export type McpSessionRecord = {
   id: string;
   workspaceId: string;
@@ -356,6 +358,12 @@ export type McpSessionRecord = {
   expiresAt: string;
   createdAt: string;
   updatedAt: string;
+  kind?: McpSessionKind;
+  lastSeenAt?: string | null;
+  lastOrigin?: string | null;
+  userAgent?: string | null;
+  scope?: string | null;
+  oauthClientId?: string | null;
 };
 
 type AuthIdentityRow = {
@@ -431,7 +439,7 @@ function isNodeRuntime() {
   );
 }
 
-async function sha256Hex(input: string): Promise<string> {
+export async function sha256Hex(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)]
@@ -552,6 +560,10 @@ function restoreArray<T>(
   const value = (service as Record<string, unknown>)[key];
   if (!Array.isArray(value)) return;
   value.splice(0, value.length, ...(values ?? []));
+}
+
+export function runtimeIsD1(): boolean {
+  return runtimeD1 !== null && runtimeD1 !== undefined;
 }
 
 export async function d1All<T>(
@@ -1935,26 +1947,55 @@ export async function createMcpSession(input: {
   clientName?: string;
   protocolVersion?: string | null;
   ttlDays?: number;
-}): Promise<{ session: McpSessionRecord; rawToken: string }> {
+  ttlMs?: number;
+  kind?: McpSessionKind;
+  scope?: string | null;
+  refreshTokenHash?: string | null;
+  refreshTokenExpiresAt?: string | null;
+  userAgent?: string | null;
+  lastOrigin?: string | null;
+  oauthClientId?: string | null;
+}): Promise<{
+  session: McpSessionRecord;
+  rawToken: string;
+  refreshToken: string | null;
+}> {
   await ensureRuntimeReady();
   const now = new Date().toISOString();
   const rawToken = randomBearerToken();
+  const ttlMs =
+    input.ttlMs !== undefined
+      ? input.ttlMs
+      : (input.ttlDays ?? 30) * 24 * 60 * 60_000;
   const session: McpSessionRecord = {
     id: await mcpSessionIdForBearer(rawToken),
     workspaceId: input.workspaceId,
     userId: input.userId,
     clientName: input.clientName?.trim() || "MCP client",
     protocolVersion: input.protocolVersion ?? null,
-    expiresAt: new Date(
-      Date.now() + (input.ttlDays ?? 30) * 24 * 60 * 60_000,
-    ).toISOString(),
+    expiresAt: new Date(Date.now() + ttlMs).toISOString(),
     createdAt: now,
     updatedAt: now,
+    kind: input.kind ?? "manual",
+    lastSeenAt: now,
+    lastOrigin: input.lastOrigin ?? null,
+    userAgent: input.userAgent ?? null,
+    scope: input.scope ?? null,
+    oauthClientId: input.oauthClientId ?? null,
   };
   fallbackMcpSessions.set(session.id, session);
+  let refreshToken: string | null = null;
+  let refreshTokenHash: string | null = input.refreshTokenHash ?? null;
+  if (refreshTokenHash === null && input.kind === "oauth") {
+    refreshToken = randomBearerToken();
+    refreshTokenHash = await mcpSessionIdForBearer(refreshToken);
+  }
+  if (refreshTokenHash) {
+    rememberRefreshTokenHash(refreshTokenHash, session.id);
+  }
   if (runtimeD1) {
     await d1Run(
-      "INSERT INTO agent_sessions (id, workspace_id, user_id, client_name, client_version, model, last_seen_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO agent_sessions (id, workspace_id, user_id, client_name, client_version, model, last_seen_at, kind, user_agent, last_origin, oauth_client_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       session.id,
       session.workspaceId,
       session.userId,
@@ -1962,22 +2003,181 @@ export async function createMcpSession(input: {
       null,
       null,
       now,
+      session.kind ?? "manual",
+      session.userAgent ?? null,
+      session.lastOrigin ?? null,
+      session.oauthClientId ?? null,
       now,
       now,
     );
     await d1Run(
-      "INSERT INTO mcp_sessions (id, workspace_id, user_id, agent_session_id, protocol_version, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mcp_sessions (id, workspace_id, user_id, agent_session_id, protocol_version, expires_at, refresh_token_hash, refresh_token_expires_at, scope, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       session.id,
       session.workspaceId,
       session.userId,
       session.id,
       session.protocolVersion,
       session.expiresAt,
+      refreshTokenHash,
+      input.refreshTokenExpiresAt ?? null,
+      session.scope ?? null,
       session.createdAt,
       session.updatedAt,
     );
   }
-  return { session, rawToken };
+  return { session, rawToken, refreshToken };
+}
+
+export async function touchMcpSession(input: {
+  sessionId: string;
+  origin?: string | null;
+  userAgent?: string | null;
+}): Promise<void> {
+  await ensureRuntimeReady();
+  const now = new Date().toISOString();
+  const fallback = fallbackMcpSessions.get(input.sessionId);
+  if (fallback) {
+    fallback.lastSeenAt = now;
+    if (input.origin !== undefined) fallback.lastOrigin = input.origin ?? null;
+    if (input.userAgent !== undefined)
+      fallback.userAgent = input.userAgent ?? null;
+    fallback.updatedAt = now;
+  }
+  if (runtimeD1) {
+    await d1Run(
+      "UPDATE agent_sessions SET last_seen_at = ?, last_origin = COALESCE(?, last_origin), user_agent = COALESCE(?, user_agent), updated_at = ? WHERE id = ?",
+      now,
+      input.origin ?? null,
+      input.userAgent ?? null,
+      now,
+      input.sessionId,
+    );
+  }
+}
+
+export async function rotateMcpSessionTokens(input: {
+  sessionId: string;
+  ttlMs: number;
+  refreshTtlMs: number;
+  userAgent?: string | null;
+  lastOrigin?: string | null;
+}): Promise<{
+  rawToken: string;
+  refreshToken: string;
+  expiresAt: string;
+  refreshExpiresAt: string;
+} | null> {
+  await ensureRuntimeReady();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + input.ttlMs).toISOString();
+  const refreshExpiresAt = new Date(
+    now.getTime() + input.refreshTtlMs,
+  ).toISOString();
+  const rawToken = randomBearerToken();
+  const refreshToken = randomBearerToken();
+  const newId = await mcpSessionIdForBearer(rawToken);
+  const refreshHash = await mcpSessionIdForBearer(refreshToken);
+  const updatedAt = now.toISOString();
+  if (runtimeD1) {
+    const existing = await runtimeD1
+      .prepare(
+        "SELECT id, agent_session_id as agentSessionId FROM mcp_sessions WHERE id = ?",
+      )
+      .bind(input.sessionId)
+      .first<{ id: string; agentSessionId: string | null }>();
+    if (!existing) return null;
+    await d1Run(
+      "UPDATE mcp_sessions SET id = ?, expires_at = ?, refresh_token_hash = ?, refresh_token_expires_at = ?, updated_at = ? WHERE id = ?",
+      newId,
+      expiresAt,
+      refreshHash,
+      refreshExpiresAt,
+      updatedAt,
+      input.sessionId,
+    );
+    if (existing.agentSessionId) {
+      await d1Run(
+        "UPDATE agent_sessions SET id = ?, last_seen_at = ?, last_origin = COALESCE(?, last_origin), user_agent = COALESCE(?, user_agent), updated_at = ? WHERE id = ?",
+        newId,
+        updatedAt,
+        input.lastOrigin ?? null,
+        input.userAgent ?? null,
+        updatedAt,
+        existing.agentSessionId,
+      );
+      await d1Run(
+        "UPDATE mcp_sessions SET agent_session_id = ? WHERE id = ?",
+        newId,
+        newId,
+      );
+    }
+  }
+  const fallbackExisting = fallbackMcpSessions.get(input.sessionId);
+  if (fallbackExisting) {
+    // Drop the old refresh hash from the index (we don't have it directly,
+    // but we can iterate and remove entries pointing at the old session id).
+    for (const [hash, sid] of fallbackRefreshIndex.entries()) {
+      if (sid === input.sessionId) fallbackRefreshIndex.delete(hash);
+    }
+    fallbackMcpSessions.delete(input.sessionId);
+    const rotated = {
+      ...fallbackExisting,
+      id: newId,
+      expiresAt,
+      lastSeenAt: updatedAt,
+      lastOrigin: input.lastOrigin ?? fallbackExisting.lastOrigin ?? null,
+      userAgent: input.userAgent ?? fallbackExisting.userAgent ?? null,
+      updatedAt,
+    };
+    fallbackMcpSessions.set(newId, rotated);
+    rememberRefreshTokenHash(refreshHash, newId);
+  } else if (!runtimeD1) {
+    return null;
+  } else {
+    rememberRefreshTokenHash(refreshHash, newId);
+  }
+  return { rawToken, refreshToken, expiresAt, refreshExpiresAt };
+}
+
+const fallbackRefreshIndex = new Map<string, string>();
+
+export function rememberRefreshTokenHash(
+  refreshHash: string,
+  sessionId: string,
+): void {
+  fallbackRefreshIndex.set(refreshHash, sessionId);
+}
+
+export function forgetRefreshTokenHash(refreshHash: string): void {
+  fallbackRefreshIndex.delete(refreshHash);
+}
+
+export async function findMcpSessionByRefreshToken(
+  rawRefreshToken: string,
+): Promise<McpSessionRecord | null> {
+  await ensureRuntimeReady();
+  const hash = await mcpSessionIdForBearer(rawRefreshToken);
+  if (runtimeD1) {
+    const row = await runtimeD1
+      .prepare(
+        "SELECT m.id, m.workspace_id as workspaceId, m.user_id as userId, COALESCE(a.client_name, 'MCP client') as clientName, m.protocol_version as protocolVersion, m.expires_at as expiresAt, m.refresh_token_expires_at as refreshTokenExpiresAt, a.kind as kind, m.scope as scope, m.created_at as createdAt, m.updated_at as updatedAt FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.refresh_token_hash = ?",
+      )
+      .bind(hash)
+      .first<McpSessionRecord & { refreshTokenExpiresAt: string | null }>();
+    if (row) {
+      if (
+        row.refreshTokenExpiresAt &&
+        Date.parse(row.refreshTokenExpiresAt) <= Date.now()
+      ) {
+        return null;
+      }
+      return row;
+    }
+  }
+  const sessionId = fallbackRefreshIndex.get(hash);
+  if (!sessionId) return null;
+  const session = fallbackMcpSessions.get(sessionId);
+  return session ?? null;
 }
 
 export async function listMcpSessions(input: {
@@ -1988,7 +2188,7 @@ export async function listMcpSessions(input: {
   const now = new Date().toISOString();
   if (runtimeD1) {
     const rows = await d1All<McpSessionRecord>(
-      "SELECT m.id, m.workspace_id as workspaceId, m.user_id as userId, COALESCE(a.client_name, 'MCP client') as clientName, m.protocol_version as protocolVersion, m.expires_at as expiresAt, m.created_at as createdAt, m.updated_at as updatedAt FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.workspace_id = ? AND m.expires_at > ? ORDER BY m.created_at DESC",
+      "SELECT m.id, m.workspace_id as workspaceId, m.user_id as userId, COALESCE(a.client_name, 'MCP client') as clientName, m.protocol_version as protocolVersion, m.expires_at as expiresAt, m.created_at as createdAt, m.updated_at as updatedAt, COALESCE(a.kind, 'manual') as kind, a.last_seen_at as lastSeenAt, a.last_origin as lastOrigin, a.user_agent as userAgent, m.scope as scope, a.oauth_client_id as oauthClientId FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.workspace_id = ? AND m.expires_at > ? ORDER BY m.created_at DESC",
       input.workspaceId,
       now,
     );
@@ -2014,10 +2214,12 @@ export async function getMcpSession(
 ): Promise<McpSessionRecord | null> {
   await ensureRuntimeReady();
   const hashedSessionId = await mcpSessionIdForBearer(rawToken);
+  const selectColumns =
+    "m.id, m.workspace_id as workspaceId, m.user_id as userId, COALESCE(a.client_name, 'MCP client') as clientName, m.protocol_version as protocolVersion, m.expires_at as expiresAt, m.created_at as createdAt, m.updated_at as updatedAt, COALESCE(a.kind, 'manual') as kind, a.last_seen_at as lastSeenAt, a.last_origin as lastOrigin, a.user_agent as userAgent, m.scope as scope, a.oauth_client_id as oauthClientId";
   if (runtimeD1) {
     const row = await runtimeD1
       .prepare(
-        "SELECT m.id, m.workspace_id as workspaceId, m.user_id as userId, COALESCE(a.client_name, 'MCP client') as clientName, m.protocol_version as protocolVersion, m.expires_at as expiresAt, m.created_at as createdAt, m.updated_at as updatedAt FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.id = ?",
+        `SELECT ${selectColumns} FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.id = ?`,
       )
       .bind(hashedSessionId)
       .first<McpSessionRecord>();
@@ -2025,7 +2227,7 @@ export async function getMcpSession(
       return row;
     const legacyRow = await runtimeD1
       .prepare(
-        "SELECT m.id, m.workspace_id as workspaceId, m.user_id as userId, COALESCE(a.client_name, 'MCP client') as clientName, m.protocol_version as protocolVersion, m.expires_at as expiresAt, m.created_at as createdAt, m.updated_at as updatedAt FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.id = ?",
+        `SELECT ${selectColumns} FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.id = ?`,
       )
       .bind(rawToken)
       .first<McpSessionRecord>();

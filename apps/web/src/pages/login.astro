@@ -86,14 +86,18 @@ const signupEnabled = publicSignupEnabled();
   <script>
     const form = document.querySelector("[data-login-form]");
     const result = document.querySelector("[data-login-result]");
+    const params = new URLSearchParams(window.location.search);
+    const redirectTo = params.get("redirect_to");
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!(form instanceof HTMLFormElement)) return;
       const data = new FormData(form);
+      const body: Record<string, unknown> = { email: data.get("email") };
+      if (redirectTo) body.redirect_to = redirectTo;
       const response = await fetch("/api/auth/magic-link/request", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: data.get("email") }),
+        body: JSON.stringify(body),
       });
       const payload = await response.json();
       if (result instanceof HTMLElement) {
@@ -101,5 +105,13 @@ const signupEnabled = publicSignupEnabled();
         result.textContent = JSON.stringify(payload, null, 2);
       }
     });
+    const devLink = document.querySelector(
+      "a.dev-login-link",
+    ) as HTMLAnchorElement | null;
+    if (devLink && redirectTo) {
+      const devUrl = new URL(devLink.href, window.location.origin);
+      devUrl.searchParams.set("redirect_to", redirectTo);
+      devLink.href = devUrl.toString();
+    }
   </script>
 </AppLayout>

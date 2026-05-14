@@ -2,6 +2,7 @@ import {
   isMcpToolName,
   jsonRpcError,
   jsonRpcResult,
+  mcpInstructions,
   mcpToolSpecs,
   type McpToolName,
 } from "@vegastack/pages-mcp";
@@ -43,6 +44,7 @@ import { devAutoLoginEnabled, devAutoLoginUser } from "../lib/dev-auth";
 import { coerceCommentAnchor } from "../lib/comment-anchor-api";
 import { assertPublicationPasswordPolicy } from "../lib/share-password-policy";
 import { validateEditableSource } from "../lib/source-validation";
+import { validateHost } from "../lib/oauth/issuer";
 import skillCli from "../../../../skills/vegastack-pages/references/cli.md?raw";
 import skillComments from "../../../../skills/vegastack-pages/references/comments.md?raw";
 import skillMcp from "../../../../skills/vegastack-pages/references/mcp.md?raw";
@@ -112,22 +114,50 @@ type McpActor = {
   workspaceId: string | null;
 };
 
+const MCP_CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "authorization, content-type, mcp-protocol-version, mcp-session-id",
+  "Access-Control-Max-Age": "86400",
+} as const;
+
+function withMcpCors(response: Response): Response {
+  for (const [key, value] of Object.entries(MCP_CORS_HEADERS)) {
+    if (!response.headers.has(key)) response.headers.set(key, value);
+  }
+  return response;
+}
+
+export const OPTIONS: APIRoute = () =>
+  new Response(null, { status: 204, headers: MCP_CORS_HEADERS });
+
 export const GET: APIRoute = () => {
-  return Response.json(
-    {
-      error: {
-        code: "METHOD_NOT_ALLOWED",
-        message:
-          "VegaStack Pages MCP uses Streamable HTTP POST requests at this endpoint.",
+  return withMcpCors(
+    Response.json(
+      {
+        error: {
+          code: "METHOD_NOT_ALLOWED",
+          message:
+            "VegaStack Pages MCP uses Streamable HTTP POST requests at this endpoint.",
+        },
       },
-    },
-    { status: 405, headers: { Allow: "POST" } },
+      { status: 405, headers: { Allow: "POST" } },
+    ),
   );
 };
 
 export const POST: APIRoute = async ({ request }) => {
   try {
-    validateOrigin(request);
+    const hostError = validateHost(request);
+    if (hostError) {
+      return withMcpCors(
+        Response.json(
+          jsonRpcError(null, -32000, hostError, { code: "INVALID_HOST" }),
+          { status: 403 },
+        ),
+      );
+    }
     await ensureSeedData();
     const actor = await validateAuth(request);
 
@@ -157,20 +187,22 @@ export const POST: APIRoute = async ({ request }) => {
           ),
         )
       ).filter(Boolean);
-      return responses.length > 0
-        ? Response.json(responses)
-        : new Response(null, { status: 202 });
+      return withMcpCors(
+        responses.length > 0
+          ? Response.json(responses)
+          : new Response(null, { status: 202 }),
+      );
     }
 
     const response = await handleMessage(parsed, {
       requestUrl: request.url,
       actor,
     });
-    return response
-      ? Response.json(response)
-      : new Response(null, { status: 202 });
+    return withMcpCors(
+      response ? Response.json(response) : new Response(null, { status: 202 }),
+    );
   } catch (error) {
-    return errorResponse(error);
+    return withMcpCors(errorResponse(error, request));
   }
 };
 
@@ -201,6 +233,7 @@ async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
         protocolVersion,
         serverInfo: { name: "VegaStack Pages", version: "0.1.0" },
         capabilities: { tools: {}, resources: {}, prompts: {} },
+        instructions: mcpInstructions,
       });
     }
     if (method === "ping") {
@@ -589,7 +622,12 @@ async function callTool(
         "comment",
         args.workspace_id,
       );
-      const reply = commentService.reply(agentReplyInput(args));
+      const reply = commentService.reply({
+        threadId: asString(args.thread_id),
+        body: asString(args.body),
+        authorType: "user",
+        agent: null,
+      });
       reviewEventService.emit({
         workspaceId: page.page.workspaceId,
         pageId: page.page.id,
@@ -1236,6 +1274,53 @@ async function callTool(
         },
       });
       return pageMutationResult(created.page, context);
+    }
+    case "list_workspaces": {
+      const user = context.actor.user;
+      if (!user) {
+        throw new AppError("AUTH_REQUIRED", "Authentication is required.", 401);
+      }
+      const workspaces = workspaceService
+        .listWorkspacesForUser(user.id)
+        .map((workspace) => {
+          const member = workspaceService.getMember(workspace.id, user.id);
+          return {
+            id: workspace.id,
+            name: workspace.name,
+            slug: workspace.slug,
+            role: member?.role ?? null,
+          };
+        });
+      return { workspaces };
+    }
+    case "whoami": {
+      const user = context.actor.user;
+      if (!user) {
+        return {
+          user: null,
+          auth_mode: context.actor.authMode,
+          workspaces: [],
+          workspace_id: context.actor.workspaceId,
+        };
+      }
+      const workspaces = workspaceService
+        .listWorkspacesForUser(user.id)
+        .map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+          slug: workspace.slug,
+        }));
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          display_name: user.displayName ?? null,
+          role: user.role,
+        },
+        auth_mode: context.actor.authMode,
+        workspace_id: context.actor.workspaceId,
+        workspaces,
+      };
     }
   }
 }
@@ -2212,43 +2297,21 @@ async function validateAuth(request: Request): Promise<McpActor> {
   throw new AppError("AUTH_REQUIRED", "MCP bearer token is required.", 401);
 }
 
-function validateOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return;
-
-  const requestUrl = new URL(request.url);
-  const originUrl = new URL(origin);
-  const allowedOrigins = (process.env.VPG_MCP_ALLOWED_ORIGINS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const sameHost = originUrl.host === requestUrl.host;
-  const localHost = ["localhost", "127.0.0.1", "::1"].includes(
-    originUrl.hostname,
-  );
-
-  if (!sameHost && !localHost && !allowedOrigins.includes(origin)) {
-    throw new AppError(
-      "PERMISSION_DENIED",
-      "Origin is not allowed for MCP requests.",
-      403,
-      {
-        origin,
-        allowed_origins: allowedOrigins,
-      },
-    );
-  }
-}
-
-function errorResponse(error: unknown) {
+function errorResponse(error: unknown, request?: Request) {
   const id = null;
   if (error instanceof AppError) {
-    const headers =
-      error.status === 401
-        ? {
-            "WWW-Authenticate": 'Bearer realm="VegaStack Pages MCP"',
-          }
-        : undefined;
+    const headers: Record<string, string> = {};
+    if (error.status === 401) {
+      const origin = request ? deriveIssuerOrigin(request) : "";
+      const resourceMetadata = origin
+        ? `${origin}/.well-known/oauth-protected-resource`
+        : "/.well-known/oauth-protected-resource";
+      headers["WWW-Authenticate"] =
+        `Bearer realm="VegaStack Pages MCP", ` +
+        `resource_metadata="${resourceMetadata}", ` +
+        `error="invalid_token", ` +
+        `error_description="Bearer token required"`;
+    }
     return Response.json(
       jsonRpcError(id, -32000, error.message, error.toJSON()),
       { status: error.status, headers },
@@ -2257,6 +2320,22 @@ function errorResponse(error: unknown) {
   return Response.json(jsonRpcError(id, -32603, "MCP request failed."), {
     status: 500,
   });
+}
+
+function deriveIssuerOrigin(request: Request): string {
+  const headers = request.headers;
+  const forwardedProto = headers.get("x-forwarded-proto");
+  const forwardedHost = headers.get("x-forwarded-host");
+  if (forwardedHost) {
+    const proto = (forwardedProto ?? "https").split(",")[0]!.trim();
+    const host = forwardedHost.split(",")[0]!.trim();
+    return `${proto}://${host}`;
+  }
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return "";
+  }
 }
 
 function absoluteUrl(context: McpToolContext, path: string) {

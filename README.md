@@ -18,7 +18,7 @@ VegaStack Pages is built for the whole loop: templates, source editing, review c
 
 | Area               | What ships                                                                                                                                                                                      |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agent creation     | Remote MCP at `/mcp`, managed MCP at `https://pages.vegastack.com/mcp`, and the Rust-backed `vpg` CLI.                                                                                          |
+| Agent creation     | Remote MCP at `/mcp` with OAuth 2.1 + PKCE (RFC 9728/8414/7591), managed MCP at `https://pages.vegastack.com/mcp`, and the Rust-backed `vpg` CLI.                                               |
 | Page formats       | Markdown, MDX, and raw HTML. Source stays authoritative.                                                                                                                                        |
 | Templates          | Workspace templates with typed properties, reusable sections, and guidance comments for consistent agent output.                                                                                |
 | Review             | Rendered pages, anchored inline comments, guest reviewers, agent replies, resolve/unresolve, and wait conditions.                                                                               |
@@ -96,13 +96,15 @@ npm install -g @vegastack/pages
 vpg --help
 ```
 
-Use a workspace-scoped token from **Settings > MCP** or another bearer token accepted by your deployment:
+Use a workspace-scoped token from **Settings > Sessions** or another bearer token accepted by your deployment:
 
 ```sh
 vpg login --base-url https://pages.vegastack.com --workspace wks_123 --token "$VPG_TOKEN"
 vpg create --template prd --title "Search redesign" --set owner=platform
-vpg wait pg_123 --until first-response
+vpg wait pg_123 --until first-response --after-id evt_42
 vpg pages patch pg_123 --base-version-id ver_123 --find "old" --replace "new"
+vpg whoami
+vpg workspaces
 ```
 
 For source builds:
@@ -116,12 +118,11 @@ The deploy helper shells out to this repository's `pnpm deploy:cloudflare` scrip
 
 ## Remote MCP
 
-MCP is the main agent interface.
+MCP is the main agent interface. Three authentication paths, all spec-compliant:
 
-1. Sign in.
-2. Open **Settings > MCP**.
-3. Create a workspace-scoped session.
-4. Connect an MCP client to `/mcp` on your deployment.
+- **Browser OAuth (recommended for Claude.ai, ChatGPT custom connectors, Cursor remote MCP, …).** Paste the endpoint into the connector form; the client discovers OAuth via `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, registers itself with `/oauth/register` (RFC 7591), runs OAuth 2.1 + PKCE S256, exchanges the code at `/oauth/token`. Access tokens last 1 hour and rotate via refresh tokens for 60 days.
+- **Manual bearer.** Sign in, open **Settings > Sessions**, click **Create session**, copy the token. Use it for headless agents, CI, or MCP clients that accept a static bearer.
+- **CLI login.** `vpg login --token <token>` stores the bearer locally; sessions appear under **Settings > Sessions** as `kind=cli`.
 
 Managed endpoint:
 
@@ -129,9 +130,9 @@ Managed endpoint:
 https://pages.vegastack.com/mcp
 ```
 
-Every tool call includes `workspace_id`. The token is still scoped server-side, but the explicit workspace id prevents accidental cross-workspace calls.
+Every tool call includes `workspace_id`. The token is workspace-scoped server-side; the explicit id is a guard against cross-workspace mistakes — call `list_workspaces` once to discover available ids.
 
-Core tools cover page creation, templates, source reads, validation, patching, attachments, comments, wait conditions, review events, publishing, workspace search, tree reads, page moves, and member invites. See [MCP and CLI docs](apps/web/src/content/docs/mcp-and-cli.md).
+Core tools cover sessions (`list_workspaces`, `whoami`), page creation, templates, source reads, validation, patching, attachments, comments, wait conditions, review events, publishing, workspace search, tree reads, page moves, and member invites. See [MCP and CLI docs](apps/web/src/content/docs/mcp-and-cli.md).
 
 ## Repository Layout
 
