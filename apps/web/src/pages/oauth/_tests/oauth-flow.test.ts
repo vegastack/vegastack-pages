@@ -50,6 +50,10 @@ async function makePkcePair() {
   return { verifier, challenge };
 }
 
+function basicClient(clientId: string, secret = "") {
+  return `Basic ${btoa(`${encodeURIComponent(clientId)}:${secret}`)}`;
+}
+
 async function seedWorkspaceAndUser() {
   const tag = crypto.randomUUID().slice(0, 8);
   const workspace = workspaceService.createWorkspace({
@@ -413,6 +417,57 @@ describe("Authorization code grant with PKCE", () => {
     expect(body.error).toBe("invalid_grant");
   });
 
+  it("accepts public client_id from an empty-secret Basic auth header", async () => {
+    const { workspace, user } = await seedWorkspaceAndUser();
+    const client = await registerLocalClient(["https://example.test/cb"]);
+    const cookies = cookiesFor(authService.createSession(user.id).id);
+    const { verifier, challenge } = await makePkcePair();
+
+    const consent = await consentPost({
+      cookies,
+      request: new Request(
+        "https://pages.example.test/oauth/authorize/consent",
+        {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            response_type: "code",
+            client_id: client.client_id,
+            redirect_uri: "https://example.test/cb",
+            scope: "mcp",
+            state: "basic-client",
+            code_challenge: challenge,
+            code_challenge_method: "S256",
+            workspace_id: workspace.id,
+            decision: "approve",
+          }).toString(),
+        },
+      ),
+    } as never);
+    const code = new URL(consent.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+
+    const exchange = await tokenPost({
+      request: new Request("https://pages.example.test/oauth/token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: basicClient(client.client_id),
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: "https://example.test/cb",
+          code_verifier: verifier,
+        }).toString(),
+      }),
+    } as never);
+    expect(exchange.status).toBe(200);
+    const body = (await exchange.json()) as { access_token: string };
+    expect(body.access_token).toMatch(/^mcp_/);
+  });
+
   it("rejects a PKCE verifier that does not match the challenge", async () => {
     const { workspace, user } = await seedWorkspaceAndUser();
     const client = await registerLocalClient(["https://example.test/cb"]);
@@ -579,11 +634,13 @@ describe("Refresh token rotation and revoke", () => {
     const refreshed = await tokenPost({
       request: new Request("https://pages.example.test/oauth/token", {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: basicClient(client.client_id),
+        },
         body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: issued.refresh_token,
-          client_id: client.client_id,
         }).toString(),
       }),
     } as never);

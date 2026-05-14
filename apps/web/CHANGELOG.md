@@ -1,5 +1,21 @@
 # @vegastack/pages-web
 
+## 0.1.7
+
+### Patch Changes
+
+- Unblock Claude's OAuth token exchange after consent. The token endpoint now
+  accepts the public `client_id` from an empty-secret HTTP Basic header and skips
+  the D1 rate-limit write for the well-known Anthropic connector client before
+  consuming the short-lived, single-use PKCE authorization code. This keeps the
+  broker path inside Claude's timeout while preserving the actual grant checks.
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.7
+  - @vegastack/pages-mcp@0.1.7
+  - @vegastack/pages-renderer@0.1.7
+  - @vegastack/pages-ui@0.1.7
+
 ## 0.1.6
 
 ### Patch Changes

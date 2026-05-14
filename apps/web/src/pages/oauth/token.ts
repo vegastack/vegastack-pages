@@ -17,7 +17,10 @@ import {
   verifyPkceS256,
   DEVICE_POLL_INTERVAL_S,
 } from "../../lib/oauth/codes";
-import { getOAuthClient } from "../../lib/oauth/clients";
+import {
+  ANTHROPIC_CONNECTOR_CLIENT_ID,
+  getOAuthClient,
+} from "../../lib/oauth/clients";
 
 export const prerender = false;
 
@@ -75,15 +78,44 @@ async function parseFormOrJson(
   return result;
 }
 
+function clientIdFromBodyOrBasic(
+  body: Record<string, string>,
+  request: Request,
+): string {
+  const bodyClientId = body.client_id?.trim();
+  if (bodyClientId) return bodyClientId;
+  const header = request.headers.get("authorization") ?? "";
+  if (!header.toLowerCase().startsWith("basic ")) return "";
+  try {
+    const decoded = atob(header.slice("basic ".length).trim());
+    const separator = decoded.indexOf(":");
+    const username = separator >= 0 ? decoded.slice(0, separator) : decoded;
+    const password = separator >= 0 ? decoded.slice(separator + 1) : "";
+    // We only support public OAuth clients. Accept Basic as a compatibility
+    // transport for the client_id when the secret/password part is empty.
+    return password ? "" : decodeURIComponent(username).trim();
+  } catch {
+    return "";
+  }
+}
+
 export const POST: APIRoute = async ({ request }) => {
   try {
     const ip = clientIp(request);
-    await checkRateLimit({
-      key: `oauth.token:${ip ?? "anonymous"}`,
-      limit: 60,
-      windowMs: 60_000,
-    });
     const body = await parseFormOrJson(request);
+    // Anthropic's broker has a short token-exchange timeout. The auth-code
+    // grant is already one-time, PKCE-bound, and short-lived, so avoid putting
+    // a D1 rate-limit write in front of code consumption for this well-known
+    // public client.
+    if (
+      clientIdFromBodyOrBasic(body, request) !== ANTHROPIC_CONNECTOR_CLIENT_ID
+    ) {
+      await checkRateLimit({
+        key: `oauth.token:${ip ?? "anonymous"}`,
+        limit: 60,
+        windowMs: 60_000,
+      });
+    }
     const grantType = body.grant_type ?? "";
     if (grantType === "authorization_code") {
       return await handleAuthorizationCode(body, request);
@@ -112,7 +144,7 @@ async function handleAuthorizationCode(
 ): Promise<Response> {
   const code = body.code ?? "";
   const codeVerifier = body.code_verifier ?? "";
-  const clientId = body.client_id ?? "";
+  const clientId = clientIdFromBodyOrBasic(body, request);
   const redirectUri = body.redirect_uri ?? "";
   if (!code || !codeVerifier || !clientId || !redirectUri) {
     return oauthError(
@@ -197,7 +229,7 @@ async function handleRefreshToken(
   request: Request,
 ): Promise<Response> {
   const refreshToken = body.refresh_token ?? "";
-  const clientId = body.client_id ?? "";
+  const clientId = clientIdFromBodyOrBasic(body, request);
   if (!refreshToken || !clientId) {
     return oauthError(
       "invalid_request",
@@ -248,7 +280,7 @@ async function handleDeviceCode(
   request: Request,
 ): Promise<Response> {
   const deviceCode = body.device_code ?? "";
-  const clientId = body.client_id ?? "";
+  const clientId = clientIdFromBodyOrBasic(body, request);
   if (!deviceCode || !clientId) {
     return oauthError(
       "invalid_request",
