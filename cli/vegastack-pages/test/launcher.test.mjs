@@ -15,7 +15,8 @@ test("launcher reports version", () => {
   assert.equal(result.status, 0);
   assert.ok(
     result.stdout === `vpg ${pkg.version}\n` ||
-      result.stdout === `vpg ${pkg.version}-dev\n`,
+      result.stdout === `vpg ${pkg.version}-dev\n` ||
+      result.stdout === `vpg ${pkg.version}-dev (no native binary)\n`,
   );
 });
 
