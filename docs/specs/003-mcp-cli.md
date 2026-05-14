@@ -148,14 +148,14 @@ https://pages.vegastack.com/mcp
 
 Transport:
 
-- Streamable HTTP (MCP 2025-11-25) over POST. OPTIONS preflight returns 204 with `Access-Control-Allow-Origin: *`.
-- Server-Sent Events only if compatibility requires it later.
+- Streamable HTTP (MCP 2025-11-25) over POST for JSON-RPC requests. OPTIONS preflight returns 204 with `Access-Control-Allow-Origin: *`.
+- GET returns a lightweight `text/event-stream` keepalive stream for browser MCP connector refresh probes that expect an SSE-compatible path.
 - Host-header validation rejects mismatched hosts (DNS-rebinding guard). Loopback hosts and entries in `VPG_MCP_ALLOWED_HOSTS` are permitted regardless.
 
 Auth:
 
 - Bearer-only on `Authorization: Bearer <token>`. No cookie auth, no CSRF surface, so `Access-Control-Allow-Origin: *` with no credentials.
-- 401 emits `WWW-Authenticate: Bearer realm="VegaStack Pages MCP", resource_metadata="<origin>/.well-known/oauth-protected-resource", error="invalid_token"` so MCP 2025-11-25 clients self-onboard.
+- 401 emits `WWW-Authenticate: Bearer realm="VegaStack Pages MCP", resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp", error="invalid_token"` so MCP 2025-11-25 clients self-onboard.
 - Three flows, one storage shape:
   - **OAuth 2.1 + PKCE** for browser MCP clients via `/.well-known/oauth-protected-resource` (RFC 9728), `/.well-known/oauth-authorization-server` (RFC 8414), `/oauth/register` (RFC 7591 public-client DCR, PKCE S256 mandatory), `/oauth/authorize` + `/oauth/authorize/consent`, `/oauth/token` (1h access, 60d refresh, refresh rotation), `/oauth/revoke` (RFC 7009), `/oauth/device` + `/oauth/device/verify` (RFC 8628).
   - **`vpg` CLI device-code (default `vpg login`)** uses the well-known client `oac_vpg_cli` baked into the server (no dynamic registration round-trip) and POSTs to `/oauth/device`, prints/opens the verification URL, polls `/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` until the user picks a workspace and clicks Allow. Token response includes a non-standard `workspace_id` field so the CLI persists the workspace without an extra call. Sessions appear with `kind=oauth`.

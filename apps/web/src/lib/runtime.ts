@@ -2213,11 +2213,18 @@ export async function getMcpSession(
   rawToken: string,
 ): Promise<McpSessionRecord | null> {
   await ensureRuntimeReady();
+  return getMcpSessionFromStore(rawToken, runtimeD1);
+}
+
+async function getMcpSessionFromStore(
+  rawToken: string,
+  database: D1Database | null,
+): Promise<McpSessionRecord | null> {
   const hashedSessionId = await mcpSessionIdForBearer(rawToken);
   const selectColumns =
     "m.id, m.workspace_id as workspaceId, m.user_id as userId, COALESCE(a.client_name, 'MCP client') as clientName, m.protocol_version as protocolVersion, m.expires_at as expiresAt, m.created_at as createdAt, m.updated_at as updatedAt, COALESCE(a.kind, 'manual') as kind, a.last_seen_at as lastSeenAt, a.last_origin as lastOrigin, a.user_agent as userAgent, m.scope as scope, a.oauth_client_id as oauthClientId";
-  if (runtimeD1) {
-    const row = await runtimeD1
+  if (database) {
+    const row = await database
       .prepare(
         `SELECT ${selectColumns} FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.id = ?`,
       )
@@ -2225,7 +2232,7 @@ export async function getMcpSession(
       .first<McpSessionRecord>();
     if (row && (!row.expiresAt || Date.parse(row.expiresAt) > Date.now()))
       return row;
-    const legacyRow = await runtimeD1
+    const legacyRow = await database
       .prepare(
         `SELECT ${selectColumns} FROM mcp_sessions m LEFT JOIN agent_sessions a ON a.id = m.agent_session_id WHERE m.id = ?`,
       )
@@ -2243,6 +2250,30 @@ export async function getMcpSession(
     fallbackMcpSessions.get(rawToken);
   if (!session || Date.parse(session.expiresAt) <= Date.now()) return null;
   return session;
+}
+
+export async function getMcpSessionFast(
+  rawToken: string,
+): Promise<McpSessionRecord | null> {
+  const bindings = await getRuntimeBindings();
+  const database = runtimeD1 ?? bindings?.DB ?? null;
+  if (!database) return getMcpSession(rawToken);
+  return getMcpSessionFromStore(rawToken, database);
+}
+
+export async function getUserFast(userId: string): Promise<UserRecord | null> {
+  const bindings = await getRuntimeBindings();
+  const database = runtimeD1 ?? bindings?.DB ?? null;
+  if (!database) {
+    await ensureRuntimeReady();
+    return workspaceService.getUser(userId);
+  }
+  return database
+    .prepare(
+      "SELECT id, email, display_name as displayName, role, created_at as createdAt, updated_at as updatedAt FROM users WHERE id = ?",
+    )
+    .bind(userId)
+    .first<UserRecord>();
 }
 
 export async function revokeMcpSession(input: {

@@ -89,6 +89,8 @@ Per MCP 2025-11-25, the server validates the Host header on `/mcp` to prevent DN
 
 The legacy `VPG_MCP_ALLOWED_ORIGINS` is now a no-op; bearer auth has no CSRF surface so the origin check has been removed. CORS on `/mcp` is `Access-Control-Allow-Origin: *` without credentials.
 
+JSON-RPC MCP requests still use POST. GET on `/mcp` only serves an SSE-compatible keepalive stream for connector refresh probes and does not read or mutate workspace data.
+
 ## Authorization
 
 Every request that reads or mutates workspace data must call `PermissionService`.

@@ -28,6 +28,8 @@ import {
   commentService,
   ensureSeedData,
   getMcpSession,
+  getMcpSessionFast,
+  getUserFast,
   indexCommentThread,
   indexPage,
   pageService,
@@ -110,6 +112,7 @@ type McpToolContext = {
 
 type McpActor = {
   user: UserRecord | null;
+  userId?: string | null;
   authMode: "session" | "static_token" | "anonymous";
   workspaceId: string | null;
 };
@@ -146,17 +149,29 @@ export const HEAD: APIRoute = () =>
   );
 
 export const GET: APIRoute = () => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(": VegaStack Pages MCP stream\n\n"));
+      const interval = setInterval(() => {
+        controller.enqueue(encoder.encode(": keepalive\n\n"));
+      }, 15_000);
+      setTimeout(() => {
+        clearInterval(interval);
+        controller.close();
+      }, 60_000);
+    },
+  });
+
   return withMcpCors(
-    Response.json(
-      {
-        error: {
-          code: "METHOD_NOT_ALLOWED",
-          message:
-            "VegaStack Pages MCP uses Streamable HTTP POST requests at this endpoint.",
-        },
+    new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
       },
-      { status: 405, headers: { Allow: "POST, GET, HEAD, OPTIONS" } },
-    ),
+    }),
   );
 };
 
@@ -174,11 +189,14 @@ export const POST: APIRoute = async ({ request }) => {
     if (process.env.VPG_MCP_TOKEN) {
       await ensureSeedData();
     }
-    const actor = await validateAuth(request);
-
     const parsed = parseJsonRpcBody(await readRequestBody(request));
-    if (messagesNeedRuntimeData(parsed)) {
+    const needsRuntimeData = messagesNeedRuntimeData(parsed);
+    const actor = await validateAuth(request, {
+      fast: !needsRuntimeData,
+    });
+    if (needsRuntimeData) {
       await ensureSeedData();
+      hydrateActorUser(actor);
     }
     if (actor.authMode === "static_token") {
       const methods = (Array.isArray(parsed) ? parsed : [parsed])
@@ -239,6 +257,54 @@ function messagesNeedRuntimeData(body: JsonRpcMessage | JsonRpcMessage[]) {
   });
 }
 
+const readOnlyToolNames = new Set<McpToolName>([
+  "prepare_page_edit",
+  "get_page",
+  "get_rendered_page",
+  "list_page_versions",
+  "validate_page_source",
+  "wait_for_review",
+  "list_comments",
+  "list_review_events",
+  "search_workspace",
+  "search_pages",
+  "list_workspace_tree",
+  "list_templates",
+  "get_template",
+  "render_template",
+  "list_workspaces",
+  "whoami",
+]);
+
+const destructiveToolNames = new Set<McpToolName>([
+  "delete_thread",
+  "revoke_publication",
+]);
+
+function titleFromToolName(name: McpToolName) {
+  return name
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function serializeToolsForClient() {
+  return mcpToolSpecs.map((tool) => {
+    const readOnly = readOnlyToolNames.has(tool.name);
+    const destructive = destructiveToolNames.has(tool.name);
+    return {
+      ...tool,
+      title: titleFromToolName(tool.name),
+      annotations: {
+        readOnlyHint: readOnly,
+        destructiveHint: destructive,
+        idempotentHint: readOnly,
+        openWorldHint: !readOnly,
+      },
+    };
+  });
+}
+
 async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
   const hasId = Boolean(
     body && typeof body === "object" && Object.hasOwn(body, "id"),
@@ -273,7 +339,7 @@ async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
       return jsonRpcResult(id, {});
     }
     if (method === "tools/list") {
-      return jsonRpcResult(id, { tools: mcpToolSpecs });
+      return jsonRpcResult(id, { tools: serializeToolsForClient() });
     }
     if (method === "resources/list") {
       return jsonRpcResult(id, { resources: listResources(context) });
@@ -2253,7 +2319,10 @@ function constantTimeEqual(left: string, right: string) {
   return mismatch === 0;
 }
 
-async function validateAuth(request: Request): Promise<McpActor> {
+async function validateAuth(
+  request: Request,
+  options: { fast?: boolean } = {},
+): Promise<McpActor> {
   const authHeader = request.headers.get("authorization") ?? "";
   const bearer = authHeader.startsWith("Bearer ")
     ? authHeader.slice("Bearer ".length).trim()
@@ -2305,13 +2374,18 @@ async function validateAuth(request: Request): Promise<McpActor> {
   }
 
   if (bearer) {
-    const mcpSession = await getMcpSession(bearer);
+    const mcpSession = options.fast
+      ? await getMcpSessionFast(bearer)
+      : await getMcpSession(bearer);
     const mcpUser = mcpSession
-      ? workspaceService.getUser(mcpSession.userId)
+      ? options.fast
+        ? await getUserFast(mcpSession.userId)
+        : workspaceService.getUser(mcpSession.userId)
       : null;
-    if (mcpSession && mcpUser) {
+    if (mcpSession && (mcpUser || options.fast)) {
       return {
         user: mcpUser,
+        userId: mcpSession.userId,
         authMode: "session",
         workspaceId: mcpSession.workspaceId,
       };
@@ -2322,12 +2396,21 @@ async function validateAuth(request: Request): Promise<McpActor> {
     const devUser = devAutoLoginUser();
     return {
       user: devUser,
+      userId: devUser?.id ?? null,
       authMode: devUser ? "session" : "anonymous",
       workspaceId: null,
     };
   }
 
   throw new AppError("AUTH_REQUIRED", "MCP bearer token is required.", 401);
+}
+
+function hydrateActorUser(actor: McpActor) {
+  if (actor.user || !actor.userId) return;
+  actor.user = workspaceService.getUser(actor.userId);
+  if (!actor.user) {
+    throw new AppError("AUTH_REQUIRED", "MCP session user was not found.", 401);
+  }
 }
 
 function errorResponse(error: unknown, request?: Request) {
@@ -2337,8 +2420,8 @@ function errorResponse(error: unknown, request?: Request) {
     if (error.status === 401) {
       const origin = request ? deriveIssuerOrigin(request) : "";
       const resourceMetadata = origin
-        ? `${origin}/.well-known/oauth-protected-resource`
-        : "/.well-known/oauth-protected-resource";
+        ? `${origin}/.well-known/oauth-protected-resource/mcp`
+        : "/.well-known/oauth-protected-resource/mcp";
       headers["WWW-Authenticate"] =
         `Bearer realm="VegaStack Pages MCP", ` +
         `resource_metadata="${resourceMetadata}", ` +

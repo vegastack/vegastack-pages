@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.10
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Fix Claude MCP connector tool refresh by making `/mcp` lightweight for lifecycle probes, returning an SSE-compatible GET stream, and enriching `tools/list` metadata.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.10
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.10
+  - @vegastack/pages-mcp@0.1.10
+  - @vegastack/pages-renderer@0.1.10
+  - @vegastack/pages-ui@0.1.10
+
+
 ## 0.1.9
 
 ### @vegastack/pages

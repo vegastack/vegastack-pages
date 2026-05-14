@@ -88,6 +88,14 @@ curl -s http://127.0.0.1:4322/mcp \
 
 The server enforces `VPG_MCP_MAX_BODY_BYTES`, defaulting to 2 MiB.
 
+Browser connector refresh probes can also open the endpoint as an SSE stream:
+
+```sh
+curl -i -N http://127.0.0.1:4322/mcp
+```
+
+Expected: `200 OK` with `content-type: text/event-stream`.
+
 ## Host Validation
 
 `/mcp` validates the Host header per MCP 2025-11-25 to prevent DNS-rebinding attacks. When running behind a reverse proxy, set `VPG_MCP_ALLOWED_HOSTS` to the public host(s) you'll present:

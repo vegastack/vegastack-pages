@@ -1,5 +1,12 @@
 # @vegastack/pages-mcp
 
+## 0.1.10
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.10
+
 ## 0.1.9
 
 ### Patch Changes

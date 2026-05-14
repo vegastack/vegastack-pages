@@ -37,12 +37,15 @@ afterEach(() => {
 });
 
 describe("MCP route", () => {
-  it("rejects GET with a transport-focused 405", async () => {
+  it("answers GET with an SSE-compatible stream for connector refresh checks", async () => {
     const response = await GET({} as never);
 
-    expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("POST, GET, HEAD, OPTIONS");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain(
+      "text/event-stream",
+    );
     expect(response.headers.get("mcp-protocol-version")).toBe("2025-11-25");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
   });
 
   it("answers HEAD with 200 and the MCP protocol version for connector discovery", async () => {
