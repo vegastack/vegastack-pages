@@ -1,6 +1,6 @@
 ---
 title: Self-host on Cloudflare
-description: Deploy VegaStack Pages on Cloudflare Workers with D1, KV, R2, Wrangler, Email Service, and Backup to Git.
+description: Deploy VegaStack Pages on Cloudflare Workers with D1, KV, R2, Wrangler, AWS SES or Cloudflare Email Service, and Backup to Git.
 category: Self-host
 order: 10
 lastUpdated: 2026-05-14
@@ -47,12 +47,13 @@ The MCP endpoint for agents is `https://pages.example.com/mcp`.
 
 ## Optional features
 
-| Feature                  | Configuration                                                                                                                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare Email Service | Set `VPG_EMAIL_PROVIDER=cloudflare` or `VPG_ENABLE_CLOUDFLARE_EMAIL=true`. Optionally set `VPG_EMAIL_FROM`.                                                     |
-| Backup to Git            | Set GitHub App variables: `VPG_GITHUB_APP_ID`, `VPG_GITHUB_APP_SLUG`, `VPG_GITHUB_APP_PRIVATE_KEY`, `VPG_GITHUB_APP_CLIENT_ID`, `VPG_GITHUB_APP_CLIENT_SECRET`. |
-| Custom domain            | Set `VPG_CUSTOM_DOMAIN=pages.example.com`.                                                                                                                      |
-| Managed mode             | Only for VegaStack-operated hosting. Uses `/app/signup` and public signup.                                                                                      |
+| Feature                  | Configuration                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Email Service | Set `VPG_EMAIL_PROVIDER=cloudflare` or `VPG_ENABLE_CLOUDFLARE_EMAIL=true`, plus `VPG_EMAIL_FROM` and `VPG_EMAIL_FROM_NAME`.                                                               |
+| AWS SES                  | Set `VPG_EMAIL_PROVIDER=ses`, `VPG_EMAIL_FROM`, `VPG_EMAIL_FROM_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`. These are written as Worker secrets during deploy. |
+| Backup to Git            | Set GitHub App variables: `VPG_GITHUB_APP_ID`, `VPG_GITHUB_APP_SLUG`, `VPG_GITHUB_APP_PRIVATE_KEY`, `VPG_GITHUB_APP_CLIENT_ID`, `VPG_GITHUB_APP_CLIENT_SECRET`.                           |
+| Custom domain            | Set `VPG_CUSTOM_DOMAIN=pages.example.com`.                                                                                                                                                |
+| Managed mode             | Only for VegaStack-operated hosting. Uses `/app/signup` and public signup.                                                                                                                |
 
 ## Build without deploying
 

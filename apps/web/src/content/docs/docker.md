@@ -16,7 +16,7 @@ Docker runs the same Astro app through the Node adapter. D1 becomes SQLite and R
 | D1                  | SQLite                                                |
 | KV sessions         | SQLite-backed app sessions                            |
 | R2                  | Local filesystem object storage under `/data/objects` |
-| Email Service       | Provider interface, console by default in Compose     |
+| Email               | Console by default; AWS SES when configured           |
 
 The renderer, MCP endpoint, comments, permissions, and search use the same application services.
 

@@ -63,6 +63,11 @@ Common environment variables:
 | `VPG_BASE_URL`                 | Public origin for generated links and auth callbacks. Defaults to `http://localhost:4321` in Compose. |
 | `VPG_SETUP_TOKEN`              | First-admin setup token. Required.                                                                    |
 | `VPG_EMAIL_PROVIDER`           | Email provider selector. Defaults to `console` in Compose.                                            |
+| `VPG_EMAIL_FROM`               | Sender address when using a real email provider.                                                      |
+| `VPG_EMAIL_FROM_NAME`          | Sender display name when using a real email provider.                                                 |
+| `AWS_REGION`                   | AWS SES region when `VPG_EMAIL_PROVIDER=ses`.                                                         |
+| `AWS_ACCESS_KEY_ID`            | AWS SES access key id when `VPG_EMAIL_PROVIDER=ses`.                                                  |
+| `AWS_SECRET_ACCESS_KEY`        | AWS SES secret access key when `VPG_EMAIL_PROVIDER=ses`.                                              |
 | `VPG_STATE_DIR`                | Directory for SQLite state. Compose sets `/data/state`.                                               |
 | `VPG_SQLITE_PATH`              | SQLite file path. Compose sets `/data/state/vegastack-pages.sqlite`.                                  |
 | `VPG_OBJECT_STORE_DIR`         | Filesystem object store directory. Compose sets `/data/objects`.                                      |

@@ -276,9 +276,9 @@ install/docker/
 
 ## Email
 
-In-app and MCP notifications are v1. Email notifications are later or optional.
+In-app and MCP notifications are core. Email delivery is optional and used for magic links and invites when a provider is configured.
 
-When implemented, prefer a provider interface with Cloudflare Email Service first and AWS SES as optional. Cloudflare Email Service may require Workers Paid for sending, so it cannot be a hard v1 free-plan dependency.
+The provider interface supports Cloudflare Email Service and AWS SES. Cloudflare Email Service may require Workers Paid for sending, so email cannot be a hard free-plan dependency.
 
 ## Design System
 

@@ -268,8 +268,6 @@ jobs:
           VPG_GITHUB_APP_ID: ${{ secrets.VPG_GITHUB_APP_ID }}
           VPG_GITHUB_APP_SLUG: ${{ secrets.VPG_GITHUB_APP_SLUG }}
           VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
-          VPG_EMAIL_FROM: ${{ secrets.VPG_EMAIL_FROM }}
-          VPG_EMAIL_FROM_NAME: ${{ secrets.VPG_EMAIL_FROM_NAME }}
         run: |
           for value in \
             "$CLOUDFLARE_ACCOUNT_ID" \
@@ -282,9 +280,7 @@ jobs:
             "$VPG_R2_BUCKET_NAME" \
             "$VPG_GITHUB_APP_ID" \
             "$VPG_GITHUB_APP_SLUG" \
-            "$VPG_GITHUB_SYNC_CRON" \
-            "$VPG_EMAIL_FROM" \
-            "$VPG_EMAIL_FROM_NAME"; do
+            "$VPG_GITHUB_SYNC_CRON"; do
             if [ -n "$value" ]; then
               echo "::add-mask::$value"
             fi
@@ -302,8 +298,6 @@ jobs:
           VPG_GITHUB_APP_ID: ${{ secrets.VPG_GITHUB_APP_ID }}
           VPG_GITHUB_APP_SLUG: ${{ secrets.VPG_GITHUB_APP_SLUG }}
           VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
-          VPG_EMAIL_FROM: ${{ secrets.VPG_EMAIL_FROM }}
-          VPG_EMAIL_FROM_NAME: ${{ secrets.VPG_EMAIL_FROM_NAME }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
@@ -322,7 +316,6 @@ jobs:
           }
 
           const cron = process.env.VPG_GITHUB_SYNC_CRON || "17 2 * * *";
-          const emailFrom = process.env.VPG_EMAIL_FROM || "";
           const customDomain = process.env.VPG_CUSTOM_DOMAIN;
           const config = {
             $schema: "../../node_modules/wrangler/config-schema.json",
@@ -345,10 +338,6 @@ jobs:
               VPG_PUBLIC_SIGNUP: "true",
               VPG_BASE_URL: `https://${customDomain}`,
               VPG_HOME_MODE: "landing",
-              VPG_EMAIL_PROVIDER: emailFrom ? "cloudflare" : "auto",
-              VPG_EMAIL_FROM: emailFrom,
-              VPG_EMAIL_FROM_NAME:
-                process.env.VPG_EMAIL_FROM_NAME || "VegaStack Pages",
               VPG_GITHUB_APP_ID: process.env.VPG_GITHUB_APP_ID || "",
               VPG_GITHUB_APP_SLUG:
                 process.env.VPG_GITHUB_APP_SLUG || "",

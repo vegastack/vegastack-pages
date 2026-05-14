@@ -178,10 +178,7 @@ Node mode must use the same domain services as Cloudflare mode.
 
 ## Email
 
-V1:
-
-- In-app and MCP notifications first.
-- Email optional/later.
+Email is optional for self-hosting. Magic links and invites can be sent through a configured provider, and local/Docker development can keep `VPG_EMAIL_PROVIDER=console`.
 
 Provider interface:
 
@@ -191,12 +188,13 @@ Provider interface:
 
 Cloudflare Email Service:
 
-- Preferred first provider when email is implemented.
+- Worker-native provider through the optional `EMAIL` send binding.
 - May require Workers Paid for sending.
 
 SES:
 
-- Optional second provider.
+- Implemented through AWS SES HTTPS API signing with runtime secrets:
+  `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN`.
 
 ## Setup Wizard
 

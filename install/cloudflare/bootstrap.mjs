@@ -52,6 +52,10 @@ const cloudflareEmailEnabled =
   process.env.VPG_ENABLE_CLOUDFLARE_EMAIL === "true" ||
   emailProvider === "cloudflare" ||
   emailProvider === "cloudflare_email_service";
+const sesEmailEnabled =
+  emailProvider === "ses" ||
+  emailProvider === "aws_ses" ||
+  emailProvider === "amazon_ses";
 
 function loadConfig(path) {
   if (!existsSync(path)) return {};
@@ -89,6 +93,7 @@ function wrangler(args, options = {}) {
 }
 
 function putSecret(name, value) {
+  if (!value) return;
   const result = spawnSync(
     "pnpm",
     ["exec", "wrangler", "secret", "put", name],
@@ -102,6 +107,13 @@ function putSecret(name, value) {
   );
   if (result.status !== 0) {
     throw new Error(`wrangler secret put ${name} failed.`);
+  }
+}
+
+function assertRequiredEnv(names, context) {
+  const missing = names.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(`${context} is missing: ${missing.join(", ")}.`);
   }
 }
 
@@ -212,6 +224,23 @@ function createKV() {
 
 function writeWranglerConfig(databaseId, kvNamespaceId) {
   const emailFrom = process.env.VPG_EMAIL_FROM ?? "";
+  const vars = {
+    VPG_RUNTIME: "cloudflare",
+    VPG_DEPLOYMENT_MODE: deploymentMode,
+    VPG_PUBLIC_SIGNUP: managedMode ? "true" : "false",
+    VPG_BASE_URL: baseUrl,
+    VPG_HOME_MODE: homeMode,
+    VPG_GITHUB_APP_ID: process.env.VPG_GITHUB_APP_ID ?? "",
+    VPG_GITHUB_APP_SLUG: process.env.VPG_GITHUB_APP_SLUG ?? "",
+    VPG_GITHUB_SYNC_CRON: process.env.VPG_GITHUB_SYNC_CRON ?? "17 2 * * *",
+  };
+  if (!sesEmailEnabled) {
+    Object.assign(vars, {
+      VPG_EMAIL_PROVIDER: emailProvider,
+      VPG_EMAIL_FROM: emailFrom,
+      VPG_EMAIL_FROM_NAME: process.env.VPG_EMAIL_FROM_NAME ?? "VegaStack Pages",
+    });
+  }
   const config = {
     $schema: "../../node_modules/wrangler/config-schema.json",
     name: workerName,
@@ -231,19 +260,7 @@ function writeWranglerConfig(databaseId, kvNamespaceId) {
       ),
     },
     workers_dev: !customDomain,
-    vars: {
-      VPG_RUNTIME: "cloudflare",
-      VPG_DEPLOYMENT_MODE: deploymentMode,
-      VPG_PUBLIC_SIGNUP: managedMode ? "true" : "false",
-      VPG_BASE_URL: baseUrl,
-      VPG_HOME_MODE: homeMode,
-      VPG_EMAIL_PROVIDER: emailProvider,
-      VPG_EMAIL_FROM: emailFrom,
-      VPG_EMAIL_FROM_NAME: process.env.VPG_EMAIL_FROM_NAME ?? "VegaStack Pages",
-      VPG_GITHUB_APP_ID: process.env.VPG_GITHUB_APP_ID ?? "",
-      VPG_GITHUB_APP_SLUG: process.env.VPG_GITHUB_APP_SLUG ?? "",
-      VPG_GITHUB_SYNC_CRON: process.env.VPG_GITHUB_SYNC_CRON ?? "17 2 * * *",
-    },
+    vars,
     triggers: {
       crons: [process.env.VPG_GITHUB_SYNC_CRON ?? "17 2 * * *"],
     },
@@ -352,6 +369,23 @@ if (deploy && !applyMigrations && process.env.VPG_SKIP_MIGRATIONS !== "true") {
 
 if (deploy) {
   console.log("Writing runtime secrets...");
+  if (sesEmailEnabled) {
+    assertRequiredEnv(
+      [
+        "VPG_EMAIL_FROM",
+        "VPG_EMAIL_FROM_NAME",
+        "AWS_REGION",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+      ],
+      "AWS SES email deployment",
+    );
+    console.log("Writing AWS SES credential secrets...");
+    putSecret("AWS_REGION", process.env.AWS_REGION);
+    putSecret("AWS_ACCESS_KEY_ID", process.env.AWS_ACCESS_KEY_ID);
+    putSecret("AWS_SECRET_ACCESS_KEY", process.env.AWS_SECRET_ACCESS_KEY);
+    putSecret("AWS_SESSION_TOKEN", process.env.AWS_SESSION_TOKEN);
+  }
   if (!managedMode) {
     console.log("Writing one-time setup token secret...");
     putSecret("VPG_SETUP_TOKEN", setupToken);
@@ -365,6 +399,12 @@ if (deploy) {
   }
   console.log("Deploying Worker...");
   wrangler(["deploy"], { cwd: appDir });
+  if (sesEmailEnabled) {
+    console.log("Writing AWS SES sender secrets...");
+    putSecret("VPG_EMAIL_FROM", process.env.VPG_EMAIL_FROM);
+    putSecret("VPG_EMAIL_FROM_NAME", process.env.VPG_EMAIL_FROM_NAME);
+    putSecret("VPG_EMAIL_PROVIDER", "ses");
+  }
 } else {
   console.log("Cloudflare config written to apps/web/wrangler.jsonc.");
   console.log(

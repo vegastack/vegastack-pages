@@ -44,7 +44,7 @@ Do not create a separate `apps/mcp-worker` in v1.
 
 ## Rationale
 
-Cloudflare Workers fit the primary self-host target and integrate with D1, R2, Durable Objects, Workers assets, and future Email Service.
+Cloudflare Workers fit the primary self-host target and integrate with D1, R2, Durable Objects, Workers assets, Cloudflare Email Service, and AWS SES through Worker secrets.
 
 Astro SSR supports dynamic authenticated pages while still allowing a mostly static, low-JavaScript reading experience.
 

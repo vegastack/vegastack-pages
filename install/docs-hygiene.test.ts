@@ -110,6 +110,31 @@ describe("public docs hygiene", () => {
     }
   });
 
+  it("keeps AWS SES email configuration documented with runtime secrets", () => {
+    const variables = [
+      "VPG_EMAIL_PROVIDER",
+      "VPG_EMAIL_FROM",
+      "VPG_EMAIL_FROM_NAME",
+      "AWS_REGION",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+    ];
+    const docs = [
+      read("install/cloudflare/README.md"),
+      read("install/docker/README.md"),
+      read("apps/web/src/content/docs/cloudflare.md"),
+      read("docs/specs/008-configuration-env.md"),
+    ];
+
+    for (const content of docs) {
+      for (const variable of variables) {
+        expect(content).toContain(variable);
+      }
+      expect(content).toContain("ses");
+    }
+    expect(read("install/cloudflare/README.md")).toContain("Worker secret");
+  });
+
   it("keeps Docker docs aligned with Compose safety defaults", () => {
     const compose = read("install/docker/docker-compose.yml");
     const dockerReadme = read("install/docker/README.md");

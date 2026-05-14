@@ -72,6 +72,13 @@ type CloudflareBindings = {
   EMAIL?: {
     send(input: unknown): Promise<unknown>;
   };
+  AWS_ACCESS_KEY_ID?: string;
+  AWS_REGION?: string;
+  AWS_SECRET_ACCESS_KEY?: string;
+  AWS_SESSION_TOKEN?: string;
+  VPG_EMAIL_FROM?: string;
+  VPG_EMAIL_FROM_NAME?: string;
+  VPG_EMAIL_PROVIDER?: string;
 };
 
 type RuntimeSnapshot = {

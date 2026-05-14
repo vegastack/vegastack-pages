@@ -23,7 +23,12 @@ import { bypassesRuntimePersistence } from "./lib/middleware-policy";
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const browserMutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-function withSecurityHeaders(response: Response, request: Request) {
+function withSecurityHeaders(
+  response: Response,
+  request: Request,
+  options: { setCsrfCookie?: boolean } = {},
+) {
+  const setCsrfCookie = options.setCsrfCookie ?? true;
   const headers = new Headers(response.headers);
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
@@ -46,7 +51,7 @@ function withSecurityHeaders(response: Response, request: Request) {
   if (hsts) {
     headers.set("strict-transport-security", hsts);
   }
-  if (!readCookie(request, csrfCookieName)) {
+  if (setCsrfCookie && !readCookie(request, csrfCookieName)) {
     headers.append("set-cookie", csrfCookie(randomCsrfToken(), request));
   }
   return new Response(response.body, {
@@ -64,7 +69,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
       pathname: url.pathname,
     })
   ) {
-    return withSecurityHeaders(await next(), context.request);
+    return withSecurityHeaders(await next(), context.request, {
+      setCsrfCookie: false,
+    });
   }
 
   await ensureRuntimeReady();
