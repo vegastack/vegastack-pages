@@ -24,6 +24,13 @@ const root = resolve(here, "..");
 const stage = join(root, "npm-publish");
 const umbrellaPath = join(root, "package.json");
 const umbrella = JSON.parse(readFileSync(umbrellaPath, "utf8"));
+const supportedPlatforms = [
+  "darwin-x64",
+  "darwin-arm64",
+  "linux-x64",
+  "linux-arm64",
+  "win32-x64",
+];
 
 if (!existsSync(stage)) {
   console.error(
@@ -47,12 +54,7 @@ for (const name of readdirSync(stage)) {
 }
 
 // 2. Discover staged platforms + version-check each
-const expected = Object.keys(umbrella.optionalDependencies ?? {});
-const expectedPlatforms = new Set(
-  expected
-    .filter((dep) => dep.startsWith(`${umbrella.name}-`))
-    .map((dep) => dep.slice(umbrella.name.length + 1)),
-);
+const expectedPlatforms = new Set(supportedPlatforms);
 
 const found = new Set();
 for (const name of readdirSync(stage)) {
@@ -85,7 +87,7 @@ if (extra.length) {
 }
 
 // 4. Refresh umbrella's optionalDependencies to pin exact versions
-const refreshed = { ...(umbrella.optionalDependencies ?? {}) };
+const refreshed = {};
 for (const platform of expectedPlatforms) {
   refreshed[`${umbrella.name}-${platform}`] = umbrella.version;
 }

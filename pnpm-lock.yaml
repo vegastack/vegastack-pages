@@ -175,23 +175,7 @@ importers:
         specifier: ^1.4.0
         version: 1.5.2
 
-  cli/vegastack-pages:
-    optionalDependencies:
-      '@vegastack/pages-darwin-arm64':
-        specifier: 0.1.0
-        version: 0.1.0
-      '@vegastack/pages-darwin-x64':
-        specifier: 0.1.0
-        version: 0.1.0
-      '@vegastack/pages-linux-arm64':
-        specifier: 0.1.0
-        version: 0.1.0
-      '@vegastack/pages-linux-x64':
-        specifier: 0.1.0
-        version: 0.1.0
-      '@vegastack/pages-win32-x64':
-        specifier: 0.1.0
-        version: 0.1.0
+  cli/vegastack-pages: {}
 
   packages/config:
     dependencies:

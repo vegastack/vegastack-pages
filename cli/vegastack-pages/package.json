@@ -39,13 +39,6 @@
     "build": "node scripts/build-native.mjs",
     "test": "node --test test/*.test.mjs"
   },
-  "optionalDependencies": {
-    "@vegastack/pages-darwin-x64": "0.1.0",
-    "@vegastack/pages-darwin-arm64": "0.1.0",
-    "@vegastack/pages-linux-x64": "0.1.0",
-    "@vegastack/pages-linux-arm64": "0.1.0",
-    "@vegastack/pages-win32-x64": "0.1.0"
-  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public",

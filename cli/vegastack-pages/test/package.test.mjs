@@ -40,18 +40,30 @@ test("cross-build stages platform packages with license metadata", () => {
   );
 });
 
-test("umbrella package declares exactly the supported native packages", () => {
-  assert.deepEqual(Object.keys(pkg.optionalDependencies).sort(), [
-    "@vegastack/pages-darwin-arm64",
-    "@vegastack/pages-darwin-x64",
-    "@vegastack/pages-linux-arm64",
-    "@vegastack/pages-linux-x64",
-    "@vegastack/pages-win32-x64",
-  ]);
+test("source manifest defers native optional packages until publish", () => {
+  assert.equal(pkg.optionalDependencies, undefined);
   assert.equal(pkg.bin.vpg, "bin/vpg.js");
   assert.equal(pkg.bin["vegastack-pages"], "bin/vpg.js");
   assert.equal(pkg.scripts.postinstall, undefined);
   assert.equal(pkg.scripts.install, undefined);
+});
+
+test("pack-platforms injects exactly the supported native packages", () => {
+  const script = readFileSync(
+    new URL("../scripts/pack-platforms.mjs", import.meta.url),
+    "utf8",
+  );
+
+  for (const platform of [
+    "darwin-x64",
+    "darwin-arm64",
+    "linux-x64",
+    "linux-arm64",
+    "win32-x64",
+  ]) {
+    assert.match(script, new RegExp(`"${platform}"`));
+  }
+  assert.match(script, /umbrella\.optionalDependencies = refreshed/);
 });
 
 test("native build script uses platform path delimiters and Windows home fallback", () => {
