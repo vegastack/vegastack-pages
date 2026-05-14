@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.8
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Default `vpg` managed-hosting commands to `https://pages.vegastack.com`, update MCP discovery to protocol version `2025-11-25`, preserve OAuth login redirect parameters, serve path-derived authorization-server metadata for MCP clients, and improve login, signup, and magic-link status handling.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.8
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.8
+  - @vegastack/pages-mcp@0.1.8
+  - @vegastack/pages-renderer@0.1.8
+  - @vegastack/pages-ui@0.1.8
+
+
 ## 0.1.7
 
 ### @vegastack/pages

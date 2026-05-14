@@ -4,11 +4,20 @@ import AppLayout from "../layouts/AppLayout.astro";
 import VegaStackLogo from "../assets/vegastack-logo.svg";
 import GithubMark from "../components/GithubMark.astro";
 import { formatStarCount, getGithubStars } from "../lib/github-stars.ts";
+import { getRequestActor } from "../lib/access";
 
 export const prerender = false;
 
 const homeMode = process.env.VPG_HOME_MODE ?? "landing";
-if (homeMode === "redirect_to_app" || homeMode === "redirect_to_first_page") {
+const forceHomepage = Astro.url.searchParams.get("force_homepage") === "1";
+const actor = getRequestActor(Astro.cookies);
+if (!forceHomepage && Astro.url.pathname === "/" && actor.user) {
+  return Astro.redirect("/app");
+}
+if (
+  !forceHomepage &&
+  (homeMode === "redirect_to_app" || homeMode === "redirect_to_first_page")
+) {
   return Astro.redirect("/app");
 }
 

@@ -90,7 +90,7 @@ The server enforces `VPG_MCP_MAX_BODY_BYTES`, defaulting to 2 MiB.
 
 ## Host Validation
 
-`/mcp` validates the Host header per MCP 2025-06-18 to prevent DNS-rebinding attacks. When running behind a reverse proxy, set `VPG_MCP_ALLOWED_HOSTS` to the public host(s) you'll present:
+`/mcp` validates the Host header per MCP 2025-11-25 to prevent DNS-rebinding attacks. When running behind a reverse proxy, set `VPG_MCP_ALLOWED_HOSTS` to the public host(s) you'll present:
 
 ```sh
 export VPG_MCP_ALLOWED_HOSTS=pages.example.com,pages-staging.example.com

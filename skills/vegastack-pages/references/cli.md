@@ -11,6 +11,9 @@ Auth options:
 
 ```sh
 # Browser device-code login (default — opens consent page, picks workspace):
+vpg login
+
+# Self-hosted browser device-code login:
 vpg login --base-url https://pages.example.com
 
 # Manual token (CI / headless / agent):

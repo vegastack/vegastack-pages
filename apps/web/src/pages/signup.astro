@@ -1,10 +1,19 @@
 ---
 import { publicSignupEnabled } from "../lib/deployment";
+import { getRequestActor } from "../lib/access";
+import { loginRedirectTarget } from "../lib/auth-redirects";
 import AppLayout from "../layouts/AppLayout.astro";
 
 export const prerender = false;
 
 const enabled = publicSignupEnabled();
+const isDev = import.meta.env.DEV;
+const actor = getRequestActor(Astro.cookies);
+if (actor.user) {
+  return Astro.redirect(
+    loginRedirectTarget(Astro.url.searchParams.get("redirect_to")),
+  );
+}
 ---
 
 <AppLayout title="Sign up - VegaStack Pages">
@@ -54,7 +63,14 @@ const enabled = publicSignupEnabled();
             <p class="auth-alt">
               Already have access? <a href="/app/login">Log in</a>
             </p>
-            <div class="login-result" data-signup-result hidden />
+            <div
+              class="auth-status"
+              data-signup-result
+              data-dev-mode={isDev ? "true" : "false"}
+              hidden
+              role="status"
+              aria-live="polite"
+            />
           </>
         ) : (
           <>
@@ -155,6 +171,27 @@ const enabled = publicSignupEnabled();
   <script>
     const form = document.querySelector("[data-signup-form]");
     const result = document.querySelector("[data-signup-result]");
+
+    function renderStatus(
+      state: string,
+      title: string,
+      message: string,
+      action?: HTMLElement | null,
+    ) {
+      if (!(result instanceof HTMLElement)) return;
+      result.hidden = false;
+      result.dataset.state = state;
+      const titleEl = document.createElement("strong");
+      titleEl.className = "auth-status-title";
+      titleEl.textContent = title;
+      const messageEl = document.createElement("span");
+      messageEl.className = "auth-status-body";
+      messageEl.textContent = message;
+      const children: HTMLElement[] = [titleEl, messageEl];
+      if (action) children.push(action);
+      result.replaceChildren(...children);
+    }
+
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!(form instanceof HTMLFormElement)) return;
@@ -163,38 +200,54 @@ const enabled = publicSignupEnabled();
         button.disabled = true;
         button.textContent = "Creating...";
       }
+      renderStatus(
+        "loading",
+        "Creating workspace",
+        "We are preparing a confirmation link for this email address.",
+      );
       const data = new FormData(form);
-      const response = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          display_name: data.get("display_name"),
-          email: data.get("email"),
-          workspace_name: data.get("workspace_name"),
-        }),
-      });
-      const payload = await response.json();
-      if (button instanceof HTMLButtonElement) {
-        button.disabled = false;
-        button.textContent = "Create workspace";
+      try {
+        const response = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            display_name: data.get("display_name"),
+            email: data.get("email"),
+            workspace_name: data.get("workspace_name"),
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error?.message || "Signup failed.");
+        }
+        let action: HTMLAnchorElement | null = null;
+        if (
+          result instanceof HTMLElement &&
+          result.dataset.devMode === "true" &&
+          payload?.debug_verify_url
+        ) {
+          action = document.createElement("a");
+          action.href = String(payload.debug_verify_url);
+          action.textContent = "Open development confirmation link";
+        }
+        renderStatus(
+          "success",
+          "Check your email",
+          "Your workspace is reserved. Use the confirmation link to finish setup.",
+          action,
+        );
+      } catch (error) {
+        renderStatus(
+          "error",
+          "Could not create workspace",
+          error instanceof Error ? error.message : "Signup failed.",
+        );
+      } finally {
+        if (button instanceof HTMLButtonElement) {
+          button.disabled = false;
+          button.textContent = "Create workspace";
+        }
       }
-      if (!(result instanceof HTMLElement)) return;
-      result.hidden = false;
-      if (response.ok && payload.debug_verify_url) {
-        const message = document.createElement("p");
-        const link = document.createElement("a");
-        message.textContent = "Workspace created. Development magic link:";
-        link.href = String(payload.debug_verify_url);
-        link.textContent = "Open workspace";
-        result.replaceChildren(message, link);
-        return;
-      }
-      if (response.ok) {
-        result.textContent =
-          "Workspace created. Check your email for a magic link.";
-        return;
-      }
-      result.textContent = payload?.error?.message ?? "Signup failed.";
     });
   </script>
 </AppLayout>

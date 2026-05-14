@@ -49,7 +49,7 @@ Three ways to connect, from least to most setup:
 
 - **Browser-based clients** (Claude.ai, ChatGPT custom connectors, Cursor remote MCP, …). Paste `https://pages.vegastack.com/mcp` (or your self-host equivalent) into the connector form. The client discovers OAuth via `/.well-known/oauth-protected-resource`, opens a consent popup, you sign in and pick a workspace, done.
 - **Manual bearer.** Open **Settings → My Connections**, click **Create token**, copy the value. Use it as `Authorization: Bearer <token>` from Claude Desktop, Cursor local MCP, MCP-over-stdio bridges, or anything that accepts a static token.
-- **CLI login.** `vpg login --token <token>` stores the bearer locally and pins a workspace.
+- **CLI login.** `vpg login` starts the browser device-code flow against the managed service. For CI or headless use, `vpg login --token <token>` stores a manual bearer locally and pins a workspace.
 
 From an MCP client, call:
 

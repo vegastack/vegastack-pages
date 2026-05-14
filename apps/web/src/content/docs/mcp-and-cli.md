@@ -10,7 +10,7 @@ VegaStack Pages exposes review workflows through a Remote MCP endpoint and a Rus
 
 ## MCP endpoint
 
-The Remote MCP server is mounted at `/mcp` on the same app and implements the MCP 2025-06-18 Streamable HTTP transport.
+The Remote MCP server is mounted at `/mcp` on the same app and implements the MCP 2025-11-25 Streamable HTTP transport.
 
 Managed endpoint:
 
@@ -106,12 +106,12 @@ vegastack-pages --help
 Examples:
 
 ```sh
-vpg --base-url https://pages.vegastack.com --workspace wks_123 create --file ./plan.md --title "Plan"
-vpg --base-url https://pages.vegastack.com --workspace wks_123 create --template prd --title "Search redesign" --set owner=platform
-vpg --base-url https://pages.vegastack.com --workspace wks_123 wait pg_123 --until first-response --after-id evt_42
-vpg --base-url https://pages.vegastack.com --workspace wks_123 publish-page pg_123 --permission comment
-vpg --base-url https://pages.vegastack.com --workspace wks_123 whoami
-vpg --base-url https://pages.vegastack.com workspaces
+vpg --workspace wks_123 create --file ./plan.md --title "Plan"
+vpg --workspace wks_123 create --template prd --title "Search redesign" --set owner=platform
+vpg --workspace wks_123 wait pg_123 --until first-response --after-id evt_42
+vpg --workspace wks_123 publish-page pg_123 --permission comment
+vpg --workspace wks_123 whoami
+vpg workspaces
 ```
 
 Equivalent surgical-edit workflow:

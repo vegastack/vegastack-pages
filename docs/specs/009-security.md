@@ -82,7 +82,7 @@ Rate limits:
 
 ## DNS rebinding (MCP Streamable HTTP)
 
-Per MCP 2025-06-18, the server validates the Host header on `/mcp` to prevent DNS-rebinding attacks against local self-host deployments:
+Per MCP 2025-11-25, the server validates the Host header on `/mcp` to prevent DNS-rebinding attacks against local self-host deployments:
 
 - Accept the request if the Host header (or `X-Forwarded-Host`) matches the request URL host, is loopback (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`), or is enumerated in `VPG_MCP_ALLOWED_HOSTS`.
 - Reject with 403 otherwise.

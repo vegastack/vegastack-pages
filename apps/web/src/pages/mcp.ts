@@ -55,7 +55,7 @@ import skillReadme from "../../../../skills/vegastack-pages/SKILL.md?raw";
 
 export const prerender = false;
 
-const protocolVersion = "2025-06-18";
+const protocolVersion = "2025-11-25";
 const defaultMaxBodyBytes = 2 * 1024 * 1024;
 const activeWaitForReviewCalls = new Set<string>();
 const skillResources = [
@@ -171,10 +171,15 @@ export const POST: APIRoute = async ({ request }) => {
         ),
       );
     }
-    await ensureSeedData();
+    if (process.env.VPG_MCP_TOKEN) {
+      await ensureSeedData();
+    }
     const actor = await validateAuth(request);
 
     const parsed = parseJsonRpcBody(await readRequestBody(request));
+    if (messagesNeedRuntimeData(parsed)) {
+      await ensureSeedData();
+    }
     if (actor.authMode === "static_token") {
       const methods = (Array.isArray(parsed) ? parsed : [parsed])
         .map((message) => message.method)
@@ -218,6 +223,21 @@ export const POST: APIRoute = async ({ request }) => {
     return withMcpCors(errorResponse(error, request));
   }
 };
+
+function messagesNeedRuntimeData(body: JsonRpcMessage | JsonRpcMessage[]) {
+  const messages = Array.isArray(body) ? body : [body];
+  return messages.some((message) => {
+    const method = String(message?.method ?? "");
+    return ![
+      "initialize",
+      "ping",
+      "notifications/initialized",
+      "tools/list",
+      "prompts/list",
+      "prompts/get",
+    ].includes(method);
+  });
+}
 
 async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
   const hasId = Boolean(

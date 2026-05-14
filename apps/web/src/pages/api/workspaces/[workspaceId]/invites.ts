@@ -2,6 +2,7 @@ import { AppError } from "@vegastack/pages-core";
 import type { WorkspaceRole } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
+import { safeLocalRedirectPath } from "../../../../lib/auth-redirects";
 import { sendMagicLinkEmail } from "../../../../lib/email";
 import { magicLinkHandoffUrl } from "../../../../lib/magic-link";
 import {
@@ -156,7 +157,9 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         ? null
         : await authService.createMagicLink({
             email: user.email,
-            redirectTo: body.redirect_to ? String(body.redirect_to) : "/app",
+            redirectTo: safeLocalRedirectPath(
+              body.redirect_to ? String(body.redirect_to) : null,
+            ),
           });
     const workspace = workspaceService.getWorkspace(workspaceId);
     const verifyUrl = magic

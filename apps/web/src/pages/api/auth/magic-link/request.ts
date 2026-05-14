@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { safeLocalRedirectPath } from "../../../../lib/auth-redirects";
 import { publicSignupEnabled } from "../../../../lib/deployment";
 import { sendMagicLinkEmail } from "../../../../lib/email";
 import { magicLinkHandoffUrl } from "../../../../lib/magic-link";
@@ -36,7 +37,9 @@ export const POST: APIRoute = async ({ request, url }) => {
     }
     const created = await authService.createMagicLink({
       email,
-      redirectTo: body.redirect_to ? String(body.redirect_to) : "/app",
+      redirectTo: safeLocalRedirectPath(
+        body.redirect_to ? String(body.redirect_to) : null,
+      ),
     });
     const verifyUrl = magicLinkHandoffUrl(url.origin, created.rawToken);
     const workspace = user

@@ -1,4 +1,13 @@
 ---
+import { getRequestActor } from "../../lib/access";
+import { loginRedirectTarget } from "../../lib/auth-redirects";
+
 export const prerender = false;
-return Astro.rewrite("/login");
+const actor = getRequestActor(Astro.cookies);
+if (actor.user) {
+  return Astro.redirect(
+    loginRedirectTarget(Astro.url.searchParams.get("redirect_to")),
+  );
+}
+return Astro.rewrite(`/login${Astro.url.search}`);
 ---

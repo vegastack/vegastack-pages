@@ -26,7 +26,7 @@ Managed hosting:
 
 ```sh
 # Browser login (recommended): opens a consent page, you pick a workspace, done.
-vpg login --base-url https://pages.vegastack.com
+vpg login
 
 # Or paste a token for headless/CI use:
 vpg login --base-url https://pages.vegastack.com --workspace wks_123 --token "$VPG_TOKEN"
@@ -66,11 +66,15 @@ cargo run --quiet -- --help
 
 ```sh
 # Browser flow:
-vpg login --base-url https://pages.example.com
+vpg login
 
 # Manual flow:
 vpg login --base-url https://pages.example.com --workspace wks_123 --token "$VPG_TOKEN"
 ```
+
+`vpg login` defaults to the managed service at `https://pages.vegastack.com`.
+Self-hosted and local development instances should pass `--base-url` or set
+`VPG_BASE_URL`.
 
 In both modes, `vpg login` stores the token in the OS keychain where available, otherwise in an owner-only local file (`~/.config/vegastack-pages/`). Workspace-scoped tokens are sent as `Authorization: Bearer <token>` on every API request and enforced server-side against their workspace.
 

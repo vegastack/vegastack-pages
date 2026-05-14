@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SKILL_NAME: &str = "vegastack-pages";
+const DEFAULT_BASE_URL: &str = "https://pages.vegastack.com";
 const SKILL_FILES: &[(&str, &str)] = &[
     (
         "SKILL.md",
@@ -58,7 +59,7 @@ struct Cli {
         long,
         global = true,
         env = "VPG_BASE_URL",
-        default_value = "http://127.0.0.1:4321"
+        default_value = DEFAULT_BASE_URL
     )]
     base_url: String,
 
@@ -3254,6 +3255,38 @@ mod tests {
         assert_eq!(parsed.refresh_token.as_deref(), Some("mcp_def"));
         assert_eq!(parsed.workspace_id.as_deref(), Some("wks_42"));
         assert_eq!(parsed.expires_in, Some(3600));
+    }
+
+    #[test]
+    fn cli_defaults_to_managed_service_base_url() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = env::var_os("VPG_BASE_URL");
+        env::remove_var("VPG_BASE_URL");
+
+        let cli = Cli::try_parse_from(["vpg", "whoami"]).expect("parse cli");
+        assert_eq!(cli.base_url, DEFAULT_BASE_URL);
+        assert!(!cli.base_url.contains("127.0.0.1"));
+        assert!(!cli.base_url.contains("localhost"));
+
+        if let Some(value) = previous {
+            env::set_var("VPG_BASE_URL", value);
+        }
+    }
+
+    #[test]
+    fn cli_uses_localhost_only_when_explicitly_configured() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = env::var_os("VPG_BASE_URL");
+        env::set_var("VPG_BASE_URL", "http://127.0.0.1:4322");
+
+        let cli = Cli::try_parse_from(["vpg", "whoami"]).expect("parse cli");
+        assert_eq!(cli.base_url, "http://127.0.0.1:4322");
+
+        if let Some(value) = previous {
+            env::set_var("VPG_BASE_URL", value);
+        } else {
+            env::remove_var("VPG_BASE_URL");
+        }
     }
 
     #[test]

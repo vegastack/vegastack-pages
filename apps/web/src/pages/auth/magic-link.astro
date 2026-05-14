@@ -1,24 +1,99 @@
 ---
+import { getRequestActor } from "../../lib/access";
 import AppLayout from "../../layouts/AppLayout.astro";
+
+export const prerender = false;
+
+const actor = getRequestActor(Astro.cookies);
+if (actor.user) {
+  return Astro.redirect("/app");
+}
 ---
 
 <AppLayout title="Signing in - VegaStack Pages" robots="noindex">
-  <main class="login-page">
-    <section class="login-card">
-      <h1>Signing in</h1>
-      <p data-magic-link-status>Completing your sign-in.</p>
+  <main class="auth-shell">
+    <section class="auth-form-side" aria-labelledby="magic-link-heading">
+      <header>
+        <a class="auth-wordmark" href="/">VegaStack Pages</a>
+      </header>
+      <h1 id="magic-link-heading">Signing in</h1>
+      <p data-magic-link-lede>Completing your one-time sign-in link.</p>
+      <div
+        class="auth-status"
+        data-magic-link-status
+        data-state="loading"
+        role="status"
+        aria-live="polite"
+      >
+        <strong class="auth-status-title">Checking link</strong>
+        <span class="auth-status-body">
+          Keep this tab open while we verify your session.
+        </span>
+      </div>
+      <p class="auth-alt">
+        Need a new link? <a href="/app/login">Return to login</a>
+      </p>
     </section>
+    <aside class="auth-aside" aria-hidden="true">
+      <div>
+        <p class="auth-aside-eyebrow">Magic link</p>
+        <h2 class="auth-aside-headline">One tap, one session.</h2>
+        <div class="auth-aside-body">
+          <p>
+            Sign-in links are short-lived and can only be used once. After the
+            link is verified, we open your workspace.
+          </p>
+          <p>
+            If this browser already has an active session, auth pages send you
+            straight back to the app.
+          </p>
+        </div>
+        <div class="auth-env-block" aria-label="Magic link details">
+          <div>
+            <span class="auth-env-key">token</span>{" "}
+            <span class="auth-env-val">verified in the browser</span>
+          </div>
+          <div>
+            <span class="auth-env-key">session</span>{" "}
+            <span class="auth-env-val">stored as a secure cookie</span>
+          </div>
+        </div>
+      </div>
+      <p class="auth-aside-footer">
+        Missing or expired links can be replaced from the login screen.
+      </p>
+    </aside>
   </main>
 
   <script is:inline>
     (() => {
       const status = document.querySelector("[data-magic-link-status]");
+      const lede = document.querySelector("[data-magic-link-lede]");
+
+      function renderStatus(state, title, message) {
+        if (!(status instanceof HTMLElement)) return;
+        status.dataset.state = state;
+        const titleEl = document.createElement("strong");
+        titleEl.className = "auth-status-title";
+        titleEl.textContent = title;
+        const messageEl = document.createElement("span");
+        messageEl.className = "auth-status-body";
+        messageEl.textContent = message;
+        status.replaceChildren(titleEl, messageEl);
+      }
+
       const params = new URLSearchParams(window.location.hash.slice(1));
       const token = params.get("token") ?? "";
       window.history.replaceState(null, "", "/auth/magic-link");
       if (!token) {
-        if (status)
-          status.textContent = "This sign-in link is missing its token.";
+        renderStatus(
+          "error",
+          "Link missing",
+          "Open the latest sign-in link from your email, or request a new one.",
+        );
+        if (lede instanceof HTMLElement) {
+          lede.textContent = "This sign-in link cannot be used.";
+        }
         return;
       }
       fetch("/api/auth/magic-link/verify", {
@@ -31,10 +106,18 @@ import AppLayout from "../../layouts/AppLayout.astro";
           if (!response.ok || !body.redirect_to) {
             throw new Error(body?.error?.message || "Sign-in failed.");
           }
+          renderStatus("success", "Signed in", "Opening your workspace now.");
           window.location.replace(String(body.redirect_to));
         })
         .catch((error) => {
-          if (status) status.textContent = error.message || "Sign-in failed.";
+          renderStatus(
+            "error",
+            "Sign-in failed",
+            error.message || "Request a new link and try again.",
+          );
+          if (lede instanceof HTMLElement) {
+            lede.textContent = "We could not verify this sign-in link.";
+          }
         });
     })();
   </script>

@@ -14,6 +14,7 @@ import { POST as revokePost } from "../revoke";
 import { POST as devicePost } from "../device";
 import { GET as protectedResourceGet } from "../../.well-known/oauth-protected-resource";
 import { GET as authServerGet } from "../../.well-known/oauth-authorization-server";
+import { GET as authServerPathGet } from "../../.well-known/oauth-authorization-server/[...slug]";
 import { POST as mcpPost } from "../../mcp";
 import { base64UrlEncode } from "../../../lib/oauth/codes";
 
@@ -152,6 +153,21 @@ describe("OAuth discovery metadata", () => {
     );
     expect(body.code_challenge_methods_supported).toEqual(["S256"]);
     expect(body.token_endpoint_auth_methods_supported).toEqual(["none"]);
+  });
+
+  it("serves authorization-server metadata from path-derived MCP well-known URLs", async () => {
+    const response = await authServerPathGet({
+      request: new Request(
+        "https://pages.example.test/.well-known/oauth-authorization-server/mcp",
+      ),
+    } as never);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      issuer: string;
+      token_endpoint: string;
+    };
+    expect(body.issuer).toBe("https://pages.example.test");
+    expect(body.token_endpoint).toBe("https://pages.example.test/oauth/token");
   });
 
   it("derives metadata from X-Forwarded-Host for reverse-proxied self-hosters", async () => {
@@ -966,7 +982,11 @@ describe("Authorize GET flow", () => {
       request: new Request(url.toString()),
     } as never);
     expect(response.status).toBe(302);
-    expect(response.headers.get("location") ?? "").toContain("redirect_to=");
+    const location = response.headers.get("location") ?? "";
+    expect(location).toContain("redirect_to=");
+    expect(decodeURIComponent(location)).toContain(
+      "/oauth/authorize?response_type=code",
+    );
   });
 
   it("rejects unknown client_id with an HTML error", async () => {

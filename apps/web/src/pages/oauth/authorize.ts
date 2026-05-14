@@ -125,7 +125,7 @@ export const GET: APIRoute = async ({ cookies, url }) => {
       ? "/api/auth/dev-login"
       : "/app/login";
     const target = new URL(loginPath, url);
-    target.searchParams.set("redirect_to", "/oauth/authorize/resume");
+    target.searchParams.set("redirect_to", `${url.pathname}${url.search}`);
     return Response.redirect(target.toString(), 302);
   }
   const workspaces = workspaceService

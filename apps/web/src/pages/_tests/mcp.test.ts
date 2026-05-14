@@ -42,14 +42,14 @@ describe("MCP route", () => {
 
     expect(response.status).toBe(405);
     expect(response.headers.get("allow")).toBe("POST, GET, HEAD, OPTIONS");
-    expect(response.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+    expect(response.headers.get("mcp-protocol-version")).toBe("2025-11-25");
   });
 
   it("answers HEAD with 200 and the MCP protocol version for connector discovery", async () => {
     const response = await HEAD({} as never);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+    expect(response.headers.get("mcp-protocol-version")).toBe("2025-11-25");
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(await response.text()).toBe("");
   });
@@ -71,7 +71,7 @@ describe("MCP route", () => {
     } as never);
 
     expect(response.status).toBe(401);
-    expect(response.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+    expect(response.headers.get("mcp-protocol-version")).toBe("2025-11-25");
     expect(response.headers.get("www-authenticate")).toContain(
       "resource_metadata=",
     );

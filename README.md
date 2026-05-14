@@ -100,7 +100,7 @@ Use a workspace-scoped token from **Settings → My Connections** or another bea
 
 ```sh
 # Browser login (opens the consent page in your default browser):
-vpg login --base-url https://pages.vegastack.com
+vpg login
 # Or paste a workspace-scoped token for headless / CI use:
 vpg login --base-url https://pages.vegastack.com --workspace wks_123 --token "$VPG_TOKEN"
 vpg create --template prd --title "Search redesign" --set owner=platform

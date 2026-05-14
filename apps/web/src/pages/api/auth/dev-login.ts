@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { safeLocalRedirectPath } from "../../../lib/auth-redirects";
 import {
   authService,
   ensureSeedData,
@@ -27,12 +28,7 @@ export const GET: APIRoute = async ({ cookies, redirect, url }) => {
     await ensureSeedData();
     const requestedEmail = url.searchParams.get("email");
     const requestedRedirect = url.searchParams.get("redirect_to") ?? "/app";
-    const safeRedirect =
-      requestedRedirect.startsWith("/") &&
-      !requestedRedirect.startsWith("//") &&
-      !requestedRedirect.startsWith("/\\")
-        ? requestedRedirect
-        : "/app";
+    const safeRedirect = safeLocalRedirectPath(requestedRedirect);
     const setup = setupService.status();
     const user = requestedEmail
       ? workspaceService.getUserByEmail(requestedEmail)
