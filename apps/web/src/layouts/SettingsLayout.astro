@@ -13,7 +13,8 @@ interface Props {
     | "members"
     | "attachments"
     | "templates"
-    | "sessions"
+    | "connections"
+    | "connections_workspace"
     | "audit"
     | "profile";
   sectionLabel: string;
@@ -28,7 +29,9 @@ interface Props {
 
 const { title, context, currentSection, sectionLabel, description, kicker } =
   Astro.props;
-const { workspace, workspaces, pages, currentUser } = context;
+const { workspace, workspaces, pages, currentUser, effectivePermission } =
+  context;
+const isAdmin = effectivePermission === "admin";
 
 const navItems: Array<{
   id: Props["currentSection"];
@@ -44,7 +47,20 @@ const navItems: Array<{
     label: "Attachments",
     href: "/app/settings/attachments",
   },
-  { id: "sessions", label: "Sessions", href: "/app/settings/sessions" },
+  {
+    id: "connections",
+    label: "My Connections",
+    href: "/app/settings/connections",
+  },
+  ...(isAdmin
+    ? [
+        {
+          id: "connections_workspace" as Props["currentSection"],
+          label: "Connections Log",
+          href: "/app/settings/connections/workspace",
+        },
+      ]
+    : []),
   { id: "audit", label: "Audit", href: "/app/settings/audit" },
 ];
 
@@ -65,6 +81,7 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
       currentUser={currentUser}
       currentSection={currentSection}
       pages={pages.map((page) => ({ id: page.id, slugId: page.slugId }))}
+      permission={effectivePermission}
     />
 
     <div class="vpg-shell-right">

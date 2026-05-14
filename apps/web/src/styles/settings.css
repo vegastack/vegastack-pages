@@ -1861,7 +1861,8 @@
 }
 
 /* ── Sessions settings page ────────────────────────────────────────────────
-   Page-specific layout for /app/settings/sessions. Lives in the shared
+   Page-specific layout for /app/settings/connections (and the admin-only
+   /app/settings/connections/workspace surface). Lives in the shared
    settings stylesheet rather than the page's `<style>` block so it loads
    render-blocking with the rest of the settings CSS and there is no
    first-paint flash where the button stacks below the input. */

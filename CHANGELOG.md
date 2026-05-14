@@ -2,6 +2,58 @@
 
 All notable changes to VegaStack Pages are documented here.
 
+## 0.1.3
+
+Make `/register` fast enough to fit inside claude.ai's connector-broker
+timeout window.
+
+### Background
+
+`wrangler tail` against pages.vegastack.com during a real Add Custom
+Connector attempt showed every `POST /register` (both the root alias and
+the canonical `/oauth/register`) coming back as **Canceled** in the
+Cloudflare runtime — the broker was closing the connection before our
+response landed. A curl timing probe confirmed our DCR endpoint was
+returning in **1.8-2.4s**, well past the broker's ~1.5s timeout. Two
+reference servers in claude.ai's connector listing (Excalidraw, Context7)
+both clear DCR in under 1s — Excalidraw because it doesn't implement OAuth
+at all, Context7 because they delegate DCR to Clerk.
+
+### Fixed
+
+- New well-known OAuth client `oac_anthropic_connector` matching the
+  redirect URIs `https://claude.ai/api/mcp/auth_callback` and
+  `https://claude.com/api/mcp/auth_callback`. When a `POST /register`
+  payload's `redirect_uris` matches that signature, the handler returns
+  the pre-baked `client_id` immediately — no D1 INSERT, no rate-limit
+  write. Sub-100ms response. Same pattern as the existing `oac_vpg_cli`
+  client used by the CLI device-code flow.
+- For generic DCR (any client whose redirect URIs aren't on the Anthropic
+  list), the audit-log INSERT is now deferred via
+  `ExecutionContext.waitUntil()`. The client INSERT stays synchronous
+  (subsequent `/authorize` and `/token` calls have to find the client by
+  id), but the audit row writes after the 201 response has been sent.
+  Roughly halves response time on the slow path.
+
+### Changed — Connections settings IA polish
+
+- **Sidebar reshuffle**: `My Connections` moves up into the **Account**
+  group (next to Profile). Sessions are personal data and travel with the
+  account. The admin-only **Connections Log** stays in **Activity**.
+- **Rename**: the admin overview is now called **Connections Log** (was
+  "Workspace Connections"). Matches the Audit log naming pattern.
+- **Icon swap**: revoke buttons on both Connections pages use a trash-can
+  icon instead of a generic ×. Removes the visual ambiguity of × with
+  destructive intent.
+- **Connections Log table**: compact two-line dates, ellipsis-truncated
+  owner name/email with a non-clipping "You" chip, fixed column widths,
+  and a stacked Client column so long session ids don't push date
+  columns off-screen.
+- Docs + skill references updated: "Settings → Workspace Connections" is
+  now "Settings → Connections Log" across README, the docs site, spec/003,
+  spec/009, the permissions guide, the mcp-and-cli page, and the MCP
+  skill reference.
+
 ## 0.1.2
 
 A tiny follow-up to v0.1.1. While debugging the claude.ai custom connector

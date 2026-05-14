@@ -11,7 +11,8 @@ type SectionId =
   | "members"
   | "attachments"
   | "templates"
-  | "sessions"
+  | "connections"
+  | "connections_workspace"
   | "audit"
   | "profile";
 
@@ -21,10 +22,23 @@ interface Props {
   currentUser: User;
   currentSection: SectionId;
   pages: Array<{ id: string; slugId: string }>;
+  // Permission of the current user inside the active workspace. Used to
+  // gate admin-only sidebar entries (Connections Log). Pass-through
+  // from SettingsLayout, which reads it from SettingsContext. The union
+  // mirrors permissionService.resolve()'s return type.
+  permission?: "admin" | "write" | "comment" | "read" | "none";
 }
 
-const { workspace, workspaces, currentUser, currentSection, pages } =
-  Astro.props;
+const {
+  workspace,
+  workspaces,
+  currentUser,
+  currentSection,
+  pages,
+  permission,
+} = Astro.props;
+
+const isAdmin = permission === "admin";
 
 const firstPage = pages[0];
 const backHref = firstPage ? `/p/${firstPage.slugId}` : "/app";
@@ -74,6 +88,12 @@ const groups: Array<{
         href: "/app/settings/profile",
         icon: "user",
       },
+      {
+        id: "connections",
+        label: "My Connections",
+        href: "/app/settings/connections",
+        icon: "plug",
+      },
     ],
   },
   {
@@ -119,12 +139,16 @@ const groups: Array<{
   {
     label: "Activity",
     items: [
-      {
-        id: "sessions",
-        label: "Sessions",
-        href: "/app/settings/sessions",
-        icon: "plug",
-      },
+      ...(isAdmin
+        ? [
+            {
+              id: "connections_workspace" as SectionId,
+              label: "Connections Log",
+              href: "/app/settings/connections/workspace",
+              icon: "plug" as IconKey,
+            },
+          ]
+        : []),
       {
         id: "audit",
         label: "Audit log",

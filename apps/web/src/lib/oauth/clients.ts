@@ -35,6 +35,46 @@ const VPG_CLI_CLIENT: OAuthClientRow = {
   updatedAt: "1970-01-01T00:00:00.000Z",
 };
 
+// Well-known client_id used by Anthropic's claude.ai / claude.com connector
+// broker. claude.ai POSTs a DCR request with these exact redirect URIs every
+// time a user adds the connector — short-circuiting to a stable, pre-baked
+// client_id lets us answer in milliseconds instead of doing a D1 INSERT, which
+// matters because the broker times out around 1.5s and our cold-start
+// INSERT-plus-audit-log path was running ~2s.
+export const ANTHROPIC_CONNECTOR_CLIENT_ID = "oac_anthropic_connector";
+
+const ANTHROPIC_REDIRECT_URIS = [
+  "https://claude.ai/api/mcp/auth_callback",
+  "https://claude.com/api/mcp/auth_callback",
+] as const;
+
+const ANTHROPIC_CONNECTOR_CLIENT: OAuthClientRow = {
+  id: ANTHROPIC_CONNECTOR_CLIENT_ID,
+  clientName: "Claude",
+  redirectUris: [...ANTHROPIC_REDIRECT_URIS],
+  softwareId: "anthropic-claude-ai-connector",
+  softwareVersion: null,
+  tokenEndpointAuthMethod: "none",
+  registeredUserAgent: null,
+  registeredIp: null,
+  createdAt: "1970-01-01T00:00:00.000Z",
+  updatedAt: "1970-01-01T00:00:00.000Z",
+};
+
+// True when the incoming DCR payload looks like Anthropic's connector broker
+// (every redirect_uri is one of the known callback URLs). The check is
+// signature-based rather than UA-based because the broker's UA isn't stable.
+export function matchesAnthropicConnector(input: {
+  redirectUris: string[];
+}): boolean {
+  if (!Array.isArray(input.redirectUris) || input.redirectUris.length === 0) {
+    return false;
+  }
+  return input.redirectUris.every((uri) =>
+    (ANTHROPIC_REDIRECT_URIS as readonly string[]).includes(uri),
+  );
+}
+
 type StoredRow = Omit<OAuthClientRow, "redirectUris"> & {
   redirectUrisJson: string;
 };
@@ -190,6 +230,8 @@ export async function getOAuthClient(
 ): Promise<OAuthClientRow | null> {
   if (!clientId) return null;
   if (clientId === VPG_CLI_CLIENT_ID) return VPG_CLI_CLIENT;
+  if (clientId === ANTHROPIC_CONNECTOR_CLIENT_ID)
+    return ANTHROPIC_CONNECTOR_CLIENT;
   await ensureRuntimeReady();
   if (runtimeIsD1()) {
     const rows = await d1All<StoredRow>(

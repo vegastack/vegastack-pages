@@ -1,5 +1,46 @@
 # @vegastack/pages-web
 
+## 0.1.3
+
+### Minor Changes
+
+- Split the Sessions settings page into **My Connections** (personal, every member) and **Workspace Connections** (admin-only) so the silent permission redirect from the old combined view is gone.
+  - **New routes**: `/app/settings/connections` (personal) and `/app/settings/connections/workspace` (admin). The personal page hosts the **New connection** form and lists the current user's MCP/CLI/OAuth sessions. The workspace page is read-only-plus-revoke for admins and shows an **Owner** column with the member each connection belongs to.
+  - **Permission gate is now visible.** The old page rendered a `Workspace` tab to non-admins and silently redirected them back to `Mine` on click. The new sidebar only shows the **Workspace Connections** entry when the current user is an admin in the active workspace; direct URL access by a non-admin returns a `303` to `/app/settings/connections`.
+  - **Legacy URL preserved.** `/app/settings/sessions` returns a `301` to `/app/settings/connections`; `/app/settings/sessions?view=workspace` returns a `301` to `/app/settings/connections/workspace`. Any inbound bookmark from the old tab shape continues to work. The mapping is extracted to a pure helper `apps/web/src/lib/settings-redirects.ts` and covered by `connections-route.test.ts`.
+  - **Sidebar reshuffle**: `Activity` group now lists `My Connections` → `Workspace Connections` (admin only) → `Audit log`. The `Sessions` SectionId is removed; `connections` + `connections_workspace` replace it. `SettingsLayout` propagates `effectivePermission` from `SettingsContext` to the sidebar so the admin row is conditionally rendered without an extra round-trip.
+  - **API untouched.** `apps/web/src/pages/api/mcp/sessions.ts` already enforced the right boundaries: `?view=workspace` requires admin, the default lists only the actor's sessions, `DELETE` is owner-only unless admin. The split is a pure UI refactor; existing API tests (`sessions.test.ts` + `sessions-views.test.ts`) keep coverage intact.
+  - **Doc + skill find-and-replace**: README, CLI README, every reference in `docs/`, `apps/web/src/content/docs/`, and `skills/vegastack-pages/references/` now point at the new labels. The landing-page FAQ is updated too. "Settings → Sessions" → "Settings → My Connections" everywhere a user would land to create or paste a token; admin-context paragraphs additionally mention `Settings → Workspace Connections`.
+
+### Patch Changes
+
+- Make `/register` fast enough for claude.ai's connector broker.
+
+  Measured by curl: our DCR endpoint was returning in 1.8-2.4s (two D1 INSERTs
+  on the hot path — the client itself + the audit log). claude.ai's broker
+  aborts the request at ~1.5s, leaving the connector stuck on "Couldn't reach
+  the MCP server" even though everything else was wired correctly.
+
+  Two changes:
+  - New well-known OAuth client `oac_anthropic_connector` matching the
+    redirect URIs `https://claude.ai/api/mcp/auth_callback` and
+    `https://claude.com/api/mcp/auth_callback`. When a `POST /register`
+    payload matches that signature, we short-circuit: return the pre-baked
+    client_id immediately, no D1 writes, no rate-limit write. Sub-100ms
+    response. Same pattern as the existing `oac_vpg_cli` client used by the
+    CLI device-code flow.
+  - For generic DCR (any other client), the audit-log INSERT is now deferred
+    via `ExecutionContext.waitUntil()`. The client INSERT stays synchronous
+    (subsequent `/authorize` and `/token` calls have to find the client by
+    id), but the audit row writes after the 201 response has been sent.
+    Roughly halves response time on the slow path.
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.3
+  - @vegastack/pages-mcp@0.1.3
+  - @vegastack/pages-renderer@0.1.3
+  - @vegastack/pages-ui@0.1.3
+
 ## 0.1.2
 
 ### Minor Changes
@@ -37,10 +78,10 @@
   metadata still advertises the `/oauth/*` URLs.
 
 - Updated dependencies []:
-  - @vegastack/pages-core@0.2.0
-  - @vegastack/pages-mcp@0.2.0
-  - @vegastack/pages-renderer@0.2.0
-  - @vegastack/pages-ui@0.2.0
+  - @vegastack/pages-core@0.1.3
+  - @vegastack/pages-mcp@0.1.3
+  - @vegastack/pages-renderer@0.1.3
+  - @vegastack/pages-ui@0.1.3
 
 ## 0.1.1
 

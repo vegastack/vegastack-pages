@@ -111,3 +111,30 @@ export function formatDate(value: string | null | undefined) {
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 }
+
+/**
+ * Compact two-line date for tables with many date columns.
+ * Returns { date: "May 14, 2026", time: "3:37 PM" } so callers can stack them.
+ * The full `formatDate` output is ~22 chars and wraps awkwardly across 4-6
+ * columns at the settings page's max-width; this split lets each cell stay
+ * single-line for the date and single-line for the time.
+ */
+export function splitDate(value: string | null | undefined): {
+  date: string;
+  time: string | null;
+} {
+  if (!value) return { date: "Never", time: null };
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return { date: value, time: null };
+  return {
+    date: parsed.toLocaleDateString("en", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+    time: parsed.toLocaleTimeString("en", {
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+  };
+}

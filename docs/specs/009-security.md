@@ -258,7 +258,7 @@ Public Pagefind is only for explicitly public/indexable exports later.
 
 ## Agent Security
 
-Agents act through workspace-scoped MCP bearer sessions. Three issuance flows (OAuth, manual, CLI) share the same `mcp_sessions` table and the same revocation surface at **Settings → Sessions**.
+Agents act through workspace-scoped MCP bearer sessions. Three issuance flows (OAuth, manual, CLI) share the same `mcp_sessions` table. Members manage their own at **Settings → My Connections**; workspace admins revoke any session across the workspace at **Settings → Connections Log**.
 
 MCP tokens are shown once, stored hashed, scoped to one workspace, and revocable from settings.
 

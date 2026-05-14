@@ -57,7 +57,7 @@ VPG_MCP_TOKEN=dev-secret pnpm dev -- --host 127.0.0.1 --port 4322
 Production deployments should issue tokens through one of:
 
 - OAuth 2.1 + PKCE from a browser MCP client (Claude.ai, ChatGPT, Cursor remote, …). The client auto-discovers `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` and registers itself; no setup required.
-- Manual bearer from **Settings > Sessions** in the web app.
+- Manual bearer from **Settings → My Connections** in the web app.
 - `vpg login --token <token>` for headless CLI use.
 
 Static MCP tokens (`VPG_MCP_TOKEN`) are a local/debug path and require `VPG_ALLOW_STATIC_MCP_TOKEN=true` plus `VPG_MCP_WORKSPACE_ID` outside dev.

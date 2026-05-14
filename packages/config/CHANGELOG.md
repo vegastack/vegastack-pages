@@ -1,5 +1,30 @@
 # @vegastack/pages-config
 
+## 0.1.3
+
+### Patch Changes
+
+- Make `/register` fast enough for claude.ai's connector broker.
+
+  Measured by curl: our DCR endpoint was returning in 1.8-2.4s (two D1 INSERTs
+  on the hot path — the client itself + the audit log). claude.ai's broker
+  aborts the request at ~1.5s, leaving the connector stuck on "Couldn't reach
+  the MCP server" even though everything else was wired correctly.
+
+  Two changes:
+  - New well-known OAuth client `oac_anthropic_connector` matching the
+    redirect URIs `https://claude.ai/api/mcp/auth_callback` and
+    `https://claude.com/api/mcp/auth_callback`. When a `POST /register`
+    payload matches that signature, we short-circuit: return the pre-baked
+    client_id immediately, no D1 writes, no rate-limit write. Sub-100ms
+    response. Same pattern as the existing `oac_vpg_cli` client used by the
+    CLI device-code flow.
+  - For generic DCR (any other client), the audit-log INSERT is now deferred
+    via `ExecutionContext.waitUntil()`. The client INSERT stays synchronous
+    (subsequent `/authorize` and `/token` calls have to find the client by
+    id), but the audit row writes after the 201 response has been sent.
+    Roughly halves response time on the slow path.
+
 ## 0.1.2
 
 ### Patch Changes

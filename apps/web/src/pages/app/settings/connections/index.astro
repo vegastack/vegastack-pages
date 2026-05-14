@@ -1,0 +1,329 @@
+---
+import SettingsLayout from "../../../../layouts/SettingsLayout.astro";
+import { formatDate, loadSettings } from "../../../../lib/settings-data";
+import { listMcpSessions } from "../../../../lib/runtime";
+import { vendorForClient } from "../../../../lib/oauth/vendor-map";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace, currentUser } = result.context;
+
+// Personal connections only. The API enforces the same filter server-side
+// on POST/DELETE (members can only act on their own session ids unless they
+// are workspace admins).
+const sessions = await listMcpSessions({
+  workspaceId: workspace.id,
+  userId: currentUser.id,
+});
+
+const rows = sessions.map((session) => {
+  const vendor = vendorForClient({
+    clientName: session.clientName,
+    redirectUris: null,
+  });
+  return {
+    ...session,
+    vendorId: vendor.id,
+    vendorLabel: vendor.label,
+  };
+});
+---
+
+<SettingsLayout
+  title={`My Connections · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="connections"
+  sectionLabel="My Connections"
+  description="MCP clients, CLI logins, and browser OAuth sign-ins issued to you in this workspace. Tokens are shown once at creation and can be revoked at any time."
+>
+  <section class="settings-card" data-mcp-session-card>
+    <header class="settings-card-header">
+      <h2>New connection</h2>
+      <p>
+        Issue a bearer token bound to this workspace for headless agents and CI.
+        Browser-based MCP clients (Claude, ChatGPT, Cursor, …) sign in via OAuth
+        automatically when you point them at the endpoint below.
+      </p>
+    </header>
+
+    <form class="sessions-create-form" data-mcp-session-form>
+      <label class="vpg-field sessions-create-field">
+        <span>Client label</span>
+        <input
+          class="vpg-input"
+          name="client_name"
+          value="Codex"
+          autocomplete="off"
+        />
+      </label>
+      <button
+        class="vpg-button vpg-button-primary vpg-button-md sessions-create-submit"
+        type="submit"
+      >
+        Create token
+      </button>
+    </form>
+
+    <div class="settings-token-result" data-mcp-token-result hidden>
+      <label class="vpg-field">
+        <span>Endpoint</span>
+        <input class="vpg-input" data-mcp-url readonly />
+      </label>
+      <label class="vpg-field">
+        <span>Bearer token</span>
+        <textarea
+          class="vpg-textarea settings-token-textarea"
+          data-mcp-token
+          readonly
+          rows="3"></textarea>
+      </label>
+      <div class="settings-inline-actions">
+        <button
+          class="vpg-button vpg-button-default vpg-button-md"
+          type="button"
+          data-copy-mcp-token>Copy token</button
+        >
+        <button
+          class="vpg-button vpg-button-subtle vpg-button-md"
+          type="button"
+          data-copy-mcp-json>Copy JSON config</button
+        >
+      </div>
+      <p class="settings-muted-line">
+        Send requests with <code>Authorization: Bearer &lt;token&gt;</code>.
+      </p>
+    </div>
+
+    <p class="settings-muted-line settings-card-footnote">
+      <strong>Browser sign-in:</strong> point any OAuth-capable MCP client at
+      <code data-mcp-endpoint></code>. The client discovers the OAuth flow at
+      <code>/.well-known/oauth-authorization-server</code> and signs in with your
+      existing VegaStack login.
+    </p>
+  </section>
+
+  <section class="settings-card settings-card-table">
+    <div class="settings-table-wrap">
+      <table class="settings-table" aria-label="My connections">
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Kind</th>
+            <th>Last seen</th>
+            <th>Created</th>
+            <th>Expires</th>
+            <th class="settings-actions-cell" aria-label="Actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            rows.length === 0 ? (
+              <tr>
+                <td colspan="6">
+                  <div class="settings-empty">
+                    <div class="settings-empty-glyph" aria-hidden="true">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M12 22v-5" />
+                        <path d="M9 7V2" />
+                        <path d="M15 7V2" />
+                        <path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z" />
+                      </svg>
+                    </div>
+                    <p>
+                      <strong>No connections yet</strong>
+                      <span>
+                        Create a token above for your CLI or agent, or point an
+                        MCP client at the endpoint to start a browser OAuth
+                        flow.
+                      </span>
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              rows.map((session) => (
+                <tr data-mcp-session-row={session.id}>
+                  <td>
+                    <strong>{session.vendorLabel}</strong>
+                    <small class="settings-muted-line">
+                      {session.clientName} · Session {session.id.slice(-6)}
+                    </small>
+                  </td>
+                  <td>
+                    <span class="settings-chip">
+                      {session.kind ?? "manual"}
+                    </span>
+                  </td>
+                  <td>
+                    {session.lastSeenAt ? formatDate(session.lastSeenAt) : "—"}
+                  </td>
+                  <td>{formatDate(session.createdAt)}</td>
+                  <td>{formatDate(session.expiresAt)}</td>
+                  <td class="settings-actions-cell">
+                    <button
+                      class="settings-row-action danger"
+                      type="button"
+                      data-revoke-mcp-session={session.id}
+                      aria-label={`Revoke ${session.clientName}`}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <line x1="10" x2="10" y1="11" y2="17" />
+                        <line x1="14" x2="14" y1="11" y2="17" />
+                      </svg>
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script
+    is:inline
+    define:vars={{
+      workspaceId: workspace.id,
+    }}
+  >
+    (() => {
+      const {
+        toast,
+        withSubmit,
+        confirmAction,
+        closestRow,
+        removeRow,
+        withTransition,
+      } = window.settingsHelpers;
+      function cookie(name) {
+        return document.cookie
+          .split(";")
+          .map((part) => part.trim())
+          .find((part) => part.startsWith(name + "="))
+          ?.slice(name.length + 1);
+      }
+      function csrfHeaders(extra) {
+        return Object.assign({}, extra, {
+          "x-vpg-csrf-token": decodeURIComponent(cookie("vpg_csrf") || ""),
+        });
+      }
+      const form = document.querySelector("[data-mcp-session-form]");
+      const result = document.querySelector("[data-mcp-token-result]");
+      const urlInput = document.querySelector("[data-mcp-url]");
+      const tokenInput = document.querySelector("[data-mcp-token]");
+      const copyToken = document.querySelector("[data-copy-mcp-token]");
+      const copyJson = document.querySelector("[data-copy-mcp-json]");
+      const endpointCode = document.querySelector("[data-mcp-endpoint]");
+      let latest = null;
+
+      if (endpointCode) {
+        endpointCode.textContent = `${window.location.origin}/mcp`;
+      }
+
+      form?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        withSubmit(form, async () => {
+          const payload = {
+            workspace_id: workspaceId,
+            client_name: new FormData(form).get("client_name") || "MCP client",
+          };
+          const response = await fetch("/api/mcp/sessions", {
+            method: "POST",
+            headers: csrfHeaders({ "content-type": "application/json" }),
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            toast("Connection could not be created.", "error");
+            return;
+          }
+          latest = await response.json();
+          if (urlInput) urlInput.value = latest.mcp_url;
+          if (tokenInput) tokenInput.value = latest.token;
+          if (result) result.hidden = false;
+          toast("Connection created.");
+        });
+      });
+
+      copyToken?.addEventListener("click", async () => {
+        if (!latest?.token) return;
+        await navigator.clipboard.writeText(latest.token);
+        toast("Token copied.");
+      });
+
+      copyJson?.addEventListener("click", async () => {
+        if (!latest?.token) return;
+        await navigator.clipboard.writeText(
+          JSON.stringify(
+            {
+              mcpServers: {
+                "vegastack-pages": {
+                  url: latest.mcp_url,
+                  headers: { Authorization: `Bearer ${latest.token}` },
+                },
+              },
+            },
+            null,
+            2,
+          ),
+        );
+        toast("JSON config copied.");
+      });
+
+      document.addEventListener("click", async (event) => {
+        const target =
+          event.target instanceof Element
+            ? event.target.closest("[data-revoke-mcp-session]")
+            : null;
+        if (!target) return;
+        const sessionId = target.getAttribute("data-revoke-mcp-session");
+        if (!sessionId) return;
+        const confirmed = await confirmAction({
+          title: "Revoke connection",
+          description:
+            "The client using this token will lose access immediately. You can create a new connection at any time.",
+          confirmLabel: "Revoke connection",
+          tone: "danger",
+        });
+        if (!confirmed) return;
+        const row = closestRow(target);
+        if (row) row.dataset.pending = "true";
+        const response = await fetch("/api/mcp/sessions", {
+          method: "DELETE",
+          headers: csrfHeaders({ "content-type": "application/json" }),
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            session_id: sessionId,
+          }),
+        });
+        if (response.ok) {
+          if (row) withTransition(() => removeRow(row));
+          toast("Connection revoked.");
+        } else {
+          if (row) delete row.dataset.pending;
+          toast("Could not revoke connection.", "error");
+        }
+      });
+    })();
+  </script>
+</SettingsLayout>

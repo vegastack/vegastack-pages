@@ -895,7 +895,7 @@ textarea {
   gap: 0.55rem;
   color: var(--vsk-text);
   font-size: var(--text-base);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-micro);
   text-decoration: none;
   white-space: nowrap;
@@ -903,10 +903,9 @@ textarea {
 
 .app-brand-mark {
   display: inline-block;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: var(--vsk-radius-row);
-  background: var(--vsk-text);
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--vsk-text);
 }
 
 .app-brand-name {

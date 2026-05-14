@@ -2,7 +2,7 @@
 
 Use the Remote MCP endpoint at `/mcp` with `Authorization: Bearer <workspace-token>`. A workspace token is scoped to one workspace.
 
-Three issuance flows, one storage shape: OAuth 2.1 + PKCE for browser MCP clients (discover via `/.well-known/oauth-protected-resource`), manual tokens from **Settings → Sessions**, or CLI tokens from `vpg login --token`. Every session shows up at the same page and can be revoked from there.
+Three issuance flows, one storage shape: OAuth 2.1 + PKCE for browser MCP clients (discover via `/.well-known/oauth-protected-resource`), manual tokens from **Settings → My Connections**, or CLI tokens from `vpg login --token`. Each member's tokens show up at **Settings → My Connections**; workspace admins see every member's tokens at **Settings → Connections Log** and can revoke from there.
 
 ## Editing
 

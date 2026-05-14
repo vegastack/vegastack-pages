@@ -96,7 +96,7 @@ npm install -g @vegastack/pages
 vpg --help
 ```
 
-Use a workspace-scoped token from **Settings > Sessions** or another bearer token accepted by your deployment:
+Use a workspace-scoped token from **Settings → My Connections** or another bearer token accepted by your deployment:
 
 ```sh
 # Browser login (opens the consent page in your default browser):
@@ -125,7 +125,7 @@ MCP is the main agent interface. Three authentication paths, all spec-compliant:
 
 - **Browser OAuth (recommended for Claude.ai, ChatGPT custom connectors, Cursor remote MCP, …).** Paste the endpoint into the connector form; the client discovers OAuth via `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, registers itself with `/oauth/register` (RFC 7591), runs OAuth 2.1 + PKCE S256, exchanges the code at `/oauth/token`. Access tokens last 1 hour and rotate via refresh tokens for 60 days.
 - **CLI browser login** _(recommended for humans)_. Run `vpg login` with no arguments. The CLI starts an RFC 8628 device-code flow, opens VegaStack Pages in your browser, you pick a workspace and click **Allow**, and the CLI receives the access token automatically. Works headless over SSH too — the URL prints to the terminal; open it on any device.
-- **Manual bearer.** Sign in, open **Settings > Sessions**, click **Create session**, copy the token. Useful for headless agents, CI, or MCP clients that need a static bearer. Pass via `vpg login --token <token>` or `VPG_TOKEN`.
+- **Manual bearer.** Sign in, open **Settings → My Connections**, click **Create token**, copy the value. Useful for headless agents, CI, or MCP clients that need a static bearer. Pass via `vpg login --token <token>` or `VPG_TOKEN`.
 
 Managed endpoint:
 

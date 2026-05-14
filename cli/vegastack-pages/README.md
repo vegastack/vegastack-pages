@@ -61,8 +61,8 @@ cargo run --quiet -- --help
 
 `vpg login` has two modes:
 
-- **Browser device-code login (default).** `vpg login` with no `--token` starts an RFC 8628 device-code flow against `/oauth/device` and `/oauth/token`. The CLI prints a verification URL, opens it in your default browser, you pick a workspace and click **Allow**, and the CLI receives the access token. Pass `--no-browser` to skip the automatic launch (the URL still prints — useful over SSH). Set `VPG_NO_OPEN=1` to globally disable browser auto-launch. This flow uses the well-known CLI client `oac_vpg_cli` and writes a session of `kind=oauth` to **Settings > Sessions**.
-- **Manual bearer token.** `vpg login --token <tok>` or `VPG_TOKEN=<tok> vpg login` stores a workspace-scoped token issued from **Settings > Sessions > Create session**. Useful for CI, agent containers, or environments without a browser. Creates a session of `kind=cli`.
+- **Browser device-code login (default).** `vpg login` with no `--token` starts an RFC 8628 device-code flow against `/oauth/device` and `/oauth/token`. The CLI prints a verification URL, opens it in your default browser, you pick a workspace and click **Allow**, and the CLI receives the access token. Pass `--no-browser` to skip the automatic launch (the URL still prints — useful over SSH). Set `VPG_NO_OPEN=1` to globally disable browser auto-launch. This flow uses the well-known CLI client `oac_vpg_cli` and writes a session of `kind=oauth` to **Settings → My Connections**.
+- **Manual bearer token.** `vpg login --token <tok>` or `VPG_TOKEN=<tok> vpg login` stores a workspace-scoped token issued from **Settings → My Connections → Create token**. Useful for CI, agent containers, or environments without a browser. Creates a session of `kind=cli`.
 
 ```sh
 # Browser flow:
@@ -74,7 +74,7 @@ vpg login --base-url https://pages.example.com --workspace wks_123 --token "$VPG
 
 In both modes, `vpg login` stores the token in the OS keychain where available, otherwise in an owner-only local file (`~/.config/vegastack-pages/`). Workspace-scoped tokens are sent as `Authorization: Bearer <token>` on every API request and enforced server-side against their workspace.
 
-Sessions created by either flow appear on the **Settings > Sessions** page (with vendor recognition for known clients) and can be revoked from there.
+Sessions created by either flow appear on the **Settings → My Connections** page (with vendor recognition for known clients) and can be revoked from there.
 
 The CLI talks to standalone VegaStack Pages API routes. It does not call MCP and does not need an MCP client to create/edit pages, handle comments, wait for review, manage templates, update publications, upload attachments, or invite members.
 

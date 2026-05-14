@@ -29,8 +29,8 @@ https://pages.example.com/mcp
 The server accepts a bearer token on `Authorization: Bearer <token>`. Tokens come from one of three flows; all three land in the same `Sessions` table and behave identically once issued.
 
 1. **Browser OAuth — MCP clients (Claude.ai, ChatGPT, Cursor remote, …).** The client discovers the auth server via `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, registers itself with `POST /oauth/register` (RFC 7591), runs an OAuth 2.1 authorization-code flow with PKCE S256 (RFC 7636), and exchanges the code at `/oauth/token`. The server issues a 1-hour access token and a 60-day rotating refresh token. No setup in the web app is required for this path — pasting the endpoint URL is enough.
-2. **Browser OAuth — `vpg` CLI (RFC 8628 device-code).** `vpg login` with no `--token` opens a verification URL in your browser, you pick a workspace and click **Allow**, the CLI polls `/oauth/token` and receives the access token. Uses the baked-in well-known client `oac_vpg_cli`, so no dynamic registration is needed. Works headless: the URL prints to the terminal — open it on any device (laptop, phone). Sessions issued this way appear under **Settings → Sessions** with `kind=oauth`.
-3. **Manual bearer.** Sign in to the web app, open **Settings → Sessions**, click **Create session**, copy the token. Use it for headless agents, CI runners, MCP-over-stdio bridges, or any environment where the device-code flow isn't desirable. Tokens are shown once and revocable from the same page. Pass via `vpg login --token <tok>` or `VPG_TOKEN`; CLI-stored tokens appear with `kind=cli`.
+2. **Browser OAuth — `vpg` CLI (RFC 8628 device-code).** `vpg login` with no `--token` opens a verification URL in your browser, you pick a workspace and click **Allow**, the CLI polls `/oauth/token` and receives the access token. Uses the baked-in well-known client `oac_vpg_cli`, so no dynamic registration is needed. Works headless: the URL prints to the terminal — open it on any device (laptop, phone). Sessions issued this way appear under **Settings → My Connections** with `kind=oauth`.
+3. **Manual bearer.** Sign in to the web app, open **Settings → My Connections**, click **Create token**, copy the value. Use it for headless agents, CI runners, MCP-over-stdio bridges, or any environment where the device-code flow isn't desirable. Tokens are shown once and revocable from the same page. Pass via `vpg login --token <tok>` or `VPG_TOKEN`; CLI-stored tokens appear with `kind=cli`.
 
 The `/mcp` endpoint returns `WWW-Authenticate: Bearer realm="VegaStack Pages MCP", resource_metadata="…/.well-known/oauth-protected-resource", error="invalid_token"` on 401 so spec-compliant browser clients can self-onboard.
 
@@ -140,7 +140,7 @@ Every MCP tool has a matching CLI command. `vpg wait` emits status `matched` (wa
 
 ## Active sessions
 
-Open **Settings → Sessions** to see every active token issued for a workspace.
+Open **Settings → My Connections** to see your own active tokens. Workspace admins can also open **Settings → Connections Log** for the full list across every member.
 
 - **Mine** lists OAuth, manual, and CLI sessions issued for the signed-in user.
 - **Workspace** (admin only) lists every active session in the workspace.
