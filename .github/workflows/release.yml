@@ -32,6 +32,12 @@ on:
         type: choice
         default: "auto"
         options: ["auto", "yes", "no"]
+      publish_npm:
+        description: "Publish to npm. Set 'no' when re-dispatching a tag whose packages are already published (e.g. to retry only deploy-worker after a CI bug). Default 'yes' runs build-cli-matrix and publish-npm."
+        required: false
+        type: choice
+        default: "yes"
+        options: ["yes", "no"]
 
 permissions:
   contents: write
@@ -41,6 +47,7 @@ permissions:
 jobs:
   build-cli-matrix:
     name: Build CLI (${{ matrix.platform }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm != 'no' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -99,6 +106,7 @@ jobs:
   publish-npm:
     name: Publish to npm (OIDC trusted publishing)
     needs: build-cli-matrix
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm != 'no' }}
     runs-on: ubuntu-latest
     environment: npm-vegastack
     permissions:
@@ -198,7 +206,7 @@ jobs:
     needs: [publish-npm, deploy-worker]
     if: |
       always()
-      && needs.publish-npm.result == 'success'
+      && (needs.publish-npm.result == 'success' || needs.publish-npm.result == 'skipped')
       && (needs.deploy-worker.result == 'success' || needs.deploy-worker.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
@@ -298,6 +306,7 @@ jobs:
           VPG_GITHUB_APP_ID: ${{ secrets.VPG_GITHUB_APP_ID }}
           VPG_GITHUB_APP_SLUG: ${{ secrets.VPG_GITHUB_APP_SLUG }}
           VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
+          VPG_EMAIL_FROM: ${{ secrets.VPG_EMAIL_FROM }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
@@ -317,6 +326,7 @@ jobs:
 
           const cron = process.env.VPG_GITHUB_SYNC_CRON || "17 2 * * *";
           const customDomain = process.env.VPG_CUSTOM_DOMAIN;
+          const emailFrom = process.env.VPG_EMAIL_FROM ?? "";
           const config = {
             $schema: "../../node_modules/wrangler/config-schema.json",
             name: process.env.VPG_WORKER_NAME,

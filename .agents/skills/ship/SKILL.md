@@ -452,6 +452,56 @@ workflow failure, report the RCA, patch forward, and ask for the next
 `commit and push` gate. Common publish causes are trusted publishing setup,
 missing npm package configuration, or a tag/package version mismatch.
 
+## Step 8.5: Re-dispatch After Partial Failure
+
+When a CI run partially fails (one job succeeded, another did not), do **not**
+delete the tag, force-push, or republish over the successful jobs. The
+`release.yml` workflow exposes per-side skip toggles for this scenario:
+
+- `publish_npm: no` — skips `build-cli-matrix` + `publish-npm`. Use when npm
+  already has the version under its target dist-tag.
+- `deploy_worker: no` — skips the Cloudflare Worker deploy. Use when
+  `pages.vegastack.com` is already serving the target tag.
+
+`github-release` runs as long as both upstream jobs are either `success` or
+`skipped`, so it will create the GitHub release on the re-dispatch even when
+the original release-time job is skipped.
+
+Detection: before suggesting a re-dispatch, check what already shipped:
+
+```sh
+# Did npm get the version?
+npm view @vegastack/pages@<version> version 2>/dev/null
+
+# Did pages.vegastack.com get the new build? Compare an asset hash from the
+# tag's built output (apps/web/dist/client) against what the live site serves.
+curl -sL https://pages.vegastack.com | grep -oE '/_astro/[A-Za-z0-9._-]+' | head -1
+
+# Was there already a GitHub release?
+gh release view v<version> --json tagName 2>/dev/null
+```
+
+If the bug was in the workflow itself (e.g. a YAML or inline-Node typo in
+`release.yml`), patch it as a separate `fix(ci): ...` commit on `main` first.
+Future dispatches use the workflow definition from `--ref main` (or the tag,
+depending on the dispatch source), so the fix takes effect immediately
+without retagging the release.
+
+Re-dispatch example for "npm published, Worker failed, github-release
+skipped":
+
+```sh
+gh workflow run release.yml --ref main \
+  -f tag=vX.Y.Z \
+  -f npm_tag=latest \
+  -f deploy_worker=yes \
+  -f publish_npm=no
+```
+
+Present the detection results and the dispatch plan to the maintainer.
+Confirm with a short gate (`re-dispatch`, `retry deploy`, `redo worker`)
+before running `gh workflow run`. Then watch the run as in Step 8.
+
 ## Rules
 
 - Never create or amend a local release commit before showing the relevant
