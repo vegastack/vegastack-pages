@@ -10,6 +10,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
+  applyTheme,
+  persistTheme,
+  readStoredTheme,
+  type ThemeChoice,
+} from "../lib/theme";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -22,8 +28,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-
-type ThemeChoice = "system" | "light" | "dark";
 
 const THEME_OPTIONS: Array<{
   value: ThemeChoice;
@@ -45,24 +49,21 @@ export function SidebarUserPill({ name, email, initials }: Props) {
   const [theme, setTheme] = useState<ThemeChoice>("system");
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("vpg-theme");
-    const next =
-      stored === "light" || stored === "dark" || stored === "system"
-        ? stored
-        : "system";
+    const next = readStoredTheme();
     setTheme(next);
     applyTheme(next);
+    // Backfill cookie for legacy localStorage-only clients so SSR can render
+    // the right data-theme on the next navigation and avoid a theme flash.
+    persistTheme(next);
   }, []);
 
   function chooseTheme(value: string) {
-    const next = (
+    const next: ThemeChoice =
       value === "light" || value === "dark" || value === "system"
         ? value
-        : "system"
-    ) as ThemeChoice;
+        : "system";
     setTheme(next);
-    window.localStorage.setItem("vpg-theme", next);
-    applyTheme(next);
+    persistTheme(next);
   }
 
   async function logout() {
@@ -155,10 +156,4 @@ export function SidebarUserPill({ name, email, initials }: Props) {
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
-
-function applyTheme(theme: ThemeChoice) {
-  if (document.documentElement.dataset.theme !== theme) {
-    document.documentElement.dataset.theme = theme;
-  }
 }

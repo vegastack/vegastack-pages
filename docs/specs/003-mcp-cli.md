@@ -82,9 +82,7 @@ vpg search
 vpg export
 vpg deploy
 vpg doctor
-vpg update check
-vpg update plan
-vpg update apply
+vpg update
 vpg version
 ```
 
@@ -101,7 +99,7 @@ vpg wait api-review-a8f31c --until first_response --json
 vpg comments api-review-a8f31c --json
 vpg reply <thread-id> --body "I updated this section." --json
 vpg deploy --config vegastack-pages.yaml
-vpg update check --json
+vpg update --check --json
 ```
 
 ## Wait Semantics

@@ -24,19 +24,26 @@ interface Props {
   node: FolderNode;
   currentPageId?: string;
   currentFolderId?: string;
+  folderOverrides?: Map<string, "open" | "closed">;
 }
 
-const { node, currentPageId, currentFolderId } = Astro.props;
+const { node, currentPageId, currentFolderId, folderOverrides } = Astro.props;
 
 const isCurrentFolder = currentFolderId === node.folder.id;
+const containsCurrentPage = node.pages.some(
+  (page) => page.id === currentPageId,
+);
+const defaultOpen = isCurrentFolder || containsCurrentPage;
+const override = folderOverrides?.get(node.folder.id);
+const isOpen =
+  override === "open" ? true : override === "closed" ? false : defaultOpen;
 ---
 
 <li>
   <details
     class="vpg-sidebar-folder"
     data-folder-id={node.folder.id}
-    open={isCurrentFolder ||
-      node.pages.some((page) => page.id === currentPageId)}
+    open={isOpen}
   >
     <summary
       class="vpg-sidebar-row"
@@ -107,6 +114,7 @@ const isCurrentFolder = currentFolderId === node.folder.id;
             node={child}
             currentPageId={currentPageId}
             currentFolderId={currentFolderId}
+            folderOverrides={folderOverrides}
           />
         ))
       }

@@ -133,17 +133,17 @@ Supported release channels:
 CLI support:
 
 ```sh
-vpg update check
-vpg update check --json
+vpg update              # check the npm registry and upgrade in place
+vpg update --check      # only report the latest version
+vpg update --channel next   # follow the prerelease channel
 pnpm deploy:cloudflare -- --apply-migrations --deploy
 ```
 
-Later:
-
-```sh
-vpg update plan
-vpg update apply
-```
+`vpg update` queries `registry.npmjs.org`, infers the release channel from the
+current version (stable → `latest`, prerelease → `next`), and shells out to the
+package manager that installed vpg (npm, pnpm, bun, or yarn) to upgrade the
+`@vegastack/pages` umbrella. On Windows it prints the upgrade command instead
+of self-replacing the locked `.exe`.
 
 Update process:
 

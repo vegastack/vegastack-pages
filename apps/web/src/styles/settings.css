@@ -1784,6 +1784,36 @@
   min-width: max-content;
 }
 
+/* Inline form row: fields and the submit button live on the same baseline row.
+   Use for compact single-purpose forms where the action belongs next to the
+   field it edits (workspace About, version retention, profile display name).
+   Status messages drop to a second row so they don't push the button down. */
+.settings-card-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-md);
+}
+.settings-card-form-row > .vpg-field {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.settings-card-form-row > .vpg-field-actions {
+  display: inline-flex;
+  align-items: end;
+  gap: var(--space-xs);
+  flex: 0 0 auto;
+}
+.settings-card-form-row > button[type="submit"] {
+  flex: 0 0 auto;
+  min-width: max-content;
+  align-self: end;
+}
+.settings-card-form-row > .settings-status {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
 @keyframes vpg-search-pop {
   0% {
     opacity: 0;

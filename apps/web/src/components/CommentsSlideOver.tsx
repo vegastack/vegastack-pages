@@ -22,8 +22,8 @@ type TabKey = "open" | "resolved" | "all";
 const RAIL_STORAGE_KEY = "vpg_comments_rail_expanded";
 const RAIL_COOKIE_KEY = "vpg_comments_rail";
 
-function resolveInitialRailExpanded(fallback: boolean) {
-  if (typeof window === "undefined") return fallback;
+function readStoredRailExpanded(): boolean | null {
+  if (typeof window === "undefined") return null;
   try {
     const stored = window.localStorage.getItem(RAIL_STORAGE_KEY);
     if (stored === "true") return true;
@@ -31,7 +31,7 @@ function resolveInitialRailExpanded(fallback: boolean) {
   } catch {
     // localStorage can be unavailable in restricted contexts.
   }
-  return fallback;
+  return null;
 }
 
 function persistRailExpanded(expanded: boolean) {
@@ -42,7 +42,8 @@ function persistRailExpanded(expanded: boolean) {
   }
   try {
     const value = expanded ? "open" : "collapsed";
-    document.cookie = `${RAIL_COOKIE_KEY}=${value}; path=/; max-age=31536000; samesite=lax`;
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${RAIL_COOKIE_KEY}=${value}; path=/; max-age=31536000; samesite=lax${secure}`;
   } catch {
     // document.cookie can throw in sandboxed contexts.
   }
@@ -67,9 +68,11 @@ export function CommentsRail({
   initialThreads,
   initialExpanded = true,
 }: CommentsRailProps) {
-  const [expanded, setExpanded] = useState(() =>
-    resolveInitialRailExpanded(initialExpanded),
-  );
+  // Seed strictly from the SSR-resolved prop so the first client render
+  // matches the server HTML and React never warns about a hydration
+  // mismatch. Legacy clients that have only localStorage (no cookie) are
+  // reconciled below in a mount effect.
+  const [expanded, setExpanded] = useState(initialExpanded);
   const [tab, setTab] = useState<TabKey>("open");
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [stats, setStats] = useState<ThreadStats>({
@@ -97,10 +100,15 @@ export function CommentsRail({
   }
 
   useEffect(() => {
-    // Sync cookie + root attribute on mount so SSR on the next navigation
-    // matches the persisted state. Cheap idempotent write.
-    persistRailExpanded(expanded);
-    // Intentionally runs once; persistence on later toggles is handled inline.
+    // Reconcile from localStorage on mount for legacy clients that have it
+    // set but no cookie yet (SSR fell back to the prop default). If
+    // localStorage disagrees with the rendered state, flip and persist
+    // cookie + dataset so the next navigation SSRs correctly.
+    const stored = readStoredRailExpanded();
+    const next = stored ?? initialExpanded;
+    if (next !== expanded) setExpanded(next);
+    persistRailExpanded(next);
+    // Runs once; later toggles persist inline via setRailExpanded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

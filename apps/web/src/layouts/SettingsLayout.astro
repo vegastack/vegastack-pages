@@ -18,9 +18,15 @@ interface Props {
     | "profile";
   sectionLabel: string;
   description?: string;
+  // Optional override for the breadcrumb above the page title. Defaults to
+  // "<workspace.name> · Settings", which is correct for workspace-scoped
+  // sections but a lie for account-scoped pages like Profile (the data
+  // doesn't change when you switch workspaces). Pass e.g. "Account · Settings"
+  // there.
+  kicker?: string;
 }
 
-const { title, context, currentSection, sectionLabel, description } =
+const { title, context, currentSection, sectionLabel, description, kicker } =
   Astro.props;
 const { workspace, workspaces, pages, currentUser } = context;
 
@@ -87,7 +93,9 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
             </svg>
           </button>
           <div class="settings-pageheader-text">
-            <p class="settings-kicker">{workspace.name} &middot; Settings</p>
+            <p class="settings-kicker">
+              {kicker ?? `${workspace.name} · Settings`}
+            </p>
             <h1>{sectionLabel}</h1>
             {description && <p class="settings-description">{description}</p>}
           </div>

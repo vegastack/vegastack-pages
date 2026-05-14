@@ -41,12 +41,12 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
     <span>Open pages</span>
   </a>
 
-  <section class="settings-card" aria-labelledby="general-identity-h">
+  <section class="settings-card" aria-labelledby="general-about-h">
     <header class="settings-card-header">
-      <h2 id="general-identity-h">Identity</h2>
-      <p>Name, slug, and version retention for this workspace.</p>
+      <h2 id="general-about-h">About</h2>
+      <p>Workspace name and URL slug.</p>
     </header>
-    <form class="settings-card-form" data-workspace-form>
+    <form class="settings-card-form-row" data-workspace-form>
       <label class="vpg-field">
         <span>Name</span>
         <input class="vpg-input" name="name" value={workspace.name} required />
@@ -61,8 +61,29 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
           pattern="[a-z0-9-]+"
         />
       </label>
+      <button class="vpg-button vpg-button-primary vpg-button-md" type="submit">
+        <span class="settings-button-label">Save changes</span>
+        <span class="settings-button-spinner-wrap"
+          ><span class="settings-button-spinner" aria-hidden="true"
+          ></span></span
+        >
+      </button>
+      <p class="settings-status" data-workspace-status></p>
+    </form>
+  </section>
+
+  <section class="settings-card" aria-labelledby="general-retention-h">
+    <header class="settings-card-header">
+      <h2 id="general-retention-h">Version retention</h2>
+      <p>
+        How many days to keep old page versions before deleting them. Edits
+        within this window can be restored from a page's version history; older
+        snapshots are permanently removed. Default is 30 days. Range 1–3650.
+      </p>
+    </header>
+    <form class="settings-card-form-row" data-retention-form>
       <label class="vpg-field">
-        <span>Version retention days</span>
+        <span>Retention period (days)</span>
         <input
           class="vpg-input"
           name="version_retention_days"
@@ -73,14 +94,14 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
           required
         />
       </label>
-      <p class="settings-status" data-workspace-status></p>
       <button class="vpg-button vpg-button-primary vpg-button-md" type="submit">
-        <span class="settings-button-label">Save changes</span>
+        <span class="settings-button-label">Save retention</span>
         <span class="settings-button-spinner-wrap"
           ><span class="settings-button-spinner" aria-hidden="true"
           ></span></span
         >
       </button>
+      <p class="settings-status" data-retention-status></p>
     </form>
   </section>
 
@@ -260,7 +281,6 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
               body: JSON.stringify({
                 name: data.get("name"),
                 slug: data.get("slug"),
-                version_retention_days: data.get("version_retention_days"),
               }),
             },
           );
@@ -271,6 +291,35 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
             const payload = await response.json().catch(() => null);
             const message = payload?.error?.message ?? "Save failed.";
             setStatus("[data-workspace-status]", "error", message);
+            toast(message, "error");
+          }
+        });
+      });
+
+      const retentionForm = document.querySelector("[data-retention-form]");
+      retentionForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!(retentionForm instanceof HTMLFormElement)) return;
+        const data = new FormData(retentionForm);
+        setStatus("[data-retention-status]", "pending", "Saving...");
+        await withSubmit(retentionForm, async () => {
+          const response = await fetch(
+            `/api/workspaces/${workspaceId}/settings`,
+            {
+              method: "PATCH",
+              headers: csrfHeaders({ "content-type": "application/json" }),
+              body: JSON.stringify({
+                version_retention_days: data.get("version_retention_days"),
+              }),
+            },
+          );
+          if (response.ok) {
+            setStatus("[data-retention-status]", "success", "Saved.");
+            toast("Retention updated.");
+          } else {
+            const payload = await response.json().catch(() => null);
+            const message = payload?.error?.message ?? "Save failed.";
+            setStatus("[data-retention-status]", "error", message);
             toast(message, "error");
           }
         });

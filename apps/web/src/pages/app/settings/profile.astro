@@ -1,0 +1,230 @@
+---
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import { loadSettings, formatDate } from "../../../lib/settings-data";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { currentUser } = result.context;
+---
+
+<SettingsLayout
+  title={`Profile · ${currentUser.displayName} · VegaStack Pages`}
+  context={result.context}
+  currentSection="profile"
+  kicker="Account · Settings"
+  sectionLabel="Profile"
+  description={`Signed in as ${currentUser.email}. Identity is used for review comments, audit logs, and agent-connected sessions.`}
+>
+  <form slot="actions" method="post" action="/api/auth/logout">
+    <button class="vpg-button vpg-button-default vpg-button-md" type="submit">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        width="14"
+        height="14"
+        aria-hidden="true"
+      >
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+        <polyline points="16 17 21 12 16 7"></polyline>
+        <line x1="21" x2="9" y1="12" y2="12"></line>
+      </svg>
+      <span>Log out</span>
+    </button>
+  </form>
+
+  <section class="settings-card" aria-labelledby="profile-about-h">
+    <header class="settings-card-header">
+      <h2 id="profile-about-h">About</h2>
+      <p>Identity stamped on your activity across every workspace.</p>
+    </header>
+    <form
+      class="settings-card-form-row"
+      data-profile-about-form
+      data-current-display-name={currentUser.displayName}
+    >
+      <label class="vpg-field">
+        <span>Display name</span>
+        <input
+          class="vpg-input"
+          name="display_name"
+          type="text"
+          value={currentUser.displayName}
+          autocomplete="name"
+          maxlength="80"
+          required
+        />
+      </label>
+      <button
+        type="submit"
+        class="vpg-button vpg-button-primary vpg-button-md"
+        data-profile-about-save
+        disabled
+      >
+        <span class="settings-button-label">Save changes</span>
+        <span class="settings-button-spinner-wrap"
+          ><span class="settings-button-spinner" aria-hidden="true"
+          ></span></span
+        >
+      </button>
+      <p class="settings-status" data-profile-about-status></p>
+    </form>
+    <dl class="metadata-list">
+      <div>
+        <dt>Email</dt>
+        <dd>
+          {currentUser.email}
+          <span class="settings-muted-line">
+            · sign-in identity (contact support to change)
+          </span>
+        </dd>
+      </div>
+      <div>
+        <dt>User ID</dt>
+        <dd>
+          <code class="settings-code-path">{currentUser.id}</code>
+          <button
+            type="button"
+            class="vpg-button vpg-button-ghost vpg-button-sm"
+            data-copy={currentUser.id}
+            aria-label="Copy user ID"
+          >
+            Copy
+          </button>
+        </dd>
+      </div>
+      <div>
+        <dt>Account role</dt>
+        <dd><span class="settings-pill">{currentUser.role}</span></dd>
+      </div>
+      <div>
+        <dt>Created</dt>
+        <dd>{formatDate(currentUser.createdAt)}</dd>
+      </div>
+    </dl>
+  </section>
+</SettingsLayout>
+
+<script is:inline>
+  (() => {
+    const { setStatus, toast, fadeReload } = window.settingsHelpers ?? {};
+    const form = document.querySelector("[data-profile-about-form]");
+    if (!(form instanceof HTMLFormElement)) return;
+    const input = form.querySelector("input[name='display_name']");
+    const saveButton = form.querySelector("[data-profile-about-save]");
+    if (
+      !(input instanceof HTMLInputElement) ||
+      !(saveButton instanceof HTMLButtonElement)
+    ) {
+      return;
+    }
+
+    let current = form.dataset.currentDisplayName ?? input.value;
+
+    function cookie(name) {
+      return document.cookie
+        .split(";")
+        .map(function (part) {
+          return part.trim();
+        })
+        .find(function (part) {
+          return part.startsWith(name + "=");
+        })
+        ?.slice(name.length + 1);
+    }
+
+    function csrfHeaders(extra) {
+      return Object.assign({}, extra, {
+        "x-vpg-csrf-token": decodeURIComponent(cookie("vpg_csrf") || ""),
+      });
+    }
+
+    function normalize(value) {
+      return value.replace(/\s+/g, " ").trim();
+    }
+
+    function updateDirty() {
+      const normalized = normalize(input.value);
+      const dirty = normalized.length > 0 && normalized !== current;
+      saveButton.disabled = !dirty;
+    }
+
+    input.addEventListener("input", updateDirty);
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const normalized = normalize(input.value);
+      if (!normalized || normalized === current) {
+        updateDirty();
+        return;
+      }
+      saveButton.dataset.pending = "true";
+      saveButton.disabled = true;
+      setStatus?.("[data-profile-about-status]", "pending", "Saving…");
+      try {
+        const response = await fetch("/api/me", {
+          method: "PATCH",
+          headers: csrfHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ display_name: normalized }),
+        });
+        const body = await response.json().catch(function () {
+          return {};
+        });
+        if (!response.ok) {
+          const message =
+            (body && body.error && body.error.message) ||
+            "Could not update your profile.";
+          setStatus?.("[data-profile-about-status]", "error", message);
+          toast?.(message, "error");
+          return;
+        }
+        current = (body.user && body.user.display_name) || normalized;
+        input.value = current;
+        setStatus?.(
+          "[data-profile-about-status]",
+          "success",
+          "Saved. Refreshing…",
+        );
+        toast?.("Profile updated.");
+        // Sidebar pill + page header carry the display name; a soft reload
+        // is the cheapest way to keep every surface consistent without
+        // ad-hoc DOM patching in three places.
+        if (fadeReload) {
+          fadeReload();
+        } else {
+          window.location.reload();
+        }
+      } catch (error) {
+        setStatus?.(
+          "[data-profile-about-status]",
+          "error",
+          "Network error. Try again in a moment.",
+        );
+        toast?.("Network error.", "error");
+      } finally {
+        delete saveButton.dataset.pending;
+        updateDirty();
+      }
+    });
+
+    document.querySelectorAll("[data-copy]").forEach(function (node) {
+      if (!(node instanceof HTMLElement)) return;
+      node.addEventListener("click", async function () {
+        const value = node.dataset.copy ?? "";
+        try {
+          await navigator.clipboard.writeText(value);
+          toast?.("Copied to clipboard.");
+        } catch (error) {
+          toast?.("Clipboard write blocked by the browser.", "error");
+        }
+      });
+    });
+
+    updateDirty();
+  })();
+</script>

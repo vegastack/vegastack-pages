@@ -111,12 +111,12 @@ vpg templates update tpl_123 --args-file template-update.json
 ```sh
 vpg members invite --email teammate@example.com --display-name "Teammate" --role editor
 vpg deploy --target cloudflare --dry-run
-vpg update check
-vpg update plan
-vpg update apply
+vpg update
+vpg update --check
+vpg update --channel next
 ```
 
-`vpg deploy` is a source-checkout helper for repository maintainers. It shells out to the repository deploy script and must not be used unless the user explicitly asks for deployment. `vpg update` currently reports release-update placeholders; do not rely on it for production self-update behavior.
+`vpg deploy` is a source-checkout helper for repository maintainers. It shells out to the repository deploy script and must not be used unless the user explicitly asks for deployment. `vpg update` queries the npm registry, then shells out to the package manager that installed vpg (npm, pnpm, bun, or yarn) to upgrade `@vegastack/pages`. Pass `--check` to look up the latest version without installing.
 
 ## Skills
 

@@ -42,7 +42,10 @@ if (!binary) {
 
 const args = process.argv.slice(2);
 if (args[0] === "version") args[0] = "--version";
-const result = spawnSync(binary, args, { stdio: "inherit" });
+const result = spawnSync(binary, args, {
+  stdio: "inherit",
+  env: { ...process.env, VPG_INSTALL_BINARY: binary },
+});
 process.exit(result.status ?? 1);
 
 function resolveBinary() {

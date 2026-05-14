@@ -1,5 +1,30 @@
 # @vegastack/pages-db
 
+## 0.1.2
+
+### Patch Changes
+
+- Serve the OAuth + PRM endpoints at root-level paths so non-spec MCP clients
+  can complete the connector add flow.
+
+  Captured via wrangler tail while claude.ai's connector broker probed
+  pages.vegastack.com: the broker ignores both the WWW-Authenticate
+  `resource_metadata` URL and the `registration_endpoint` value from the AS
+  metadata, and instead probes RFC 9728-derived + conventional root paths
+  that returned 404. New aliases (re-exports of the existing `/oauth/*`
+  handlers, no logic change):
+  - `GET  /.well-known/oauth-protected-resource/mcp` (RFC 9728 §3.1 derived
+    PRM path)
+  - `POST /register` (DCR)
+  - `GET  /authorize`
+  - `POST /token`
+  - `POST /revoke`
+  - `POST /device`
+
+  The canonical `/oauth/*` endpoints continue to work for spec-compliant
+  clients (including our own `vpg` CLI device-code flow). Authorization-server
+  metadata still advertises the `/oauth/*` URLs.
+
 ## 0.1.1
 
 ### Patch Changes

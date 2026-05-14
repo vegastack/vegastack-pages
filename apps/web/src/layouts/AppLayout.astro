@@ -23,10 +23,22 @@ const baseUrl = (process.env.VPG_BASE_URL ?? "https://pages.vegastack.com")
 const canonicalUrl = canonicalPath
   ? `${baseUrl}${canonicalPath.startsWith("/") ? canonicalPath : `/${canonicalPath}`}`
   : null;
+
+// SSR the persisted theme onto <html> so the first paint matches the user's
+// choice. Without this the browser briefly paints dark via the
+// `prefers-color-scheme: dark` rule on `:root:not([data-theme])` when the OS
+// is dark and the user has picked light (or vice versa). The cookie is set
+// by the theme menus alongside localStorage. Default "system" lets the CSS
+// keep its existing OS-aware behavior for first-time visitors.
+const themeCookie = Astro.cookies.get("vpg-theme")?.value;
+const initialTheme =
+  themeCookie === "light" || themeCookie === "dark" || themeCookie === "system"
+    ? themeCookie
+    : "system";
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme={initialTheme}>
   <head>
     <meta charset="utf-8" />
     <meta
@@ -50,15 +62,33 @@ const canonicalUrl = canonicalPath
     <meta name="twitter:image" content={`${baseUrl}/favicon.svg`} />
 
     <script is:inline>
+      // Pre-paint: align <html data-theme> with localStorage when it disagrees
+      // with the cookie-derived SSR value (e.g. legacy clients with only
+      // localStorage). Also backfills the cookie so the next SSR has the
+      // right answer and no flash is needed.
       (() => {
-        const stored = window.localStorage.getItem("vpg-theme");
-        const theme =
-          stored === "light" || stored === "dark" || stored === "system"
-            ? stored
-            : "system";
+        const valid = (v) => v === "light" || v === "dark" || v === "system";
+        let stored = null;
+        try {
+          stored = window.localStorage.getItem("vpg-theme");
+        } catch {}
+        const theme = valid(stored) ? stored : "system";
         if (document.documentElement.dataset.theme !== theme) {
           document.documentElement.dataset.theme = theme;
         }
+        try {
+          const prefix = "vpg-theme=";
+          const cookie = document.cookie
+            .split(";")
+            .map((p) => p.trim())
+            .find((p) => p.startsWith(prefix));
+          const cookieValue = cookie ? cookie.slice(prefix.length) : null;
+          if (cookieValue !== theme) {
+            const secure =
+              window.location.protocol === "https:" ? "; Secure" : "";
+            document.cookie = `vpg-theme=${theme}; path=/; max-age=31536000; samesite=lax${secure}`;
+          }
+        } catch {}
       })();
     </script>
 

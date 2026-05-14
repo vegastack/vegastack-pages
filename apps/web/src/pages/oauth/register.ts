@@ -13,6 +13,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, content-type",
   "Access-Control-Max-Age": "86400",
+  "Cache-Control": "no-store",
 } as const;
 
 export const OPTIONS: APIRoute = () =>

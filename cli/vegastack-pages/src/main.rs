@@ -302,17 +302,16 @@ enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
+    /// Upgrade vpg to the latest release from npm.
     Update {
-        #[command(subcommand)]
-        command: UpdateCommand,
+        /// Only check for a newer version; don't install.
+        #[arg(long)]
+        check: bool,
+        /// Force a release channel ("latest" or "next"). Defaults to whichever
+        /// matches your current version.
+        #[arg(long)]
+        channel: Option<String>,
     },
-}
-
-#[derive(Subcommand, Debug)]
-enum UpdateCommand {
-    Check,
-    Plan,
-    Apply,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2675,11 +2674,7 @@ fn run(cli: &Cli) -> Result<Value, String> {
             *apply_migrations,
             *skip_migrations,
         ),
-        Some(Command::Update { command }) => Ok(json!({
-            "status": "not_implemented",
-            "message": "self-update checks will be wired to release metadata",
-            "command": format!("{command:?}")
-        })),
+        Some(Command::Update { check, channel }) => run_update(*check, channel.clone()),
         None => Ok(json!(StatusOutput {
             status: "ok",
             message: "VegaStack Pages CLI"
@@ -2823,6 +2818,284 @@ fn deploy(
         })),
         _ => Err(format!("unsupported deploy target: {target}")),
     }
+}
+
+fn run_update(check_only: bool, channel_arg: Option<String>) -> Result<Value, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let channel = match channel_arg.as_deref() {
+        Some("latest") | Some("next") => channel_arg.unwrap(),
+        Some(other) => {
+            return Err(format!(
+                "unknown channel '{other}' — expected 'latest' or 'next'"
+            ));
+        }
+        None => {
+            if current.contains('-') {
+                "next".to_string()
+            } else {
+                "latest".to_string()
+            }
+        }
+    };
+
+    eprintln!("Checking for updates…");
+    let target = fetch_dist_tag(&channel)?;
+
+    if compare_versions(current, &target) != std::cmp::Ordering::Less {
+        return Ok(json!({
+            "current": current,
+            "target": target,
+            "channel": channel,
+            "update_available": false,
+            "upgraded": false,
+            "message": format!("You're up to date ({current})."),
+        }));
+    }
+
+    if check_only {
+        return Ok(json!({
+            "current": current,
+            "target": target,
+            "channel": channel,
+            "update_available": true,
+            "upgraded": false,
+            "message": format!("Update available: {current} → {target}"),
+        }));
+    }
+
+    eprintln!("Update available: {current} → {target}");
+
+    let installer = detect_installer();
+    match installer {
+        Installer::LocalDev => {
+            return Err(
+                "This looks like a local development build of vpg. Rebuild with: \
+                 node scripts/build-native.mjs (inside cli/vegastack-pages)."
+                    .into(),
+            );
+        }
+        Installer::Unknown => {
+            let spec = format!("@vegastack/pages@{channel}");
+            return Err(format!(
+                "Couldn't detect which package manager installed vpg.\n\
+                 Run one of these to upgrade:\n  \
+                 npm  i -g {spec}\n  \
+                 pnpm add -g {spec}\n  \
+                 bun  add -g {spec}\n  \
+                 yarn global add {spec}"
+            ));
+        }
+        _ => {}
+    }
+
+    // Windows holds the running .exe with a sharing-violation lock, so a
+    // package manager that tries to replace the file in place will fail
+    // partway through. Print the exact command to run from a fresh shell
+    // instead of attempting the upgrade ourselves.
+    if cfg!(windows) {
+        let cmd = installer.upgrade_command(&channel);
+        return Ok(json!({
+            "current": current,
+            "target": target,
+            "channel": channel,
+            "update_available": true,
+            "upgraded": false,
+            "installer": installer.name(),
+            "message": format!(
+                "Update available: {current} → {target}.\n\
+                 On Windows, vpg can't replace its own .exe while it's running.\n\
+                 Open a new terminal and run:\n  {cmd}"
+            ),
+        }));
+    }
+
+    eprintln!("Upgrading with {}…", installer.name());
+    let status = installer.run_upgrade(&channel)?;
+    if !status.success() {
+        return Err(format!(
+            "{} exited with status {} — vpg was not upgraded.",
+            installer.name(),
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    Ok(json!({
+        "current": current,
+        "target": target,
+        "channel": channel,
+        "update_available": true,
+        "upgraded": true,
+        "installer": installer.name(),
+        "message": format!("Updated to {target}."),
+    }))
+}
+
+fn fetch_dist_tag(channel: &str) -> Result<String, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent(concat!("vpg/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|error| format!("failed to create HTTP client: {error}"))?;
+    let response = client
+        .get("https://registry.npmjs.org/-/package/@vegastack/pages/dist-tags")
+        .send()
+        .map_err(|error| {
+            format!(
+                "Couldn't reach the npm registry. Check your connection and try again. ({error})"
+            )
+        })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!(
+            "npm registry returned {} when fetching dist-tags for @vegastack/pages",
+            status.as_u16()
+        ));
+    }
+    let data: Value = response
+        .json()
+        .map_err(|error| format!("invalid response from npm registry: {error}"))?;
+    data.get(channel)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("no @vegastack/pages release on the '{channel}' channel yet"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Installer {
+    Npm,
+    Pnpm,
+    Bun,
+    Yarn,
+    LocalDev,
+    Unknown,
+}
+
+impl Installer {
+    fn name(&self) -> &'static str {
+        match self {
+            Installer::Npm => "npm",
+            Installer::Pnpm => "pnpm",
+            Installer::Bun => "bun",
+            Installer::Yarn => "yarn",
+            Installer::LocalDev => "local-dev",
+            Installer::Unknown => "unknown",
+        }
+    }
+
+    fn upgrade_argv(&self, channel: &str) -> Option<(&'static str, Vec<String>)> {
+        let spec = format!("@vegastack/pages@{channel}");
+        Some(match self {
+            Installer::Npm => ("npm", vec!["install".into(), "-g".into(), spec]),
+            Installer::Pnpm => ("pnpm", vec!["add".into(), "-g".into(), spec]),
+            Installer::Bun => ("bun", vec!["add".into(), "-g".into(), spec]),
+            Installer::Yarn => ("yarn", vec!["global".into(), "add".into(), spec]),
+            Installer::LocalDev | Installer::Unknown => return None,
+        })
+    }
+
+    fn upgrade_command(&self, channel: &str) -> String {
+        match self.upgrade_argv(channel) {
+            Some((cmd, args)) => format!("{cmd} {}", args.join(" ")),
+            None => format!("@vegastack/pages@{channel}"),
+        }
+    }
+
+    fn run_upgrade(&self, channel: &str) -> Result<std::process::ExitStatus, String> {
+        let (cmd, args) = self
+            .upgrade_argv(channel)
+            .ok_or_else(|| "internal: run_upgrade called for non-runnable installer".to_string())?;
+        ProcessCommand::new(cmd)
+            .args(&args)
+            .status()
+            .map_err(|error| format!("failed to run {cmd}: {error}"))
+    }
+}
+
+fn detect_installer() -> Installer {
+    classify_install_path(env::var("VPG_INSTALL_BINARY").ok().as_deref())
+}
+
+fn classify_install_path(path: Option<&str>) -> Installer {
+    let Some(raw) = path else {
+        return Installer::Unknown;
+    };
+    if raw.is_empty() {
+        return Installer::Unknown;
+    }
+    let p = raw.replace('\\', "/").to_lowercase();
+    if p.contains("/cli/vegastack-pages/dist/") || p.contains("/vegastack-pages/dist/") {
+        return Installer::LocalDev;
+    }
+    if p.contains("/.pnpm/")
+        || p.contains("/pnpm/global/")
+        || p.contains("/pnpm-global/")
+        || p.contains("/library/pnpm/")
+    {
+        return Installer::Pnpm;
+    }
+    if p.contains("/.bun/") || p.contains("/bun/install/") {
+        return Installer::Bun;
+    }
+    if p.contains("/.yarn/") || p.contains("/yarn/global/") {
+        return Installer::Yarn;
+    }
+    if p.contains("/node_modules/") || p.contains("/lib/node_modules/") {
+        return Installer::Npm;
+    }
+    Installer::Unknown
+}
+
+fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let parse = |v: &str| -> (Vec<u64>, Option<String>) {
+        let (core, pre) = match v.split_once('-') {
+            Some((c, p)) => (c, Some(p.to_string())),
+            None => (v, None),
+        };
+        let nums: Vec<u64> = core.split('.').map(|p| p.parse().unwrap_or(0)).collect();
+        (nums, pre)
+    };
+    let (a_nums, a_pre) = parse(a);
+    let (b_nums, b_pre) = parse(b);
+    for i in 0..a_nums.len().max(b_nums.len()) {
+        let x = a_nums.get(i).copied().unwrap_or(0);
+        let y = b_nums.get(i).copied().unwrap_or(0);
+        match x.cmp(&y) {
+            Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    match (a_pre, b_pre) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(ap), Some(bp)) => compare_prerelease(&ap, &bp),
+    }
+}
+
+fn compare_prerelease(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let a_parts: Vec<&str> = a.split('.').collect();
+    let b_parts: Vec<&str> = b.split('.').collect();
+    for i in 0..a_parts.len().max(b_parts.len()) {
+        match (a_parts.get(i), b_parts.get(i)) {
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => {
+                let ord = match (x.parse::<u64>().ok(), y.parse::<u64>().ok()) {
+                    (Some(xn), Some(yn)) => xn.cmp(&yn),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => x.cmp(y),
+                };
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+            (None, None) => break,
+        }
+    }
+    Ordering::Equal
 }
 
 fn print_output(cli: &Cli, value: Value) {
@@ -3469,7 +3742,7 @@ mod tests {
             "vpg export",
             "vpg doctor",
             "vpg deploy",
-            "vpg update check",
+            "vpg update",
             "vpg skills path",
             "vpg skills print",
             "vpg skills doctor",
@@ -3502,6 +3775,84 @@ mod tests {
 
         let source = include_str!("main.rs");
         assert!(source.contains("let timeout_seconds = timeout_seconds.min(600);"));
+    }
+
+    #[test]
+    fn compare_versions_orders_semver_and_prereleases() {
+        use std::cmp::Ordering;
+        assert_eq!(compare_versions("0.1.1", "0.1.1"), Ordering::Equal);
+        assert_eq!(compare_versions("0.1.1", "0.1.2"), Ordering::Less);
+        assert_eq!(compare_versions("0.2.0", "0.1.9"), Ordering::Greater);
+        // Prerelease ranks below the matching stable release
+        assert_eq!(compare_versions("0.1.2-next.0", "0.1.2"), Ordering::Less);
+        assert_eq!(compare_versions("0.1.2", "0.1.2-next.0"), Ordering::Greater);
+        // Numeric prerelease segments sort numerically, not lexically
+        assert_eq!(
+            compare_versions("0.1.2-next.9", "0.1.2-next.10"),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn classify_install_path_detects_each_installer() {
+        assert_eq!(classify_install_path(None), Installer::Unknown);
+        assert_eq!(classify_install_path(Some("")), Installer::Unknown);
+        assert_eq!(
+            classify_install_path(Some(
+                "/Users/me/projects/vegastack-pages/cli/vegastack-pages/dist/darwin-arm64/vpg"
+            )),
+            Installer::LocalDev
+        );
+        assert_eq!(
+            classify_install_path(Some(
+                "/Users/me/Library/pnpm/global/5/node_modules/@vegastack/pages-darwin-arm64/bin/vpg"
+            )),
+            Installer::Pnpm
+        );
+        assert_eq!(
+            classify_install_path(Some(
+                "/Users/me/.bun/install/global/node_modules/@vegastack/pages-darwin-arm64/bin/vpg"
+            )),
+            Installer::Bun
+        );
+        assert_eq!(
+            classify_install_path(Some(
+                "/Users/me/.yarn/global/node_modules/@vegastack/pages-darwin-arm64/bin/vpg"
+            )),
+            Installer::Yarn
+        );
+        assert_eq!(
+            classify_install_path(Some(
+                "/usr/local/lib/node_modules/@vegastack/pages-linux-x64/bin/vpg"
+            )),
+            Installer::Npm
+        );
+        assert_eq!(
+            classify_install_path(Some("C:\\Users\\me\\somewhere\\vpg.exe")),
+            Installer::Unknown
+        );
+    }
+
+    #[test]
+    fn update_command_parses_with_flags() {
+        let plain = Cli::try_parse_from(["vpg", "update"]).expect("parse update");
+        match plain.command {
+            Some(Command::Update { check, channel }) => {
+                assert!(!check);
+                assert!(channel.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let check = Cli::try_parse_from(["vpg", "update", "--check", "--channel", "next"])
+            .expect("parse update with flags");
+        match check.command {
+            Some(Command::Update { check, channel }) => {
+                assert!(check);
+                assert_eq!(channel.as_deref(), Some("next"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

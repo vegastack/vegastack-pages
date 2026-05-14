@@ -2,6 +2,57 @@
 
 All notable changes to VegaStack Pages are documented here.
 
+## 0.1.2
+
+A tiny follow-up to v0.1.1. While debugging the claude.ai custom connector
+flow over wrangler tail, we observed that the connector broker ignores both
+the `WWW-Authenticate: resource_metadata` URL and the `registration_endpoint`
+value advertised in the authorization-server metadata, and instead probes
+RFC 9728-derived and conventional root paths. This release adds the missing
+aliases so the discovery handshake completes.
+
+### Added
+
+- `GET /.well-known/oauth-protected-resource/mcp` — RFC 9728 §3.1 derived
+  protected-resource metadata path. Returns the same JSON as the root-path
+  variant.
+- `POST /register` — root-level alias for RFC 7591 Dynamic Client
+  Registration. Re-exports `/oauth/register`.
+- `GET /authorize` — root-level alias for the authorization endpoint.
+- `POST /token` — root-level alias for the token endpoint.
+- `POST /revoke` — root-level alias for the revocation endpoint.
+- `POST /device` — root-level alias for the device authorization endpoint.
+
+The canonical `/oauth/*` endpoints continue to work for spec-compliant
+clients (including our own `vpg` CLI device-code flow). Authorization-server
+metadata still advertises the `/oauth/*` URLs.
+
+### Changed
+
+- `/oauth/register` and `/oauth/authorize` now set `Cache-Control: no-store`
+  on every response (success, error, and consent HTML). Aligns with RFC 6749
+  §5.1 and is defense-in-depth against the edge-cache-poisoning class of
+  bugs documented in the wild on aggressive shared-hosting proxies in front
+  of WordPress + LiteSpeed; our Cloudflare Workers deployment was not
+  vulnerable, but the hardening is free.
+- `vpg update` now actually updates. It queries the npm registry for the
+  matching channel (`latest` for stable, `next` for prereleases), then
+  shells out to the package manager that installed vpg (npm, pnpm, bun, or
+  yarn) to upgrade the `@vegastack/pages` umbrella in place. New flags:
+  `--check` reports the latest version without installing,
+  `--channel latest|next` overrides the inferred channel. On Windows the
+  binary can't replace itself while running, so `vpg update` prints the
+  exact upgrade command instead. Local development builds and unknown
+  install paths are refused with actionable guidance.
+- Profile moved into the settings IA at `/app/settings/profile`. Legacy
+  `/profile` and `/app/profile` redirect (301) so old bookmarks resolve.
+  New `GET/PATCH /api/me` endpoint backs the display-name editor.
+- Sidebar / theme menu refactor: theme state lives in a shared
+  `apps/web/src/lib/theme.ts` and is now persisted to both `localStorage`
+  and a cookie so SSR can pre-paint the right `data-theme` and avoid a
+  theme flash on navigation. Folder open/closed state can now be overridden
+  via a server-rendered map.
+
 ## 0.1.1
 
 A small follow-up release. Unblocks the claude.ai custom connector add flow,

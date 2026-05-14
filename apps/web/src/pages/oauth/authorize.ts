@@ -49,7 +49,10 @@ p{margin:0.5rem 0;line-height:1.5;color:#bdbdc4}</style>
 <div class="card"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></div>`,
     {
       status,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
     },
   );
 }
@@ -148,7 +151,10 @@ export const GET: APIRoute = async ({ cookies, url }) => {
     renderConsent(params, client, workspaces, vendor.label, actor.user.email),
     {
       status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
     },
   );
 };

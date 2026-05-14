@@ -54,6 +54,29 @@ type FolderNode = {
   pages: PageRecord[];
 };
 
+// Parse persisted folder overrides from the cookie so SSR opens/closes the
+// `<details>` elements that the user has explicitly toggled. Without this the
+// folder tree visibly snaps to its persisted state on hydrate. Cookie format:
+//   o:<id>,<id>|c:<id>,<id>
+// Sections may be omitted; ids that aren't valid folders in this workspace are
+// just ignored.
+const folderOverrides = new Map<string, "open" | "closed">();
+{
+  const raw = Astro.cookies.get("vpg_folders")?.value;
+  if (raw) {
+    for (const section of raw.split("|")) {
+      const idx = section.indexOf(":");
+      if (idx <= 0) continue;
+      const kind = section.slice(0, idx);
+      const state = kind === "o" ? "open" : kind === "c" ? "closed" : null;
+      if (!state) continue;
+      for (const id of section.slice(idx + 1).split(",")) {
+        if (id) folderOverrides.set(id, state);
+      }
+    }
+  }
+}
+
 const folderById = new Map<string, FolderNode>();
 folders.forEach((folder) => {
   folderById.set(folder.id, { folder, children: [], pages: [] });
@@ -248,6 +271,7 @@ const userInitials = initialsOf(currentUser.displayName);
                 node={child}
                 currentPageId={currentPageId}
                 currentFolderId={currentFolderId}
+                folderOverrides={folderOverrides}
               />
             ))}
           </ul>
@@ -348,21 +372,86 @@ const userInitials = initialsOf(currentUser.displayName);
       }
     });
 
+    // Persisted folder overrides. SSR reads the same cookie and renders the
+    // <details> elements with the right `open` attribute, so this script just
+    // keeps the cookie + localStorage in sync on toggle. We track the set of
+    // explicit overrides (id -> "o" | "c") and serialize as
+    //   o:<csv>|c:<csv>
+    // matching the format Sidebar.astro parses on the server.
+    const FOLDER_COOKIE_KEY = "vpg_folders";
+    const folderOverrides = (() => {
+      const map = new Map();
+      const prefix = FOLDER_COOKIE_KEY + "=";
+      const part = document.cookie
+        .split(";")
+        .map((s) => s.trim())
+        .find((s) => s.startsWith(prefix));
+      if (!part) return map;
+      for (const section of part.slice(prefix.length).split("|")) {
+        const idx = section.indexOf(":");
+        if (idx <= 0) continue;
+        const kind = section.slice(0, idx);
+        const state = kind === "o" ? "o" : kind === "c" ? "c" : null;
+        if (!state) continue;
+        for (const id of section.slice(idx + 1).split(",")) {
+          if (id) map.set(id, state);
+        }
+      }
+      return map;
+    })();
+
+    function writeFolderCookie() {
+      const open = [];
+      const closed = [];
+      folderOverrides.forEach((state, id) => {
+        (state === "o" ? open : closed).push(id);
+      });
+      const parts = [];
+      if (open.length) parts.push("o:" + open.join(","));
+      if (closed.length) parts.push("c:" + closed.join(","));
+      const value = parts.join("|");
+      const secure = window.location.protocol === "https:" ? "; Secure" : "";
+      document.cookie =
+        FOLDER_COOKIE_KEY +
+        "=" +
+        value +
+        "; path=/; max-age=31536000; samesite=lax" +
+        secure;
+    }
+
     function hydrateFolders() {
+      let dirty = false;
       document.querySelectorAll("details[data-folder-id]").forEach((node) => {
         if (!(node instanceof HTMLDetailsElement)) return;
         if (node.dataset.hydrated === "true") return;
         node.dataset.hydrated = "true";
         const id = node.dataset.folderId;
         if (!id) return;
-        const key = "vpg-folder-" + id;
-        const stored = window.localStorage.getItem(key);
-        if (stored === "closed") node.open = false;
-        else if (stored === "open") node.open = true;
+        // Legacy backfill: if we have a localStorage entry but no cookie
+        // override for this folder, fold it into the override map so the next
+        // SSR has it. We don't override the SSR'd `open` here — SSR is already
+        // the source of truth via the cookie.
+        const localKey = "vpg-folder-" + id;
+        if (!folderOverrides.has(id)) {
+          const legacy = window.localStorage.getItem(localKey);
+          if (legacy === "open" || legacy === "closed") {
+            folderOverrides.set(id, legacy === "open" ? "o" : "c");
+            dirty = true;
+          }
+        }
         node.addEventListener("toggle", () => {
-          window.localStorage.setItem(key, node.open ? "open" : "closed");
+          const state = node.open ? "o" : "c";
+          folderOverrides.set(id, state);
+          writeFolderCookie();
+          try {
+            window.localStorage.setItem(
+              localKey,
+              node.open ? "open" : "closed",
+            );
+          } catch {}
         });
       });
+      if (dirty) writeFolderCookie();
     }
     hydrateFolders();
     document.addEventListener("astro:page-load", hydrateFolders);

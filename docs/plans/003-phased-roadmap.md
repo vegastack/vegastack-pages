@@ -158,7 +158,7 @@ Scope:
 - Retention cleanup jobs.
 - Usage and limits dashboard.
 - Backup/export improvements.
-- Update flow: `vpg update check`, `vpg update plan`, `vpg update apply`.
+- Update flow: `vpg update` (with `--check` and `--channel` flags) for in-place upgrades via the owning package manager.
 
 Acceptance:
 

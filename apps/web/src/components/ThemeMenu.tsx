@@ -1,5 +1,11 @@
 import { Check, Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+  applyTheme,
+  persistTheme,
+  readStoredTheme,
+  type ThemeChoice,
+} from "../lib/theme";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -8,8 +14,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-
-type ThemeChoice = "system" | "light" | "dark";
 
 const themes: Array<{
   value: ThemeChoice;
@@ -25,19 +29,17 @@ export function ThemeMenu() {
   const [theme, setTheme] = useState<ThemeChoice>("system");
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("vpg-theme");
-    const next =
-      stored === "light" || stored === "dark" || stored === "system"
-        ? stored
-        : "system";
+    const next = readStoredTheme();
     setTheme(next);
     applyTheme(next);
+    // Backfill cookie for legacy localStorage-only clients so SSR can render
+    // the right data-theme on the next navigation and avoid a theme flash.
+    persistTheme(next);
   }, []);
 
   function chooseTheme(next: ThemeChoice) {
     setTheme(next);
-    applyTheme(next);
-    window.localStorage.setItem("vpg-theme", next);
+    persistTheme(next);
   }
 
   const activeTheme = themes.find((item) => item.value === theme) ?? themes[0];
@@ -81,10 +83,4 @@ export function ThemeMenu() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
-
-function applyTheme(theme: ThemeChoice) {
-  if (document.documentElement.dataset.theme !== theme) {
-    document.documentElement.dataset.theme = theme;
-  }
 }
