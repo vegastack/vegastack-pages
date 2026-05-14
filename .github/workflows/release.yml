@@ -1,15 +1,14 @@
 name: Release
 
 # Tag-driven release pipeline:
-#   1. build-cli-matrix    cross-builds the Rust CLI for every supported target
-#   2. publish-npm         publishes per-platform sub-packages + the umbrella
+#   1. deploy-worker       on stable (non-prerelease) tags, deploys apps/web
+#                          to pages.vegastack.com without waiting on npm
+#   2. build-cli-matrix    cross-builds the Rust CLI for every supported target
+#   3. publish-npm         publishes per-platform sub-packages + the umbrella
 #                          @vegastack/pages package via npm OIDC trusted
 #                          publishing, with SLSA build provenance attestations
-#   3. github-release      cuts a GitHub release with the matching CHANGELOG
-#                          slice as the body
-#   4. deploy-worker       on stable (non-prerelease) tags only, deploys
-#                          apps/web to the Cloudflare Worker at
-#                          pages.vegastack.com via wrangler
+#   4. github-release      cuts a GitHub release with the matching CHANGELOG
+#                          slice after deploy + npm complete
 
 on:
   push:
@@ -48,7 +47,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-apple-darwin
-            os: macos-13
+            # macos-13 Intel runners can stay queued for a long time on first
+            # releases. Build the x64 target from macos-14 instead; if the
+            # cross-link step ever fails, the failure is concrete and patchable.
+            os: macos-14
             platform: darwin-x64
           - target: aarch64-apple-darwin
             os: macos-14
@@ -193,7 +195,11 @@ jobs:
 
   github-release:
     name: GitHub release
-    needs: publish-npm
+    needs: [publish-npm, deploy-worker]
+    if: |
+      always()
+      && needs.publish-npm.result == 'success'
+      && (needs.deploy-worker.result == 'success' || needs.deploy-worker.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -226,7 +232,6 @@ jobs:
 
   deploy-worker:
     name: Deploy Cloudflare Worker
-    needs: github-release
     runs-on: ubuntu-latest
     environment: cloudflare-prod
     if: |

@@ -20,14 +20,19 @@ explicit, named release approval **in this session**:
 
 Implementation approval is **not** release approval. "Go ahead", "proceed",
 "looks good", "continue", "fix it", "ship-ready" — none of these authorize
-remote mutation. They only authorize local edits and verification.
+remote mutation. They only authorize local edits and verification unless they
+come after a ship draft/impact block and clearly answer that block.
 
-Approval must name the release action. Examples that count:
+After Codex shows the relevant draft and impact summary, short approval gates
+are enough. Examples that count:
 
-- "tag v0.1.0-next.0 and publish to next"
-- "release 0.1.0 to latest"
-- "push develop"
-- "deploy worker to pages.vegastack.com"
+- "commit"
+- "push"
+- "commit and push"
+- "ship"
+- "release it"
+- "tag and publish"
+- "deploy it"
 - "move npm latest to 0.1.0"
 
 If the request is ambiguous, stop and ask.
@@ -114,7 +119,7 @@ cli/vegastack-pages   Rust CLI (vpg / vegastack-pages), shipped via npm
 packages/{config,core,db,mcp,renderer,ui}   Internal workspace libraries
 .changeset/           Changesets — versioning + per-package CHANGELOGs
 scripts/sync-version.mjs   Mirrors the canonical version into root + Cargo.toml
-.github/workflows/    release-changesets.yml (Version PR), release.yml (tag → publish + deploy)
+.github/workflows/    release-changesets.yml (Version PR), release.yml (tag → deploy + publish)
 .agents/skills/ship/  Release workflow skill (this is what /ship invokes)
 ```
 

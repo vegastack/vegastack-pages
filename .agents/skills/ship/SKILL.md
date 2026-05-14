@@ -27,15 +27,17 @@ Worker deploy.
   `scripts/sync-version.mjs`, updates package versions, updates generated CLI
   platform dependency pins, and aggregates package changelog entries into root
   `CHANGELOG.md`.
+- **Cloudflare deploy**: stable tags from `main` deploy `apps/web` to
+  `pages.vegastack.com` without waiting for npm. Prerelease tags do not deploy
+  the Worker by default.
 - **Release trigger**: pushing a `v*` tag triggers
   `.github/workflows/release.yml`.
 - **Distribution**: `release.yml` builds all Rust CLI platform binaries,
   publishes generated platform packages first, then publishes
   `@vegastack/pages` to public npm using trusted publishing and provenance.
-- **Cloudflare deploy**: stable tags from `main` deploy `apps/web` to
-  `pages.vegastack.com`. Prerelease tags do not deploy the Worker by default.
 - **GitHub Release**: `release.yml` creates the GitHub release from the
-  matching root `CHANGELOG.md` slice after npm publish succeeds.
+  matching root `CHANGELOG.md` slice after npm publish succeeds and the deploy
+  job is either successful or skipped for prereleases.
 
 ## Hard Release Gate
 
@@ -47,31 +49,36 @@ required approval in the current conversation.
 Implementation approval is not release approval. Do not treat "go ahead",
 "proceed", "implement it", "fix it", "looks good", "continue", "ship-ready",
 or similar wording as permission to commit or mutate remote state. Those
-phrases allow local edits and verification only.
+phrases allow local edits and verification only, unless they appear after the
+ship draft/impact block and clearly answer that block.
 
 There are two approvals:
 
-1. **Draft approval**: required before creating or amending a local release
-   commit. It must come after the five drafts are shown: version, changelog,
-   commit message, release title, and release body.
-2. **Release approval**: required before any remote mutation. It must name the
-   remote release action.
+1. **Commit approval**: required before creating or amending a local release
+   commit. It must come after the relevant draft is shown. The maintainer can
+   say "commit", "commit it", "create the commit", or "commit and push".
+2. **Push approval**: required before any remote mutation. It must come after
+   the remote impact block is shown. The maintainer can say "push", "ship",
+   "release it", "deploy it", "tag and publish", or "commit and push" when
+   the current ship context already names the branch, tag, npm dist-tag, and
+   deploy target.
 
-Before any remote mutation, show:
+Before any remote mutation, show the release impact in plain language:
 
-- exact command(s)
 - version being released
 - target branch and tag
 - npm dist-tag impact
 - whether the Cloudflare Worker will redeploy
 
-Then wait for a direct approval that names the release action, for example:
+Do not require the maintainer to retype exact commands. Wait for a short push
+gate, for example:
 
-- "push main"
-- "tag v0.1.0 and publish to latest"
-- "release 0.1.0 to latest"
-- "deploy worker to pages.vegastack.com"
-- "push main and tag v0.1.0 to release 0.1.0 to latest and deploy worker to pages.vegastack.com"
+- "push"
+- "ship"
+- "release it"
+- "deploy it"
+- "tag and publish"
+- "commit and push"
 
 If the request is ambiguous, stop and ask. Never infer publish approval from
 prior discussion or from a successful test run.
@@ -244,13 +251,14 @@ versions or releasing:
    - Match the style of existing releases if any exist:
      `gh release view <latest> --json body --jq .body`.
 
-Present all five drafts to the maintainer and ask them to confirm or override
-the version and commit message. Do not commit, amend, push, tag, or release
-until they confirm.
+Present all five drafts for release commits. For smaller release-fix commits,
+present a concise commit draft and impact summary. Ask the maintainer to say
+"commit" or "commit and push". Do not commit, amend, push, tag, or release
+until they give the relevant short gate.
 
-Hard stop: if the five drafts have not been shown in the current conversation,
-you must not run `git commit`, `git commit --amend`, `git tag`, `git push`,
-`gh release`, `gh workflow run`, `npm publish`, `pnpm publish`, or
+Hard stop: if the relevant draft has not been shown in the current
+conversation, you must not run `git commit`, `git commit --amend`, `git tag`,
+`git push`, `gh release`, `gh workflow run`, `npm publish`, `pnpm publish`, or
 `wrangler deploy`.
 
 ### Version Chronology Validation
@@ -358,7 +366,7 @@ Critical or High findings block release until fixed or explicitly accepted by
 the maintainer. Commit the audit report if the tool writes one. If the tool is
 not available, rely on the local release audit chain above.
 
-## Step 5: Wait For Commit And Push Confirmation
+## Step 5: Wait For Commit And Push Gates
 
 Display:
 
@@ -371,19 +379,27 @@ Files to commit:
 Commit message: <first line>
 Tag:            vX.Y.Z
 Release title:  vX.Y.Z — <title>
+Release impact:
+  - branch push: <branch>
+  - tag push: vX.Y.Z
+  - npm dist-tag: latest|next
+  - Cloudflare deploy: yes|no
 
-Say "approve commit" to create/amend the local release commit.
-
-After the local commit exists, I will show the remote command block separately.
-Say the exact approved release action to push, tag, publish, and deploy.
+Say "commit" to create/amend the local release commit.
+Say "commit and push" to create/amend the local commit and then push/tag so
+GitHub Actions publishes and deploys according to the impact above.
 ```
 
+Do not require the maintainer to type exact commands. The gates are the words
+`commit`, `push`, `commit and push`, `ship`, `release it`, `tag and publish`,
+or `deploy it` after the draft/impact block has been shown.
+
 Do not push, tag, dispatch, publish, deploy, or create/edit releases until the
-maintainer explicitly approves the remote action.
+maintainer gives a push gate.
 
 ## Step 6: Create The Local Commit
 
-After draft approval, run sequentially:
+After a `commit` or `commit and push` gate, run sequentially:
 
 1. Stage specific files by name. Do not use `git add -A` or `git add .` after
    the initial source import is complete unless this is an explicitly reviewed
@@ -392,11 +408,13 @@ After draft approval, run sequentially:
    `git commit --amend -m "$(cat <<'EOF' ... EOF)"` only after showing the
    amended draft.
 3. Print the commit SHA and first-line subject.
-4. Stop and show the remote release command block. Do not push or tag yet.
+4. If the gate was only `commit`, stop and show the release impact block.
+5. If the gate was `commit and push`, continue to Step 7.
 
 ## Step 7: Execute Remote Ship
 
-After explicit release approval, run sequentially:
+After a `push`, `commit and push`, `ship`, `release it`, `tag and publish`, or
+`deploy it` gate, run sequentially:
 
 1. `git pull --rebase origin main` if the remote branch exists. For an empty
    first push, explain that there is no remote branch to rebase from.
@@ -405,7 +423,9 @@ After explicit release approval, run sequentially:
 4. `git push origin vX.Y.Z`
 5. Do not manually run `npm publish` or `wrangler deploy`; `release.yml` owns
    those steps.
-6. Print:
+6. Watch the GitHub Actions release run until it succeeds, fails, or is clearly
+   blocked on external runner/environment capacity.
+7. Print:
    - commit URL
    - release URL, when available
    - GitHub Actions run URL:
@@ -413,11 +433,13 @@ After explicit release approval, run sequentially:
 
 ## Step 8: Verify Release
 
-After the tag push:
+After the branch or tag push:
 
 - Watch the release workflow:
   `gh run list --workflow=release.yml --limit 1 --json databaseId,url,status,conclusion`
-- If requested, run `gh run view <id> --log-failed`.
+- If the run fails, run `gh run view <id> --log-failed`, write a short RCA,
+  patch the underlying issue locally, then return to Step 5 with a new commit
+  draft and ask for `commit` or `commit and push`.
 - Confirm npm package version after publish:
   `npm view @vegastack/pages version --registry=https://registry.npmjs.org`
 - Confirm the managed app after deploy:
@@ -425,16 +447,17 @@ After the tag push:
 - Confirm the managed MCP endpoint:
   `https://pages.vegastack.com/mcp`
 
-If publish fails, do not retag or force-push. Investigate the workflow failure.
-Common causes are trusted publishing setup, missing npm package configuration,
-or a tag/package version mismatch.
+If publish or deploy fails, do not retag or force-push. Investigate the
+workflow failure, report the RCA, patch forward, and ask for the next
+`commit and push` gate. Common publish causes are trusted publishing setup,
+missing npm package configuration, or a tag/package version mismatch.
 
 ## Rules
 
-- Never create or amend a local release commit before showing the five drafts
-  and receiving draft approval.
+- Never create or amend a local release commit before showing the relevant
+  draft and receiving a `commit` or `commit and push` gate.
 - Never push, tag, publish, deploy, dispatch workflows, or create a GitHub
-  release without explicit user approval for that remote action.
+  release before showing the impact block and receiving a push gate.
 - Never force-push.
 - Never use `--no-verify`, `--no-gpg-sign`, or destructive git reset commands.
 - Always stage by name after the first import. Avoid `git add -A` except for a
