@@ -71,7 +71,7 @@ jobs:
         with:
           node-version: "24"
 
-      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable as of 2026-05-08
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable as of 2026-05-08
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
