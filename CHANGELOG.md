@@ -25,7 +25,6 @@
   - @vegastack/pages-renderer@0.1.8
   - @vegastack/pages-ui@0.1.8
 
-
 ## 0.1.7
 
 ### @vegastack/pages
@@ -54,7 +53,6 @@
   - @vegastack/pages-mcp@0.1.7
   - @vegastack/pages-renderer@0.1.7
   - @vegastack/pages-ui@0.1.7
-
 
 ## 0.1.6
 
@@ -124,7 +122,6 @@
   - @vegastack/pages-mcp@0.1.6
   - @vegastack/pages-renderer@0.1.6
   - @vegastack/pages-ui@0.1.6
-
 
 All notable changes to VegaStack Pages are documented here.
 
