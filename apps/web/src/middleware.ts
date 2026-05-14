@@ -18,6 +18,7 @@ import {
   contentSecurityPolicyForResponse,
   strictTransportSecurityForRequest,
 } from "./lib/security-headers";
+import { bypassesRuntimePersistence } from "./lib/middleware-policy";
 
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const browserMutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -56,6 +57,16 @@ function withSecurityHeaders(response: Response, request: Request) {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  const url = new URL(context.request.url);
+  if (
+    bypassesRuntimePersistence({
+      method: context.request.method,
+      pathname: url.pathname,
+    })
+  ) {
+    return withSecurityHeaders(await next(), context.request);
+  }
+
   await ensureRuntimeReady();
   if (
     browserMutationMethods.has(context.request.method) &&

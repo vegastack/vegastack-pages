@@ -227,6 +227,49 @@ describe("runtime D1 persistence", () => {
     ).toMatchObject({ url: "/p/old-title-a8f31c123456" });
     db.close();
   });
+
+  it("repairs older comment tables that predate guest sessions", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vpg-comment-schema-repair-"));
+    tempDirs.push(dir);
+    const sqlitePath = join(dir, "runtime.sqlite");
+    process.env.VPG_ADAPTER = "node";
+    process.env.VPG_SQLITE_PATH = sqlitePath;
+    process.env.VPG_STATE_DIR = dir;
+    process.env.VPG_DB_MIGRATIONS_DIR = join(
+      process.cwd(),
+      "packages/db/migrations",
+    );
+
+    let db = await openSqlite(sqlitePath);
+    db.exec(
+      [
+        "CREATE TABLE comment_threads (id TEXT PRIMARY KEY NOT NULL, page_id TEXT NOT NULL, workspace_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', selected_text TEXT NOT NULL, guest_name TEXT, publication_id TEXT, resolved_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        "CREATE TABLE comment_replies (id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL, body TEXT NOT NULL, author_type TEXT NOT NULL, author_user_id TEXT, guest_name TEXT, publication_id TEXT, agent_name TEXT, agent_model TEXT, agent_session_id TEXT, created_at TEXT NOT NULL)",
+      ].join(";"),
+    );
+    db.close();
+
+    vi.resetModules();
+    const runtime = await import("./runtime");
+    await runtime.ensureRuntimeReady();
+
+    db = await openSqlite(sqlitePath);
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM pragma_table_info('comment_threads') WHERE name = 'guest_session_id'",
+        )
+        .get(),
+    ).toMatchObject({ name: "guest_session_id" });
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM pragma_table_info('comment_replies') WHERE name = 'guest_session_id'",
+        )
+        .get(),
+    ).toMatchObject({ name: "guest_session_id" });
+    db.close();
+  });
 });
 
 async function freshNodeRuntime(): Promise<{

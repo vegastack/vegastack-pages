@@ -5,6 +5,7 @@ import {
   contentSecurityPolicyForResponse,
   strictTransportSecurityForRequest,
 } from "./lib/security-headers";
+import { bypassesRuntimePersistence } from "./lib/middleware-policy";
 
 describe("security headers", () => {
   it("does not allow inline or eval scripts in middleware CSP", () => {
@@ -91,5 +92,23 @@ describe("security headers", () => {
     expect(validCsrfToken(withoutToken)).toBe(false);
     expect(validCsrfToken(withToken)).toBe(true);
     expect(validCsrfToken(bearerOnly)).toBe(true);
+  });
+
+  it("bypasses runtime persistence for static docs routes only", () => {
+    expect(
+      bypassesRuntimePersistence({ method: "GET", pathname: "/docs" }),
+    ).toBe(true);
+    expect(
+      bypassesRuntimePersistence({
+        method: "HEAD",
+        pathname: "/docs/cloudflare",
+      }),
+    ).toBe(true);
+    expect(
+      bypassesRuntimePersistence({ method: "POST", pathname: "/docs" }),
+    ).toBe(false);
+    expect(
+      bypassesRuntimePersistence({ method: "GET", pathname: "/app" }),
+    ).toBe(false);
   });
 });

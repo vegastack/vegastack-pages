@@ -126,7 +126,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --no-optional
 
       - name: Download all platform artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b6f43b9a4c4d52a7e7e1a5e7 # v4.1.8
+        uses: actions/download-artifact@v4.1.8
         with:
           path: cli/vegastack-pages/npm-publish
           pattern: cli-*
@@ -255,23 +255,67 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --no-optional
 
+      - name: Mask managed Cloudflare config
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          VPG_WORKER_NAME: ${{ secrets.VPG_WORKER_NAME }}
+          VPG_CUSTOM_DOMAIN: ${{ secrets.VPG_CUSTOM_DOMAIN }}
+          VPG_D1_DATABASE_ID: ${{ secrets.VPG_D1_DATABASE_ID }}
+          VPG_D1_DATABASE_NAME: ${{ secrets.VPG_D1_DATABASE_NAME }}
+          VPG_KV_NAMESPACE_ID: ${{ secrets.VPG_KV_NAMESPACE_ID }}
+          VPG_R2_BUCKET_NAME: ${{ secrets.VPG_R2_BUCKET_NAME }}
+          VPG_GITHUB_APP_ID: ${{ secrets.VPG_GITHUB_APP_ID }}
+          VPG_GITHUB_APP_SLUG: ${{ secrets.VPG_GITHUB_APP_SLUG }}
+          VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
+          VPG_EMAIL_FROM: ${{ secrets.VPG_EMAIL_FROM }}
+          VPG_EMAIL_FROM_NAME: ${{ secrets.VPG_EMAIL_FROM_NAME }}
+        run: |
+          for value in \
+            "$CLOUDFLARE_ACCOUNT_ID" \
+            "$CLOUDFLARE_API_TOKEN" \
+            "$VPG_WORKER_NAME" \
+            "$VPG_CUSTOM_DOMAIN" \
+            "$VPG_D1_DATABASE_ID" \
+            "$VPG_D1_DATABASE_NAME" \
+            "$VPG_KV_NAMESPACE_ID" \
+            "$VPG_R2_BUCKET_NAME" \
+            "$VPG_GITHUB_APP_ID" \
+            "$VPG_GITHUB_APP_SLUG" \
+            "$VPG_GITHUB_SYNC_CRON" \
+            "$VPG_EMAIL_FROM" \
+            "$VPG_EMAIL_FROM_NAME"; do
+            if [ -n "$value" ]; then
+              echo "::add-mask::$value"
+            fi
+          done
+
       - name: Write managed Wrangler config
         working-directory: apps/web
         env:
           VPG_D1_DATABASE_ID: ${{ secrets.VPG_D1_DATABASE_ID }}
-          VPG_D1_DATABASE_NAME: ${{ vars.VPG_D1_DATABASE_NAME || 'vegastack_pages' }}
+          VPG_D1_DATABASE_NAME: ${{ secrets.VPG_D1_DATABASE_NAME }}
           VPG_KV_NAMESPACE_ID: ${{ secrets.VPG_KV_NAMESPACE_ID }}
-          VPG_R2_BUCKET_NAME: ${{ vars.VPG_R2_BUCKET_NAME || 'vegastack-pages-content' }}
-          VPG_GITHUB_APP_ID: ${{ vars.VPG_GITHUB_APP_ID }}
-          VPG_GITHUB_APP_SLUG: ${{ vars.VPG_GITHUB_APP_SLUG || 'vegastack-pages' }}
-          VPG_GITHUB_SYNC_CRON: ${{ vars.VPG_GITHUB_SYNC_CRON || '17 2 * * *' }}
-          VPG_EMAIL_FROM: ${{ vars.VPG_EMAIL_FROM }}
-          VPG_EMAIL_FROM_NAME: ${{ vars.VPG_EMAIL_FROM_NAME || 'VegaStack Pages' }}
+          VPG_R2_BUCKET_NAME: ${{ secrets.VPG_R2_BUCKET_NAME }}
+          VPG_WORKER_NAME: ${{ secrets.VPG_WORKER_NAME }}
+          VPG_CUSTOM_DOMAIN: ${{ secrets.VPG_CUSTOM_DOMAIN }}
+          VPG_GITHUB_APP_ID: ${{ secrets.VPG_GITHUB_APP_ID }}
+          VPG_GITHUB_APP_SLUG: ${{ secrets.VPG_GITHUB_APP_SLUG }}
+          VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
+          VPG_EMAIL_FROM: ${{ secrets.VPG_EMAIL_FROM }}
+          VPG_EMAIL_FROM_NAME: ${{ secrets.VPG_EMAIL_FROM_NAME }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
 
-          const required = ["VPG_D1_DATABASE_ID", "VPG_KV_NAMESPACE_ID"];
+          const required = [
+            "VPG_D1_DATABASE_ID",
+            "VPG_D1_DATABASE_NAME",
+            "VPG_KV_NAMESPACE_ID",
+            "VPG_R2_BUCKET_NAME",
+            "VPG_WORKER_NAME",
+            "VPG_CUSTOM_DOMAIN",
+          ];
           const missing = required.filter((name) => !process.env[name]);
           if (missing.length > 0) {
             throw new Error(`Missing Cloudflare production config: ${missing.join(", ")}`);
@@ -279,9 +323,10 @@ jobs:
 
           const cron = process.env.VPG_GITHUB_SYNC_CRON || "17 2 * * *";
           const emailFrom = process.env.VPG_EMAIL_FROM || "";
+          const customDomain = process.env.VPG_CUSTOM_DOMAIN;
           const config = {
             $schema: "../../node_modules/wrangler/config-schema.json",
-            name: "vegastack-pages",
+            name: process.env.VPG_WORKER_NAME,
             main: "./src/worker.ts",
             compatibility_date: "2026-05-10",
             compatibility_flags: ["nodejs_compat", "global_fetch_strictly_public"],
@@ -293,12 +338,12 @@ jobs:
               enabled: true,
             },
             workers_dev: false,
-            routes: [{ pattern: "pages.vegastack.com", custom_domain: true }],
+            routes: [{ pattern: customDomain, custom_domain: true }],
             vars: {
               VPG_RUNTIME: "cloudflare",
               VPG_DEPLOYMENT_MODE: "managed",
               VPG_PUBLIC_SIGNUP: "true",
-              VPG_BASE_URL: "https://pages.vegastack.com",
+              VPG_BASE_URL: `https://${customDomain}`,
               VPG_HOME_MODE: "landing",
               VPG_EMAIL_PROVIDER: emailFrom ? "cloudflare" : "auto",
               VPG_EMAIL_FROM: emailFrom,
@@ -306,7 +351,7 @@ jobs:
                 process.env.VPG_EMAIL_FROM_NAME || "VegaStack Pages",
               VPG_GITHUB_APP_ID: process.env.VPG_GITHUB_APP_ID || "",
               VPG_GITHUB_APP_SLUG:
-                process.env.VPG_GITHUB_APP_SLUG || "vegastack-pages",
+                process.env.VPG_GITHUB_APP_SLUG || "",
               VPG_GITHUB_SYNC_CRON: cron,
             },
             triggers: {
@@ -315,8 +360,7 @@ jobs:
             d1_databases: [
               {
                 binding: "DB",
-                database_name:
-                  process.env.VPG_D1_DATABASE_NAME || "vegastack_pages",
+                database_name: process.env.VPG_D1_DATABASE_NAME,
                 database_id: process.env.VPG_D1_DATABASE_ID,
                 migrations_dir: "../../packages/db/migrations",
               },
@@ -330,9 +374,7 @@ jobs:
             r2_buckets: [
               {
                 binding: "CONTENT",
-                bucket_name:
-                  process.env.VPG_R2_BUCKET_NAME ||
-                  "vegastack-pages-content",
+                bucket_name: process.env.VPG_R2_BUCKET_NAME,
               },
             ],
           };
@@ -373,10 +415,22 @@ jobs:
           }
           NODE
 
+      - name: Apply D1 migrations
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler d1 migrations apply DB --remote
+
       - name: Wrangler deploy (apps/web → pages.vegastack.com)
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          VPG_GITHUB_SYNC_CRON: ${{ vars.VPG_GITHUB_SYNC_CRON || '17 2 * * *' }}
+          VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
         run: pnpm exec wrangler deploy
+
+      - name: Remove generated Wrangler config
+        if: always()
+        working-directory: apps/web
+        run: rm -f wrangler.jsonc

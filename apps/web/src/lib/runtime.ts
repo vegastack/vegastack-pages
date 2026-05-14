@@ -1201,6 +1201,12 @@ async function ensureRuntimeSchema() {
   ) {
     await d1Run("ALTER TABLE comment_threads ADD COLUMN publication_id TEXT");
   }
+  if (
+    threadColumns.length > 0 &&
+    !threadColumns.some((column) => column.name === "guest_session_id")
+  ) {
+    await d1Run("ALTER TABLE comment_threads ADD COLUMN guest_session_id TEXT");
+  }
   const replyColumns = await d1All<{ name: string }>(
     "PRAGMA table_info(comment_replies)",
   );
@@ -1209,6 +1215,12 @@ async function ensureRuntimeSchema() {
     !replyColumns.some((column) => column.name === "publication_id")
   ) {
     await d1Run("ALTER TABLE comment_replies ADD COLUMN publication_id TEXT");
+  }
+  if (
+    replyColumns.length > 0 &&
+    !replyColumns.some((column) => column.name === "guest_session_id")
+  ) {
+    await d1Run("ALTER TABLE comment_replies ADD COLUMN guest_session_id TEXT");
   }
   const anchorColumns = await d1All<{ name: string }>(
     "PRAGMA table_info(comment_anchors)",
