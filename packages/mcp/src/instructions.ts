@@ -22,10 +22,10 @@ Use \`create_page_snapshot\` before risky edits if you may need to roll back. \`
 
 ## Comments and review
 
-- Threads: \`list_comments\`, \`create_comment\`, \`reply_to_thread\` (replies as the authenticated user), \`resolve_thread\`, \`unresolve_thread\`, \`delete_thread\`.
-- For agent-attributed replies (Claude, Cursor, vpg, ...) always use \`complete_review_thread\` — it accepts \`agent_name\`, \`agent_model\`, \`agent_session_id\` and optionally resolves in one call.
+- Threads: \`list_comments\`, \`create_comment\`, \`update_thread\`, \`delete_thread\`.
+- For agent-attributed replies (Claude, Cursor, vpg, ...) use \`update_thread\` with \`agent_name\`, \`agent_model\`, \`agent_session_id\`, and \`resolve\` when the thread is handled.
 - Anchors: Markdown/MDX comments use text anchors (\`selected_text\` + offsets/context). HTML pin comments use point anchors (\`anchor_kind: point\`, \`surface: html\`, \`selector.point\`). Use \`update_comment_anchor\` after fixing a fuzzy/stale anchor.
-- Review loop: after the user asks you to ship work for review, \`publish_page\` with comment permission if external reviewers, then \`wait_for_review\` (timeout up to 600000ms). When events arrive, act on them — patch the source, reply, and \`complete_review_thread\` with \`resolve\` for each handled thread.
+- Review loop: after the user asks you to ship work for review, \`publication_apply\` with comment permission if external reviewers, then \`wait_for_review\` (timeout up to 600000ms). When events arrive, act on them — patch the source, reply, and \`update_thread\` with \`resolve\` for each handled thread.
 
 ## Templates
 
@@ -35,12 +35,11 @@ Use \`create_page_snapshot\` before risky edits if you may need to roll back. \`
 
 ## Publishing
 
-- \`publish_page\` and \`publish_folder\` issue canonical public URLs. \`permission\` is one of \`view | comment | edit\`. Confirm with the user before publishing anything that was not already public — revocation requires \`revoke_publication\`.
-- \`update_publication\` can change permission, expiry, password, or indexing.
+- \`publication_apply\` creates or updates page/folder public URLs. \`permission\` is one of \`view | comment | edit\`. Confirm with the user before publishing anything that was not already public — revocation requires \`publication_delete\`.
 
 ## Search and navigation
 
-- \`search_workspace\` covers pages, folders, and comment threads. Use \`search_pages\` for the pages-only fast path. Use \`list_workspace_tree\` to navigate folder structure. Use \`move_page\` to rename or change folder path.
+- \`search_workspace\` covers pages, folders, and comment threads. Use \`type: "page"\` for page-only search. Use \`list_workspace\` to navigate folder structure with depth/count filters. Use \`move_page\` to rename or change folder path.
 
 ## Attachments
 
@@ -52,12 +51,12 @@ Use \`create_page_snapshot\` before risky edits if you may need to roll back. \`
 
 ## CLI parity
 
-Every MCP tool has a matching \`vpg\` CLI subcommand (prepare-edit, patch, validate, publish-page, complete-thread, wait, ...). Pick MCP when connected; pick \`vpg\` for shell, CI, or local-file workflows. Do not mix the two in the same flow unless the user asks.
+MCP and \`vpg\` share the same backend paths for page reads, review wait status, search, and comments. Pick MCP when connected; pick \`vpg\` for shell, CI, or local-file workflows. Do not mix the two in the same flow unless the user asks.
 
 ## Don'ts
 
 - Don't busy-poll \`list_comments\` — use \`wait_for_review\`.
-- Don't pass \`agent_name\` to \`reply_to_thread\`; use \`complete_review_thread\` instead.
+- Don't use removed legacy thread/publish/search tools; use \`update_thread\`, \`publication_apply\`, \`publication_delete\`, \`search_workspace\`, and \`list_workspace\`.
 - Don't \`update_page\` without a fresh \`base_version_id\` from \`prepare_page_edit\`.
 - Don't infer \`workspace_id\` — ask if it isn't already established.
 `;

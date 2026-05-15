@@ -19,7 +19,7 @@ import {
   type TemplateRecord,
   type UserRecord,
 } from "@vegastack/pages-core";
-import { flattenFrontmatter, renderMarkdown } from "@vegastack/pages-renderer";
+import { flattenFrontmatter } from "@vegastack/pages-renderer";
 import type { APIRoute } from "astro";
 import {
   attachmentService,
@@ -31,8 +31,8 @@ import {
   getMcpSession,
   getMcpSessionFast,
   getUserFast,
-  indexCommentThread,
-  indexPage,
+  scheduleIndexCommentThread,
+  scheduleIndexPage,
   pageService,
   permissionService,
   persistRuntimeState,
@@ -49,6 +49,12 @@ import { sendMagicLinkEmail } from "../lib/email";
 import { devAutoLoginEnabled, devAutoLoginUser } from "../lib/dev-auth";
 import { coerceCommentAnchor } from "../lib/comment-anchor-api";
 import { assertPublicationPasswordPolicy } from "../lib/share-password-policy";
+import { serializePublication } from "../lib/publication-api";
+import { renderCachedMarkdown } from "../lib/render-cache";
+import {
+  buildWorkspaceNavigation,
+  filterWorkspaceNavigation,
+} from "../lib/workspace-navigation";
 import { validateEditableSource } from "../lib/source-validation";
 import { validateHost } from "../lib/oauth/issuer";
 import skillCli from "../../../../skills/vegastack-pages/references/cli.md?raw";
@@ -152,18 +158,44 @@ export const HEAD: APIRoute = () =>
     }),
   );
 
-export const GET: APIRoute = () => {
+export const GET: APIRoute = ({ request }) => {
   const encoder = new TextEncoder();
+  const signal = request?.signal;
+  let closed = false;
+  let interval: ReturnType<typeof setInterval> | null = null;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (interval) clearInterval(interval);
+    if (timeout) clearTimeout(timeout);
+  };
   const stream = new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(": VegaStack Pages MCP stream\n\n"));
-      const interval = setInterval(() => {
-        controller.enqueue(encoder.encode(": keepalive\n\n"));
+      const enqueue = (value: string) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(value));
+        } catch {
+          cleanup();
+        }
+      };
+      signal?.addEventListener("abort", cleanup, { once: true });
+      enqueue(": VegaStack Pages MCP stream\n\n");
+      interval = setInterval(() => {
+        enqueue(": keepalive\n\n");
       }, 15_000);
-      setTimeout(() => {
-        clearInterval(interval);
-        controller.close();
+      timeout = setTimeout(() => {
+        cleanup();
+        try {
+          controller.close();
+        } catch {
+          // The client may have already disconnected; the stream is done.
+        }
       }, 60_000);
+    },
+    cancel() {
+      cleanup();
     },
   });
 
@@ -304,15 +336,13 @@ function messagesNeedRuntimeData(body: JsonRpcMessage | JsonRpcMessage[]) {
 const readOnlyToolNames = new Set<McpToolName>([
   "prepare_page_edit",
   "get_page",
-  "get_rendered_page",
   "list_page_versions",
   "validate_page_source",
   "wait_for_review",
   "list_comments",
   "list_review_events",
   "search_workspace",
-  "search_pages",
-  "list_workspace_tree",
+  "list_workspace",
   "list_templates",
   "get_template",
   "render_template",
@@ -322,7 +352,7 @@ const readOnlyToolNames = new Set<McpToolName>([
 
 const destructiveToolNames = new Set<McpToolName>([
   "delete_thread",
-  "revoke_publication",
+  "publication_delete",
 ]);
 
 function titleFromToolName(name: McpToolName) {
@@ -334,11 +364,12 @@ function titleFromToolName(name: McpToolName) {
 
 function serializeToolsForClient() {
   return mcpToolSpecs.map((tool) => {
-    const readOnly = readOnlyToolNames.has(tool.name);
-    const destructive = destructiveToolNames.has(tool.name);
+    const name = tool.name;
+    const readOnly = readOnlyToolNames.has(name);
+    const destructive = destructiveToolNames.has(name);
     return {
       ...tool,
-      title: titleFromToolName(tool.name),
+      title: titleFromToolName(name),
       annotations: {
         readOnlyHint: readOnly,
         destructiveHint: destructive,
@@ -416,7 +447,7 @@ async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
         context,
       );
       return jsonRpcResult(id, {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: compactToolText(name, result) }],
         structuredContent: result,
       });
     }
@@ -428,6 +459,21 @@ async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
     }
     return jsonRpcError(id, -32603, "MCP request failed.");
   }
+}
+
+function compactToolText(name: string, result: unknown) {
+  if (!result || typeof result !== "object") return String(result ?? "");
+  const record = result as Record<string, unknown>;
+  if (typeof record.status === "string") return `${name}: ${record.status}`;
+  if (record.page_id) return `${name}: ${String(record.page_id)}`;
+  if (record.publication_id) return `${name}: ${String(record.publication_id)}`;
+  if (Array.isArray(record.results))
+    return `${name}: ${record.results.length} results`;
+  if (Array.isArray(record.threads))
+    return `${name}: ${record.threads.length} threads`;
+  if (Array.isArray(record.events))
+    return `${name}: ${record.events.length} events`;
+  return `${name}: ok`;
 }
 
 async function callTool(
@@ -449,7 +495,7 @@ async function callTool(
             : "markdown",
         source: asString(args.source, ""),
       });
-      await indexPage(created.page.id);
+      scheduleIndexPage(created.page.id);
       reviewEventService.emit({
         workspaceId: created.page.workspaceId,
         pageId: created.page.id,
@@ -546,34 +592,57 @@ async function callTool(
         "read",
         args.workspace_id,
       );
-      return {
+      const include = normalizeInclude(args.include);
+      const result: Record<string, unknown> = {
         page: page.page,
-        source: page.source,
         url: absoluteUrl(context, `/p/${page.page.slugId}`),
       };
-    }
-    case "get_rendered_page": {
-      const page = await getExistingPage(
-        asString(args.page_id),
-        context,
-        "read",
-        args.workspace_id,
-      );
-      const rendered =
-        page.page.sourceType === "html"
-          ? { html: "", headings: [], frontmatter: {} }
-          : await renderMarkdown(page.source);
-      return {
-        page_id: page.page.id,
-        content_hash: page.page.contentHash,
-        source_type: page.page.sourceType,
-        html: rendered.html,
-        render_mode:
-          page.page.sourceType === "html" ? "sandboxed_html" : "html",
-        headings: rendered.headings,
-        frontmatter: rendered.frontmatter,
-        frontmatter_text: flattenFrontmatter(rendered.frontmatter),
-      };
+      if (include.has("source")) result.source = page.source;
+      if (include.has("rendered")) {
+        const rendered =
+          page.page.sourceType === "html"
+            ? { html: "", headings: [], frontmatter: {}, frontmatterText: "" }
+            : await renderCachedMarkdown({
+                pageId: page.page.id,
+                contentHash: page.page.contentHash,
+                source: page.source,
+              });
+        result.rendered = {
+          page_id: page.page.id,
+          content_hash: page.page.contentHash,
+          source_type: page.page.sourceType,
+          html: rendered.html,
+          render_mode:
+            page.page.sourceType === "html" ? "sandboxed_html" : "html",
+          headings: rendered.headings,
+          frontmatter: rendered.frontmatter,
+          frontmatter_text: flattenFrontmatter(rendered.frontmatter),
+        };
+      }
+      if (include.has("versions")) {
+        const versions = pageService.listVersions(page.page.id);
+        result.versions = versions.slice(0, 100);
+        result.versions_truncated = versions.length > 100;
+      }
+      if (include.has("comments")) {
+        const threads = await listPageComments(
+          page.page.id,
+          "all",
+          context,
+          page.page.workspaceId,
+        );
+        result.threads = threads.slice(0, 100);
+        result.threads_truncated = threads.length > 100;
+      }
+      if (include.has("publication")) {
+        assertPagePermission(context, page.page, "admin");
+        result.publication = serializePublication({
+          type: "page",
+          page: page.page,
+          slugId: page.page.slugId,
+        });
+      }
+      return result;
     }
     case "list_page_versions": {
       const page = await getExistingPage(
@@ -746,7 +815,7 @@ async function callTool(
         actorUserId: context.actor.user?.id ?? null,
         payload: { thread_id: created.thread.id, source: "mcp" },
       });
-      await indexCommentThread(created.thread.id);
+      scheduleIndexCommentThread(created.thread.id);
       return {
         ...created,
         page: {
@@ -758,104 +827,75 @@ async function callTool(
         },
       };
     }
-    case "reply_to_thread": {
+    case "update_thread": {
       const { thread, page } = await getThreadPage(
         asString(args.thread_id),
         context,
         "comment",
         args.workspace_id,
       );
-      const reply = commentService.reply({
-        threadId: asString(args.thread_id),
-        body: asString(args.body),
-        authorType: "user",
-        agent: null,
-      });
-      reviewEventService.emit({
-        workspaceId: page.page.workspaceId,
-        pageId: page.page.id,
-        type: "comment.replied",
-        actorUserId: null,
-        payload: {
-          thread_id: thread.thread.id,
-          reply_id: reply.id,
-          source: "mcp",
-        },
-      });
-      await indexCommentThread(thread.thread.id);
-      return { reply, thread: commentService.getThread(thread.thread.id) };
-    }
-    case "resolve_thread": {
-      const { thread, page } = await getThreadPage(
-        asString(args.thread_id),
-        context,
-        "comment",
-        args.workspace_id,
-      );
-      const resolved = commentService.resolve(thread.thread.id);
-      reviewEventService.emit({
-        workspaceId: page.page.workspaceId,
-        pageId: page.page.id,
-        type: "comment.resolved",
-        actorUserId: null,
-        payload: { thread_id: resolved.id, source: "mcp" },
-      });
-      await indexCommentThread(thread.thread.id);
-      return { thread: resolved };
-    }
-    case "unresolve_thread": {
-      const { thread, page } = await getThreadPage(
-        asString(args.thread_id),
-        context,
-        "comment",
-        args.workspace_id,
-      );
-      const unresolved = commentService.unresolve(thread.thread.id);
-      reviewEventService.emit({
-        workspaceId: page.page.workspaceId,
-        pageId: page.page.id,
-        type: "comment.unresolved",
-        actorUserId: null,
-        payload: { thread_id: unresolved.id, source: "mcp" },
-      });
-      await indexCommentThread(thread.thread.id);
-      return { thread: unresolved };
-    }
-    case "complete_review_thread": {
-      const { thread, page } = await getThreadPage(
-        asString(args.thread_id),
-        context,
-        "comment",
-        args.workspace_id,
-      );
-      const reply = commentService.reply(agentReplyInput(args));
-      reviewEventService.emit({
-        workspaceId: page.page.workspaceId,
-        pageId: page.page.id,
-        type: "comment.replied",
-        actorUserId: null,
-        payload: {
-          thread_id: thread.thread.id,
-          reply_id: reply.id,
-          source: "mcp",
-        },
-      });
-      let resolved = null;
-      if (Boolean(args.resolve)) {
-        resolved = commentService.resolve(thread.thread.id);
+      if (
+        (args.status === "resolved" && args.resolve === false) ||
+        (args.status === "open" && args.resolve === true)
+      ) {
+        throw new AppError(
+          "VALIDATION_ERROR",
+          "status and resolve cannot request opposite thread states.",
+          400,
+        );
+      }
+      let reply = null;
+      if (asString(args.body, "").trim()) {
+        reply =
+          args.agent_name || args.agent_model || args.agent_session_id
+            ? commentService.reply(agentReplyInput(args))
+            : commentService.reply({
+                threadId: thread.thread.id,
+                body: asString(args.body),
+                authorType: "user",
+                agent: null,
+              });
+        reviewEventService.emit({
+          workspaceId: page.page.workspaceId,
+          pageId: page.page.id,
+          type: "comment.replied",
+          actorUserId: context.actor.user?.id ?? null,
+          payload: {
+            thread_id: thread.thread.id,
+            reply_id: reply.id,
+            source: "mcp",
+          },
+        });
+      }
+      let updated =
+        commentService.getThread(thread.thread.id)?.thread ?? thread.thread;
+      const shouldResolve = args.resolve === true || args.status === "resolved";
+      const shouldOpen = args.status === "open" || args.resolve === false;
+      if (shouldResolve && updated.status !== "resolved") {
+        updated = commentService.resolve(thread.thread.id);
         reviewEventService.emit({
           workspaceId: page.page.workspaceId,
           pageId: page.page.id,
           type: "comment.resolved",
-          actorUserId: null,
-          payload: { thread_id: resolved.id, source: "mcp" },
+          actorUserId: context.actor.user?.id ?? null,
+          payload: { thread_id: updated.id, source: "mcp" },
+        });
+      } else if (shouldOpen && updated.status !== "open") {
+        updated = commentService.unresolve(thread.thread.id);
+        reviewEventService.emit({
+          workspaceId: page.page.workspaceId,
+          pageId: page.page.id,
+          type: "comment.unresolved",
+          actorUserId: context.actor.user?.id ?? null,
+          payload: { thread_id: updated.id, source: "mcp" },
         });
       }
-      await indexCommentThread(thread.thread.id);
+      scheduleIndexCommentThread(thread.thread.id);
+      const enriched = commentService.getThread(thread.thread.id);
       return {
         reply,
-        resolved,
-        thread: commentService.getThread(thread.thread.id),
+        thread: enriched?.thread ?? updated,
+        replies: enriched?.replies ?? [],
       };
     }
     case "update_comment_anchor": {
@@ -875,7 +915,7 @@ async function callTool(
           confidence: "fuzzy",
         }),
       });
-      await indexCommentThread(thread.thread.id);
+      scheduleIndexCommentThread(thread.thread.id);
       return {
         anchor: updated,
         thread: commentService.getThread(thread.thread.id),
@@ -912,24 +952,92 @@ async function callTool(
         }),
       };
     }
-    case "publish_page": {
+    case "publication_apply": {
+      const resourceType = args.resource_type === "folder" ? "folder" : "page";
+      const publicationId = asString(args.publication_id, "");
+      const requestedPermission =
+        args.permission === "edit" ||
+        args.permission === "comment" ||
+        args.permission === "view"
+          ? args.permission
+          : undefined;
+      const permission = requestedPermission ?? "view";
+      const password =
+        args.clear_password === true
+          ? null
+          : args.password === undefined
+            ? undefined
+            : args.password
+              ? String(args.password)
+              : null;
+      if (password !== undefined) assertPublicationPasswordPolicy(password);
+      if (publicationId) {
+        const publication = await assertPublicationPermission(
+          publicationId,
+          context,
+          args.workspace_id,
+        );
+        const updated = await publicationService.update(publication.id, {
+          permission: requestedPermission,
+          expiresAt:
+            args.clear_expires_at === true
+              ? null
+              : args.expires_at === undefined
+                ? undefined
+                : args.expires_at
+                  ? String(args.expires_at)
+                  : null,
+          password,
+          indexingEnabled:
+            args.indexing_enabled === undefined
+              ? undefined
+              : Boolean(args.indexing_enabled),
+        });
+        reviewEventService.emit({
+          workspaceId: updated.workspaceId,
+          pageId: updated.resourceType === "page" ? updated.resourceId : null,
+          type: "publication.updated",
+          actorUserId: context.actor.user?.id ?? null,
+          payload: { publication_id: updated.id, source: "mcp" },
+        });
+        return { publication_id: updated.id, publication: updated };
+      }
+      if (resourceType === "folder") {
+        const folder = await getExistingFolder(
+          asString(args.resource_id),
+          context,
+          "admin",
+          args.workspace_id,
+        );
+        const publication = await publicationService.upsert({
+          workspaceId: folder.workspaceId,
+          resourceType: "folder",
+          resourceId: folder.id,
+          permission,
+          expiresAt:
+            args.expires_at === undefined
+              ? undefined
+              : args.expires_at
+                ? String(args.expires_at)
+                : null,
+          password,
+          indexingEnabled:
+            args.indexing_enabled === undefined
+              ? undefined
+              : Boolean(args.indexing_enabled),
+        });
+        return {
+          publication_id: publication.id,
+          publication,
+          url: absoluteUrl(context, `/f/${folder.slugId}`),
+        };
+      }
       const page = await getExistingPage(
-        asString(args.page_id),
+        asString(args.resource_id),
         context,
         "admin",
         args.workspace_id,
       );
-      const permission =
-        args.permission === "edit" || args.permission === "comment"
-          ? args.permission
-          : "view";
-      const password =
-        args.password === undefined
-          ? undefined
-          : args.password
-            ? String(args.password)
-            : null;
-      if (password !== undefined) assertPublicationPasswordPolicy(password);
       const publication = await publicationService.upsert({
         workspaceId: page.page.workspaceId,
         resourceType: "page",
@@ -947,70 +1055,13 @@ async function callTool(
             ? undefined
             : Boolean(args.indexing_enabled),
       });
-      reviewEventService.emit({
-        workspaceId: page.page.workspaceId,
-        pageId: page.page.id,
-        type: "publication.updated",
-        actorUserId: null,
-        payload: { publication_id: publication.id, permission, source: "mcp" },
-      });
       return {
         publication_id: publication.id,
         publication,
         url: absoluteUrl(context, `/p/${page.page.slugId}`),
       };
     }
-    case "publish_folder": {
-      const folder = await getExistingFolder(
-        asString(args.folder_id),
-        context,
-        "admin",
-        args.workspace_id,
-      );
-      const permission =
-        args.permission === "edit" ||
-        args.permission === "comment" ||
-        args.permission === "view"
-          ? args.permission
-          : "view";
-      const password =
-        args.password === undefined
-          ? undefined
-          : args.password
-            ? String(args.password)
-            : null;
-      if (password !== undefined) assertPublicationPasswordPolicy(password);
-      const updated = await publicationService.upsert({
-        workspaceId: folder.workspaceId,
-        resourceType: "folder",
-        resourceId: folder.id,
-        permission,
-        expiresAt:
-          args.expires_at === undefined
-            ? undefined
-            : args.expires_at
-              ? String(args.expires_at)
-              : null,
-        password,
-        indexingEnabled:
-          args.indexing_enabled === undefined
-            ? undefined
-            : Boolean(args.indexing_enabled),
-      });
-      reviewEventService.emit({
-        workspaceId: updated.workspaceId,
-        pageId: null,
-        type: "publication.updated",
-        actorUserId: null,
-        payload: { publication_id: updated.id, source: "mcp" },
-      });
-      return {
-        publication_id: updated.id,
-        publication: updated,
-        url: absoluteUrl(context, `/f/${folder.slugId}`),
-      };
-    }
-    case "revoke_publication": {
+    case "publication_delete": {
       const publication = await assertPublicationPermission(
         asString(args.publication_id),
         context,
@@ -1021,85 +1072,73 @@ async function callTool(
         workspaceId: revoked.workspaceId,
         pageId: revoked.resourceType === "page" ? revoked.resourceId : null,
         type: "publication.revoked",
-        actorUserId: null,
+        actorUserId: context.actor.user?.id ?? null,
         payload: { publication_id: revoked.id, source: "mcp" },
       });
       return { publication: revoked };
     }
-    case "update_publication": {
-      const publication = await assertPublicationPermission(
-        asString(args.publication_id),
-        context,
-        args.workspace_id,
-      );
-      const password =
-        args.clear_password === true
-          ? null
-          : args.password === undefined
-            ? undefined
-            : args.password
-              ? String(args.password)
-              : null;
-      if (password !== undefined) assertPublicationPasswordPolicy(password);
-      const updated = await publicationService.update(publication.id, {
-        permission:
-          args.permission === "view" ||
-          args.permission === "comment" ||
-          args.permission === "edit"
-            ? args.permission
-            : undefined,
-        expiresAt:
-          args.clear_expires_at === true
-            ? null
-            : args.expires_at === undefined
-              ? undefined
-              : args.expires_at
-                ? String(args.expires_at)
-                : null,
-        password,
-        indexingEnabled:
-          args.indexing_enabled === undefined
-            ? undefined
-            : Boolean(args.indexing_enabled),
-      });
-      reviewEventService.emit({
-        workspaceId: updated.workspaceId,
-        pageId: updated.resourceType === "page" ? updated.resourceId : null,
-        type: "publication.updated",
-        actorUserId: null,
-        payload: { publication_id: updated.id, source: "mcp" },
-      });
-      return { publication: updated };
-    }
-    case "search_workspace":
-    case "search_pages": {
+    case "search_workspace": {
       const workspaceId = requiredWorkspaceId(args.workspace_id);
       assertWorkspacePermission(context, workspaceId, "read");
-      const type =
-        name === "search_pages" ? "page" : normalizeSearchType(args.type);
       return {
         results: (
           await searchIndexedResources(workspaceId, asString(args.query), {
             limit: clampNumber(args.limit, 10, 1, 50),
-            type,
+            type: normalizeSearchType(args.type),
           })
         ).filter((result) => canReadSearchResult(context, workspaceId, result)),
       };
     }
-    case "list_workspace_tree": {
+    case "list_workspace": {
       const workspaceId = requiredWorkspaceId(args.workspace_id);
       assertWorkspacePermission(context, workspaceId, "read");
-      const pages = pageService
-        .listPages(workspaceId)
-        .filter((page) => canReadPage(context, page))
-        .map((page) => ({
+      const nav = buildWorkspaceNavigation(
+        {
+          ...context.actor,
+          sessionId: null,
+          devFallback: false,
+          authMode: "mcp_session",
+        },
+        workspaceId,
+      );
+      const depth =
+        args.depth === undefined || args.depth === null
+          ? null
+          : clampNumber(args.depth, 0, 0, 20);
+      const folderId = asString(args.folder_id, "");
+      const updatedAfter = asString(args.updated_after, "");
+      const filtered = filterWorkspaceNavigation(nav, {
+        folderId,
+        depth,
+        updatedAfter,
+      });
+      if (!filtered) {
+        throw new AppError("FOLDER_NOT_FOUND", "Folder was not found.", 404);
+      }
+      const folders = filtered.folders;
+      const pages = filtered.pages;
+      return {
+        workspace_id: workspaceId,
+        tree_version: nav.treeVersion,
+        page_count: nav.visiblePages.length,
+        folder_count: nav.visibleFolders.length,
+        counts:
+          args.include_counts === true
+            ? {
+                pages: nav.visiblePages.length,
+                folders: nav.visibleFolders.length,
+              }
+            : undefined,
+        folders,
+        pages: pages.map((page) => ({
           id: page.id,
           folderPath: page.folderPath,
           title: page.title,
           slugId: page.slugId,
           url: absoluteUrl(context, `/p/${page.slugId}`),
-        }));
-      return workspaceService.tree({ workspaceId, pages });
+        })),
+        partial: Boolean(folderId || depth || updatedAfter),
+      };
     }
     case "move_page": {
       const page = await getExistingPage(
@@ -1129,7 +1168,7 @@ async function callTool(
         title: args.title === undefined ? undefined : String(args.title),
         folderPath,
       });
-      await indexPage(updated.id);
+      scheduleIndexPage(updated.id);
       reviewEventService.emit({
         workspaceId: updated.workspaceId,
         pageId: updated.id,
@@ -1389,7 +1428,7 @@ async function callTool(
         sourceType: rendered.template.sourceType === "mdx" ? "mdx" : "markdown",
         source: rendered.source,
       });
-      await indexPage(created.page.id);
+      scheduleIndexPage(created.page.id);
       auditService.record({
         workspaceId: created.page.workspaceId,
         actorUserId: context.actor.user?.id ?? null,
@@ -1571,7 +1610,7 @@ async function updatePageSource(input: {
     checkpoint: input.checkpoint,
     checkpointLabel: input.checkpointLabel,
   });
-  await indexPage(updated.page.id);
+  scheduleIndexPage(updated.page.id);
   reviewEventService.emit({
     workspaceId: updated.page.workspaceId,
     pageId: updated.page.id,
@@ -1825,7 +1864,9 @@ async function getExistingPage(
   required: PermissionLevel = "read",
   workspaceValue?: unknown,
 ) {
-  const page = await pageService.getPage(pageId);
+  const page =
+    (await pageService.getPage(pageId)) ??
+    (await pageService.getPageBySlugId(pageId));
   if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
   if (arguments.length >= 4) {
     assertMcpWorkspaceMatches(workspaceValue, page.page.workspaceId, "page");
@@ -2032,7 +2073,7 @@ function getPrompt(name: string, args: Record<string, unknown>) {
       "If you created the page, publish it with comment access, tell the user the URL, then wait up to 10 minutes with wait_for_review timeout_ms=600000.",
       "When comments arrive, act on them immediately instead of asking the user to paste them back into chat.",
       "When changing source, call prepare_page_edit before patch_page or update_page.",
-      "Use complete_review_thread with agent metadata for each resolved thread.",
+      "Use update_thread with agent metadata for each resolved thread.",
     ].join("\n"),
     vegastack_edit_page_safely: [
       `Edit VegaStack Pages page ${pageId}: ${change}`,
@@ -2532,6 +2573,29 @@ function normalizeSearchType(value: unknown): SearchResourceType | "all" {
     : value === "comment"
       ? "comment_thread"
       : "all";
+}
+
+function normalizeInclude(value: unknown) {
+  const allowed = new Set([
+    "metadata",
+    "source",
+    "rendered",
+    "versions",
+    "comments",
+    "publication",
+  ]);
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : ["source"];
+  const include = new Set(
+    values
+      .map((item) => String(item).trim())
+      .filter((item) => allowed.has(item)),
+  );
+  include.add("metadata");
+  return include;
 }
 
 function requiredWorkspaceId(value: unknown) {

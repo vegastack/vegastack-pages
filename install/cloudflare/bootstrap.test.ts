@@ -24,6 +24,12 @@ describe("Cloudflare bootstrap hygiene", () => {
     expect(bootstrap).toContain("Cron trigger for GitHub backup");
   });
 
+  it("generates persistent Workers observability logs", () => {
+    expect(bootstrap).toContain("observability");
+    expect(bootstrap).toContain("invocation_logs");
+    expect(bootstrap).toContain("persist: true");
+  });
+
   it("keeps AWS SES sender config out of wrangler vars", () => {
     expect(bootstrap).toContain("if (!sesEmailEnabled)");
     expect(bootstrap).toContain('putSecret("VPG_EMAIL_FROM"');

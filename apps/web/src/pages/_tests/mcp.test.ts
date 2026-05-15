@@ -595,12 +595,25 @@ describe("MCP route", () => {
       "Original local MCP coverage body",
     );
 
-    const renderedPage = await tool("get_rendered_page", {
+    const fetchedBySlug = await tool("get_page", {
+      workspace_id: workspaceId,
+      page_id: String(created.slug_id),
+      include: ["metadata", "source"],
+    });
+    const fetchedBySlugPage = fetchedBySlug.page as Record<string, unknown>;
+    expect(fetchedBySlugPage.id).toBe(pageId);
+    expect(String(fetchedBySlug.source)).toContain(
+      "Original local MCP coverage body",
+    );
+
+    const renderedPage = await tool("get_page", {
       workspace_id: workspaceId,
       page_id: pageId,
+      include: ["rendered"],
     });
-    expect(String(renderedPage.html)).toContain("MCP All Tools");
-    expect(renderedPage.render_mode).toBe("html");
+    const renderedPayload = renderedPage.rendered as Record<string, unknown>;
+    expect(String(renderedPayload.html)).toContain("MCP All Tools");
+    expect(renderedPayload.render_mode).toBe("html");
 
     let prepared = await tool("prepare_page_edit", {
       workspace_id: workspaceId,
@@ -695,7 +708,7 @@ describe("MCP route", () => {
     });
     expect(JSON.stringify(listedComments)).toContain(threadId);
 
-    const replied = await tool("reply_to_thread", {
+    const replied = await tool("update_thread", {
       workspace_id: workspaceId,
       thread_id: threadId,
       body: "Acknowledged by local MCP test.",
@@ -703,7 +716,7 @@ describe("MCP route", () => {
     const replyRecord = replied.reply as Record<string, unknown>;
     expect(replyRecord.authorType).toBe("user");
 
-    const agentReply = await tool("complete_review_thread", {
+    const agentReply = await tool("update_thread", {
       workspace_id: workspaceId,
       thread_id: threadId,
       body: "Resolved by agent on its own.",
@@ -715,23 +728,26 @@ describe("MCP route", () => {
     const agentReplyRecord = agentReply.reply as Record<string, unknown>;
     expect(agentReplyRecord.agentName).toBe("Vitest Agent");
 
-    const resolved = await tool("resolve_thread", {
+    const resolved = await tool("update_thread", {
       workspace_id: workspaceId,
       thread_id: threadId,
+      status: "resolved",
     });
     const resolvedThread = resolved.thread as Record<string, unknown>;
     expect(resolvedThread.status).toBe("resolved");
 
-    const unresolved = await tool("unresolve_thread", {
+    const unresolved = await tool("update_thread", {
       workspace_id: workspaceId,
       thread_id: threadId,
+      status: "open",
     });
     const unresolvedThread = unresolved.thread as Record<string, unknown>;
     expect(unresolvedThread.status).toBe("open");
 
-    const reresolved = await tool("resolve_thread", {
+    const reresolved = await tool("update_thread", {
       workspace_id: workspaceId,
       thread_id: threadId,
+      status: "resolved",
     });
     const reresolvedThread = reresolved.thread as Record<string, unknown>;
     expect(reresolvedThread.status).toBe("resolved");
@@ -818,7 +834,7 @@ describe("MCP route", () => {
         contentHash: String(patched.content_hash),
       },
     });
-    const completed = await tool("complete_review_thread", {
+    const completed = await tool("update_thread", {
       workspace_id: workspaceId,
       thread_id: secondThread.thread.id,
       body: "Handled in local MCP coverage.",
@@ -827,7 +843,7 @@ describe("MCP route", () => {
       agent_model: "local",
       agent_session_id: `agt_${suffix}`,
     });
-    const completedThread = completed.resolved as Record<string, unknown>;
+    const completedThread = completed.thread as Record<string, unknown>;
     expect(completedThread.status).toBe("resolved");
 
     const waited = await tool("wait_for_review", {
@@ -845,9 +861,10 @@ describe("MCP route", () => {
     });
     expect(Array.isArray(events.events)).toBe(true);
 
-    const publication = await tool("publish_page", {
+    const publication = await tool("publication_apply", {
       workspace_id: workspaceId,
-      page_id: pageId,
+      resource_type: "page",
+      resource_id: pageId,
       permission: "comment",
       password: "strong-passphrase",
       expires_at: "2099-01-01T00:00:00.000Z",
@@ -856,9 +873,10 @@ describe("MCP route", () => {
     expect(String(publication.url)).toContain("/p/");
     const publicationId = String(publication.publication_id);
 
-    const preservedPublication = await tool("publish_page", {
+    const preservedPublication = await tool("publication_apply", {
       workspace_id: workspaceId,
-      page_id: pageId,
+      resource_type: "page",
+      resource_id: pageId,
       permission: "view",
     });
     const preservedPublicationRecord =
@@ -873,9 +891,10 @@ describe("MCP route", () => {
       .listFolders(workspaceId)
       .find((folder) => folder.path === "agents");
     expect(agentsFolder).toBeDefined();
-    const folderPublication = await tool("publish_folder", {
+    const folderPublication = await tool("publication_apply", {
       workspace_id: workspaceId,
-      folder_id: agentsFolder!.id,
+      resource_type: "folder",
+      resource_id: agentsFolder!.id,
       permission: "view",
       indexing_enabled: false,
     });
@@ -885,8 +904,10 @@ describe("MCP route", () => {
     >;
     expect(folderPublicationRecord.permission).toBe("view");
 
-    const updatedPublication = await tool("update_publication", {
+    const updatedPublication = await tool("publication_apply", {
       workspace_id: workspaceId,
+      resource_type: "page",
+      resource_id: pageId,
       publication_id: publicationId,
       permission: "view",
       clear_password: true,
@@ -899,7 +920,7 @@ describe("MCP route", () => {
     expect(updatedPublicationRecord.permission).toBe("view");
     expect(updatedPublicationRecord.passwordHash).toBeNull();
 
-    const revokedPublication = await tool("revoke_publication", {
+    const revokedPublication = await tool("publication_delete", {
       workspace_id: workspaceId,
       publication_id: publicationId,
     });
@@ -909,9 +930,10 @@ describe("MCP route", () => {
     >;
     expect(revokedPublicationRecord.revokedAt).toBeTruthy();
 
-    const search = await tool("search_pages", {
+    const search = await tool("search_workspace", {
       workspace_id: workspaceId,
       query: `MCP All Tools Moved ${suffix}`,
+      type: "page",
       limit: 10,
     });
     expect(JSON.stringify(search.results)).toContain(pageId);
@@ -924,7 +946,7 @@ describe("MCP route", () => {
     });
     expect(JSON.stringify(workspaceSearch.results)).toContain(pageId);
 
-    const tree = await tool("list_workspace_tree", {
+    const tree = await tool("list_workspace", {
       workspace_id: workspaceId,
     });
     expect(JSON.stringify(tree.pages)).toContain(pageId);

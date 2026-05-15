@@ -4,7 +4,7 @@ import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   auditService,
   ensureSeedData,
-  indexPage,
+  scheduleIndexPage,
   pageService,
   permissionService,
   reviewEventService,
@@ -56,7 +56,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
           : "markdown",
       source: String(body.source ?? ""),
     });
-    await indexPage(created.page.id);
+    scheduleIndexPage(created.page.id);
     auditService.record({
       workspaceId: created.page.workspaceId,
       actorUserId: actor.user?.id ?? null,

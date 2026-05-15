@@ -4,7 +4,7 @@ import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   commentService,
   ensureSeedData,
-  indexCommentThread,
+  scheduleIndexCommentThread,
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
@@ -38,7 +38,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       actorUserId: access.actor.user?.id ?? null,
       payload: { thread_id: resolved.id },
     });
-    await indexCommentThread(resolved.id);
+    scheduleIndexCommentThread(resolved.id);
     return Response.json({ thread: resolved });
   } catch (error) {
     return jsonAppError(error, "Resolve failed.");

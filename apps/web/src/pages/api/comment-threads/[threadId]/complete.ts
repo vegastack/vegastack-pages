@@ -4,7 +4,7 @@ import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   commentService,
   ensureSeedData,
-  indexCommentThread,
+  scheduleIndexCommentThread,
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
@@ -71,7 +71,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         payload: { thread_id: resolved.id },
       });
     }
-    await indexCommentThread(thread.thread.id);
+    scheduleIndexCommentThread(thread.thread.id);
     return Response.json({
       reply,
       resolved,

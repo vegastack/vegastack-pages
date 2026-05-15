@@ -7,7 +7,7 @@ import {
 } from "../../../../lib/request-body";
 import {
   ensureSeedData,
-  indexPage,
+  scheduleIndexPage,
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
@@ -127,7 +127,7 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
         ? String(body.checkpoint_label)
         : null,
     });
-    await indexPage(updated.page.id);
+    scheduleIndexPage(updated.page.id);
     reviewEventService.emit({
       workspaceId: updated.page.workspaceId,
       pageId: updated.page.id,

@@ -23,6 +23,7 @@ import {
   canReadFolderOrVisibleDescendants,
   listVisibleFoldersForActor,
 } from "../../lib/workspace-visibility";
+import { buildWorkspaceNavigation } from "../../lib/workspace-navigation";
 import {
   commentService,
   ensureSeedData,
@@ -31,6 +32,7 @@ import {
   workspaceService,
 } from "../../lib/runtime";
 import AppLayout from "../../layouts/AppLayout.astro";
+import "../../styles/docs.css";
 
 export const prerender = false;
 
@@ -263,6 +265,9 @@ const sidebarFoldersForTree = visibleFolders.map((node) => ({
   path: node.path,
   parentFolderId: node.parentFolderId,
 }));
+const sidebarTreeVersion = isPublicPublication
+  ? null
+  : buildWorkspaceNavigation(actor, sidebarWorkspace.id).treeVersion;
 const canWrite =
   !isPublicPublication &&
   hasPermission(resolveFolderActorPermission({ actor, folder }), "write");
@@ -310,6 +315,7 @@ const publicIndexable = Boolean(
             canWrite={canWrite}
             currentFolderId={folder.id}
             initialFavoriteIds={initialFavoriteIds}
+            treeVersion={sidebarTreeVersion}
           />
         )}
         {isPublicPublication && publicRootFolder && (
@@ -338,7 +344,6 @@ const publicIndexable = Boolean(
             canFavorite={false}
             canManageAccess={canManageAccess}
             showNavigationToggle={!isPublicPublication}
-            renderedHtml=""
             updatedAt={folder.updatedAt}
           />
 
@@ -360,10 +365,7 @@ const publicIndexable = Boolean(
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette
-            client:only="react"
-            workspaceId={sidebarWorkspace.id}
-          />
+          <CommandPalette client:load workspaceId={sidebarWorkspace.id} />
         )}
 
         {!isPublicPublication && (

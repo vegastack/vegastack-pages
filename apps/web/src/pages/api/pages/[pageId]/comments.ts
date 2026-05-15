@@ -14,7 +14,7 @@ import {
   checkRateLimit,
   commentService,
   ensureSeedData,
-  indexCommentThread,
+  scheduleIndexCommentThread,
   pageService,
   publicationService,
   reviewEventService,
@@ -162,7 +162,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         thread_id: created.thread.id,
       },
     });
-    await indexCommentThread(created.thread.id);
+    scheduleIndexCommentThread(created.thread.id);
     return Response.json(enrichThread(created));
   } catch (error) {
     return jsonAppError(error, "Comment creation failed.");

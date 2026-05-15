@@ -1,5 +1,6 @@
 ---
 import { ThemeMenu } from "../components/ThemeMenu";
+import "../styles/home.css";
 import AppLayout from "../layouts/AppLayout.astro";
 import VegaStackLogo from "../assets/vegastack-logo.svg";
 import GithubMark from "../components/GithubMark.astro";
@@ -514,8 +515,7 @@ $ vpg publish-page pg_8f31c <span class="home-cli-flag">--permission</span> comm
 
 <span class="home-cli-comment"># Wait for a reviewer. Resume the agent when conditions match.</span>
 mcp.call(<span class="home-cli-str">"wait_for_review"</span>, &lcub; workspace_id: <span class="home-cli-str">"wks_docs"</span>, page_id: <span class="home-cli-str">"pg_8f31c"</span>, until: <span class="home-cli-str">"first_response"</span>, timeout_ms: 600000 &rcub;)
-mcp.call(<span class="home-cli-str">"reply_to_thread"</span>, &lcub; thread_id: <span class="home-cli-str">"thr_8f31c"</span>, body: <span class="home-cli-str">"Patched in v3"</span> &rcub;)
-mcp.call(<span class="home-cli-str">"resolve_thread"</span>, &lcub; thread_id: <span class="home-cli-str">"thr_8f31c"</span> &rcub;)
+mcp.call(<span class="home-cli-str">"update_thread"</span>, &lcub; thread_id: <span class="home-cli-str">"thr_8f31c"</span>, body: <span class="home-cli-str">"Patched in v3"</span>, resolve: true &rcub;)
 </code></pre>
         <a class="home-cli-more" href="/mcp"
           >Full MCP &amp; CLI reference <span aria-hidden="true">&rarr;</span

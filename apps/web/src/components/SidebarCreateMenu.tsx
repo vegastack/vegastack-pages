@@ -1,5 +1,6 @@
-import { FilePlus2, FilePlus, FolderPlus, Plus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { FilePlus2, FilePlus, FolderPlus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { TemplateProperty } from "@vegastack/pages-core";
 import { Button } from "./ui/button";
 import {
@@ -10,12 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
 import {
   Select,
@@ -38,23 +33,22 @@ type TemplateSummary = {
   properties: TemplateProperty[];
 };
 
-type SidebarCreateMenuProps = {
-  workspaceId: string;
-  currentFolderId?: string | null;
-  currentFolderPath?: string;
-  triggerClassName?: string;
-  triggerLabel?: string;
+type CreateContext = {
+  folderId: string | null;
+  folderPath: string;
+  canCreateSubfolder: boolean;
+  x: number;
+  y: number;
 };
 
-export function SidebarCreateMenu({
-  workspaceId,
-  currentFolderId,
-  currentFolderPath = "",
-  triggerClassName,
-  triggerLabel,
-}: SidebarCreateMenuProps) {
-  const [open, setOpen] = useState(false);
+type SidebarCreateMenuProps = {
+  workspaceId: string;
+};
+
+export function SidebarCreateMenu({ workspaceId }: SidebarCreateMenuProps) {
+  const [menu, setMenu] = useState<CreateContext | null>(null);
   const [dialogKind, setDialogKind] = useState<CreateKind | null>(null);
+  const [context, setContext] = useState<CreateContext | null>(null);
   const [name, setName] = useState("");
   const [sourceType, setSourceType] = useState<SourceType>("markdown");
   const [error, setError] = useState("");
@@ -70,22 +64,58 @@ export function SidebarCreateMenu({
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    function onClick(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const trigger = target.closest("[data-vpg-create-trigger]");
+      if (!trigger) {
+        if (!target.closest("[data-vpg-create-menu]")) setMenu(null);
+        return;
+      }
+      event.preventDefault();
+      if (!(trigger instanceof HTMLElement)) return;
+      const rect = trigger.getBoundingClientRect();
+      setMenu({
+        folderId: trigger.dataset.folderId || null,
+        folderPath: trigger.dataset.folderPath ?? "",
+        canCreateSubfolder: trigger.dataset.canCreateSubfolder === "true",
+        x: Math.min(rect.left, window.innerWidth - 220),
+        y: rect.bottom + 6,
+      });
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenu(null);
+    }
+    function onScroll() {
+      setMenu(null);
+    }
+    window.addEventListener("click", onClick);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("click", onClick);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!dialogKind) return;
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [dialogKind]);
 
   function openDialog(kind: CreateKind) {
+    if (!menu) return;
+    setContext(menu);
     setDialogKind(kind);
     setName("");
     setSourceType("markdown");
     setError("");
-    setOpen(false);
+    setMenu(null);
     setSelectedTemplateId(null);
     setPropertyValues({});
-    if (kind === "template" && !templatesLoaded) {
-      void loadTemplates();
-    }
+    if (kind === "template" && !templatesLoaded) void loadTemplates();
   }
 
   async function loadTemplates() {
@@ -96,11 +126,10 @@ export function SidebarCreateMenu({
       };
       if (response.ok && Array.isArray(payload.templates)) {
         setTemplates(payload.templates);
-        setTemplatesLoaded(true);
-      } else {
-        setTemplatesLoaded(true);
       }
     } catch {
+      // Empty template list is a valid degraded state.
+    } finally {
       setTemplatesLoaded(true);
     }
   }
@@ -129,14 +158,12 @@ export function SidebarCreateMenu({
     setSubmitting(true);
     setError("");
     try {
-      if (dialogKind === "page") {
-        await createPage(trimmedName);
-      } else if (dialogKind === "template") {
-        await createFromTemplate(trimmedName);
-      } else {
+      if (dialogKind === "page") await createPage(trimmedName);
+      else if (dialogKind === "template") await createFromTemplate(trimmedName);
+      else {
         await createFolder(
           trimmedName,
-          dialogKind === "subfolder" ? currentFolderId : null,
+          dialogKind === "subfolder" ? context?.folderId : null,
         );
       }
     } finally {
@@ -153,7 +180,7 @@ export function SidebarCreateMenu({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title,
-          folder_path: currentFolderPath,
+          folder_path: context?.folderPath ?? "",
           properties: propertyValues,
         }),
       },
@@ -175,7 +202,7 @@ export function SidebarCreateMenu({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         title,
-        folder_path: currentFolderPath,
+        folder_path: context?.folderPath ?? "",
         source_type: sourceType,
         source: initialSource(title, sourceType),
       }),
@@ -230,56 +257,63 @@ export function SidebarCreateMenu({
   const selectedTemplate = templates.find(
     (template) => template.id === selectedTemplateId,
   );
-  const templatesByCategory = templates.reduce<
-    Record<string, TemplateSummary[]>
-  >((acc, template) => {
-    const key = template.category || "general";
-    (acc[key] = acc[key] ?? []).push(template);
-    return acc;
-  }, {});
+  const templatesByCategory = useMemo(
+    () =>
+      templates.reduce<Record<string, TemplateSummary[]>>((acc, template) => {
+        const key = template.category || "general";
+        (acc[key] = acc[key] ?? []).push(template);
+        return acc;
+      }, {}),
+    [templates],
+  );
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            aria-label={
-              triggerLabel
-                ? currentFolderPath
-                  ? `Create in ${currentFolderPath}`
-                  : "Create at workspace root"
-                : "Create page or folder"
-            }
-            className={triggerClassName}
-            size={triggerLabel ? "sm" : "icon"}
-            type="button"
-            variant="ghost"
-          >
-            <Plus size={15} aria-hidden="true" />
-            {triggerLabel ? <span>{triggerLabel}</span> : null}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem onSelect={() => openDialog("page")}>
-            <FilePlus2 size={14} aria-hidden="true" />
-            <span>New page</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => openDialog("template")}>
-            <FilePlus size={14} aria-hidden="true" />
-            <span>New from template…</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => openDialog("folder")}>
-            <FolderPlus size={14} aria-hidden="true" />
-            <span>New folder</span>
-          </DropdownMenuItem>
-          {currentFolderId ? (
-            <DropdownMenuItem onSelect={() => openDialog("subfolder")}>
-              <FolderPlus size={14} aria-hidden="true" />
-              <span>New subfolder</span>
-            </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {menu && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="vpg-dropdown-content vpg-create-menu-popover"
+              data-vpg-create-menu
+              style={{ position: "fixed", left: menu.x, top: menu.y }}
+            >
+              <button
+                className="vpg-dropdown-item"
+                type="button"
+                onClick={() => openDialog("page")}
+              >
+                <FilePlus2 size={14} aria-hidden="true" />
+                <span>New page</span>
+              </button>
+              <button
+                className="vpg-dropdown-item"
+                type="button"
+                onClick={() => openDialog("template")}
+              >
+                <FilePlus size={14} aria-hidden="true" />
+                <span>New from template...</span>
+              </button>
+              <button
+                className="vpg-dropdown-item"
+                type="button"
+                onClick={() => openDialog("folder")}
+              >
+                <FolderPlus size={14} aria-hidden="true" />
+                <span>New folder</span>
+              </button>
+              {menu.canCreateSubfolder ? (
+                <button
+                  className="vpg-dropdown-item"
+                  type="button"
+                  onClick={() => openDialog("subfolder")}
+                >
+                  <FolderPlus size={14} aria-hidden="true" />
+                  <span>New subfolder</span>
+                </button>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
 
       <Dialog
         open={Boolean(dialogKind)}
@@ -292,12 +326,12 @@ export function SidebarCreateMenu({
             <DialogTitle>{dialogTitle}</DialogTitle>
             <DialogDescription>
               {dialogKind === "page"
-                ? currentFolderPath
-                  ? `Create in ${currentFolderPath}`
+                ? context?.folderPath
+                  ? `Create in ${context.folderPath}`
                   : "Create at workspace root"
                 : dialogKind === "template"
-                  ? currentFolderPath
-                    ? `Create in ${currentFolderPath} from a template`
+                  ? context?.folderPath
+                    ? `Create in ${context.folderPath} from a template`
                     : "Pick a template; the page is created at workspace root"
                   : dialogKind === "subfolder"
                     ? "Create under the current folder"
@@ -316,11 +350,11 @@ export function SidebarCreateMenu({
                 <label className="vpg-field">
                   <span>Template</span>
                   {!templatesLoaded ? (
-                    <p className="create-dialog-hint">Loading templates…</p>
+                    <p className="create-dialog-hint">Loading templates...</p>
                   ) : templates.length === 0 ? (
                     <p className="create-dialog-hint">
                       No templates in this workspace yet. Create one in Settings
-                      → Templates.
+                      &gt; Templates.
                     </p>
                   ) : (
                     <Select
@@ -563,7 +597,7 @@ function PropertyField({
             onValueChange={(next) => onChange(next)}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Choose…" />
+              <SelectValue placeholder="Choose..." />
             </SelectTrigger>
             <SelectContent>
               {(property.options ?? []).map((option) => (

@@ -8,7 +8,7 @@ import {
 import {
   auditService,
   ensureSeedData,
-  indexPage,
+  scheduleIndexPage,
   pageService,
   permissionService,
   reviewEventService,
@@ -65,7 +65,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       sourceType: rendered.template.sourceType === "mdx" ? "mdx" : "markdown",
       source: rendered.source,
     });
-    await indexPage(created.page.id);
+    scheduleIndexPage(created.page.id);
     auditService.record({
       workspaceId: created.page.workspaceId,
       actorUserId: actor.user?.id ?? null,

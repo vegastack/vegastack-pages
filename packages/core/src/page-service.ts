@@ -81,6 +81,10 @@ export class PageService {
   private readonly pages = new Map<string, PageRecord>();
   private readonly pagesByShortId = new Map<string, string>();
   private readonly versions = new Map<string, PageVersionRecord[]>();
+  private readonly sourceCache = new Map<
+    string,
+    { contentHash: string; body: string }
+  >();
 
   constructor(
     private readonly objectStore: ObjectStore,
@@ -136,6 +140,8 @@ export class PageService {
     this.pages.set(id, page);
     this.pagesByShortId.set(shortId, id);
     this.versions.set(id, [version]);
+    this.sourceCache.set(objectKeyCurrent, { contentHash, body: input.source });
+    this.sourceCache.set(versionKey, { contentHash, body: input.source });
     return { page, source: input.source };
   }
 
@@ -148,6 +154,10 @@ export class PageService {
   async getPage(pageId: string): Promise<PageWithSource | null> {
     const page = this.pages.get(pageId);
     if (!page) return null;
+    const cached = this.sourceCache.get(page.objectKeyCurrent);
+    if (cached?.contentHash === page.contentHash) {
+      return { page, source: cached.body };
+    }
     const source = await this.objectStore.get(page.objectKeyCurrent);
     if (!source) {
       throw new AppError(
@@ -156,6 +166,10 @@ export class PageService {
         404,
       );
     }
+    this.sourceCache.set(page.objectKeyCurrent, {
+      contentHash: page.contentHash,
+      body: source.body,
+    });
     return { page, source: source.body };
   }
 
@@ -224,6 +238,10 @@ export class PageService {
     await this.objectStore.put(existing.page.objectKeyCurrent, input.source, {
       contentType: sourceContentType(existing.page.sourceType),
     });
+    this.sourceCache.set(existing.page.objectKeyCurrent, {
+      contentHash,
+      body: input.source,
+    });
 
     const previousVersions = this.versions.get(input.pageId) ?? [];
     const latestCheckpoint = previousVersions.at(-1);
@@ -248,6 +266,7 @@ export class PageService {
       await this.objectStore.put(versionKey, input.source, {
         contentType: sourceContentType(existing.page.sourceType),
       });
+      this.sourceCache.set(versionKey, { contentHash, body: input.source });
       this.versions.set(input.pageId, [
         ...(this.versions.get(input.pageId) ?? []),
         {
@@ -297,6 +316,10 @@ export class PageService {
         404,
       );
     }
+    this.sourceCache.set(version.objectKey, {
+      contentHash: version.sourceHash,
+      body: source.body,
+    });
     return { version, source: source.body };
   }
 }

@@ -126,6 +126,7 @@ type CommentsPanelProps = {
   onActiveThreadChange?: (threadId: string | null) => void;
   onThreadStats?: (stats: ThreadStats) => void;
   railExpanded?: boolean;
+  desktopRail?: boolean;
   onRequestOpenDraft?: () => void;
   /**
    * Threads serialized into the page on the server so the margin cards paint
@@ -188,13 +189,14 @@ export function CommentsPanel({
   onActiveThreadChange,
   onThreadStats,
   railExpanded = true,
+  desktopRail = true,
   onRequestOpenDraft,
   initialThreads,
 }: CommentsPanelProps) {
   const [threads, setThreads] = useState<ThreadPayload[]>(
     () => initialThreads ?? [],
   );
-  const skipInitialFetchRef = useRef(initialThreads !== undefined);
+  const threadsLoadedRef = useRef(initialThreads !== undefined);
   const latestDraftKeyRef = useRef(0);
   const draftViewportRectRef = useRef<ViewportRect | null>(null);
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -214,6 +216,10 @@ export function CommentsPanel({
   const [body, setBody] = useState("");
   const [status, setStatus] = useState("");
   const [replyBodies, setReplyBodies] = useState<Record<string, string>>({});
+  const [creatingComment, setCreatingComment] = useState(false);
+  const [pendingReplyIds, setPendingReplyIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [openMenuThreadId, setOpenMenuThreadId] = useState<string | null>(null);
   const [guestName, setGuestName] = useState("");
 
@@ -303,18 +309,16 @@ export function CommentsPanel({
     if (!response.ok) return;
     const payload = (await response.json()) as { threads: ThreadPayload[] };
     setThreads(payload.threads);
+    threadsLoadedRef.current = true;
   }, [pageId, workspaceId]);
 
   useEffect(() => {
-    // Server-rendered the threads into the page already — don't re-fetch on
-    // mount. Subsequent invocations (after create/resolve/reply/delete) reload
-    // via loadThreads() directly and don't go through this effect.
-    if (skipInitialFetchRef.current) {
-      skipInitialFetchRef.current = false;
-      return;
-    }
+    // Keep collapsed rails cheap: SSR supplies counts, and full thread bodies
+    // load only when the rail is opened or a specific thread is requested.
+    if (threadsLoadedRef.current) return;
+    if (!railExpanded && !activeThreadId) return;
     void loadThreads();
-  }, [loadThreads]);
+  }, [activeThreadId, loadThreads, railExpanded]);
 
   useEffect(() => {
     function postCommentsToFrame(iframe: HTMLIFrameElement) {
@@ -503,6 +507,7 @@ export function CommentsPanel({
   ]);
 
   useEffect(() => {
+    if (!threadsLoadedRef.current && initialThreads === undefined) return;
     const stats = {
       open: openThreads.length,
       resolved: resolvedThreads.length,
@@ -512,7 +517,13 @@ export function CommentsPanel({
     window.dispatchEvent(
       new CustomEvent("vpg:comments-stats", { detail: stats }),
     );
-  }, [threads, openThreads.length, resolvedThreads.length, onThreadStats]);
+  }, [
+    initialThreads,
+    threads,
+    openThreads.length,
+    resolvedThreads.length,
+    onThreadStats,
+  ]);
 
   useEffect(() => {
     function captureSelectionDraft() {
@@ -594,9 +605,17 @@ export function CommentsPanel({
 
     document.addEventListener("mouseup", onMouseUp);
     document.addEventListener("keyup", onKeyUp);
+    window.addEventListener(
+      "vpg:capture-comment-selection",
+      captureSelectionDraft,
+    );
     return () => {
       document.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener(
+        "vpg:capture-comment-selection",
+        captureSelectionDraft,
+      );
     };
   }, [sourceType]);
 
@@ -901,6 +920,7 @@ export function CommentsPanel({
   ]);
 
   async function createComment() {
+    if (creatingComment) return;
     if (!selectedText) {
       setStatus("Select text in the document first.");
       return;
@@ -915,43 +935,52 @@ export function CommentsPanel({
       return;
     }
 
-    const response = await fetch(
-      withPageQuery(`/api/pages/${pageId}/comments`, workspaceId),
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          body,
-          guest_name: nextGuestName,
-          anchor: {
-            selected_text: selectedText,
-            source_start: anchorDraft?.sourceStart ?? null,
-            source_end: anchorDraft?.sourceEnd ?? null,
-            rendered_dom_path: anchorDraft?.renderedDomPath ?? null,
-            prefix_text: anchorDraft?.prefixText ?? "",
-            suffix_text: anchorDraft?.suffixText ?? "",
-            content_hash: contentHash,
-            anchor_kind: anchorDraft?.kind ?? "text",
-            surface: anchorDraft?.surface ?? "prose",
-            selector: anchorDraft?.selector ?? null,
-            confidence: anchorDraft?.confidence ?? "active",
+    setCreatingComment(true);
+    setStatus("");
+    try {
+      const response = await fetch(
+        withPageQuery(`/api/pages/${pageId}/comments`, workspaceId),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": crypto.randomUUID(),
           },
-        }),
-      },
-    );
+          body: JSON.stringify({
+            body,
+            guest_name: nextGuestName,
+            anchor: {
+              selected_text: selectedText,
+              source_start: anchorDraft?.sourceStart ?? null,
+              source_end: anchorDraft?.sourceEnd ?? null,
+              rendered_dom_path: anchorDraft?.renderedDomPath ?? null,
+              prefix_text: anchorDraft?.prefixText ?? "",
+              suffix_text: anchorDraft?.suffixText ?? "",
+              content_hash: contentHash,
+              anchor_kind: anchorDraft?.kind ?? "text",
+              surface: anchorDraft?.surface ?? "prose",
+              selector: anchorDraft?.selector ?? null,
+              confidence: anchorDraft?.confidence ?? "active",
+            },
+          }),
+        },
+      );
 
-    if (!response.ok) {
-      setStatus("Comment didn't send. Try again.");
-      return;
+      if (!response.ok) {
+        setStatus("Comment didn't send. Try again.");
+        return;
+      }
+      const created = (await response.json()) as ThreadPayload;
+      clearDraft();
+      setThreads((current) => [
+        ...current.filter((thread) => thread.thread.id !== created.thread.id),
+        created,
+      ]);
+      onActiveThreadChange?.(created.thread.id);
+      window.setTimeout(() => flashThreadMark(created.thread.id), 0);
+    } finally {
+      setCreatingComment(false);
     }
-    const created = (await response.json()) as ThreadPayload;
-    clearDraft();
-    setThreads((current) => [
-      ...current.filter((thread) => thread.thread.id !== created.thread.id),
-      created,
-    ]);
-    onActiveThreadChange?.(created.thread.id);
-    window.setTimeout(() => flashThreadMark(created.thread.id), 0);
   }
 
   async function resolveThread(threadId: string) {
@@ -1033,21 +1062,34 @@ export function CommentsPanel({
   }
 
   async function replyToThread(threadId: string) {
+    if (pendingReplyIds.has(threadId)) return;
     const replyBody = replyBodies[threadId]?.trim();
     if (!replyBody) return;
     const nextGuestName = guestNameRequired ? trimmedGuestName() : null;
     if (guestNameRequired && !nextGuestName) return;
-    const response = await fetch(
-      withPageQuery(`/api/comment-threads/${threadId}/replies`, workspaceId),
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body: replyBody, guest_name: nextGuestName }),
-      },
-    );
-    if (!response.ok) return;
-    setReplyBodies((current) => ({ ...current, [threadId]: "" }));
-    await loadThreads();
+    setPendingReplyIds((current) => new Set(current).add(threadId));
+    try {
+      const response = await fetch(
+        withPageQuery(`/api/comment-threads/${threadId}/replies`, workspaceId),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({ body: replyBody, guest_name: nextGuestName }),
+        },
+      );
+      if (!response.ok) return;
+      setReplyBodies((current) => ({ ...current, [threadId]: "" }));
+      await loadThreads();
+    } finally {
+      setPendingReplyIds((current) => {
+        const next = new Set(current);
+        next.delete(threadId);
+        return next;
+      });
+    }
   }
 
   async function updateThreadAnchor(
@@ -1282,7 +1324,7 @@ export function CommentsPanel({
           onSubmit={(event) => {
             event.preventDefault();
             const value = replyBodies[thread.thread.id]?.trim();
-            if (!value) return;
+            if (!value || pendingReplyIds.has(thread.thread.id)) return;
             void replyToThread(thread.thread.id);
           }}
         >
@@ -1302,7 +1344,9 @@ export function CommentsPanel({
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 const value = replyBodies[thread.thread.id]?.trim();
-                if (value) void replyToThread(thread.thread.id);
+                if (value && !pendingReplyIds.has(thread.thread.id)) {
+                  void replyToThread(thread.thread.id);
+                }
               }
             }}
             placeholder="Reply…"
@@ -1310,7 +1354,10 @@ export function CommentsPanel({
           <button
             type="submit"
             className="thread-reply-send"
-            disabled={!replyBodies[thread.thread.id]?.trim()}
+            disabled={
+              !replyBodies[thread.thread.id]?.trim() ||
+              pendingReplyIds.has(thread.thread.id)
+            }
             aria-label="Send reply"
           >
             <ArrowUp size={13} aria-hidden="true" />
@@ -1367,7 +1414,7 @@ export function CommentsPanel({
           className="thread-draft-composer"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!body.trim()) return;
+            if (!body.trim() || creatingComment) return;
             void createComment();
           }}
         >
@@ -1389,14 +1436,14 @@ export function CommentsPanel({
               }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                if (body.trim()) void createComment();
+                if (body.trim() && !creatingComment) void createComment();
               }
             }}
           />
           <button
             type="submit"
             className="thread-draft-send"
-            disabled={!body.trim()}
+            disabled={!body.trim() || creatingComment}
             aria-label="Comment"
           >
             <ArrowUp size={13} aria-hidden="true" />
@@ -1427,7 +1474,7 @@ export function CommentsPanel({
             description: "Open and resolved threads will appear here.",
           };
 
-  const showAnchoredView = tabFilter === "open";
+  const showAnchoredView = tabFilter === "open" && desktopRail;
   const showEmpty = showAnchoredView
     ? openThreads.length === 0 && !selectedText
     : visibleThreads.length === 0;

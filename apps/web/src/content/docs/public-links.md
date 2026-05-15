@@ -36,7 +36,7 @@ Open the same **Share** dialog and choose **Unpublish**. Revoked or expired publ
 Agents can create and revoke publications through MCP and CLI:
 
 ```js
-await mcp.call("publish_page", {
+await mcp.call("publication_apply", {
   workspace_id: "wks_123",
   page_id: "pg_123",
   permission: "comment",

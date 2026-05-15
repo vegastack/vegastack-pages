@@ -8,7 +8,7 @@
 - Use expected replacement counts for patches.
 - On conflict, refetch and retry. Do not bypass concurrency checks.
 - Use `validate_page_source` or `vpg pages validate` before saving substantial edits.
-- `reply_to_thread` (MCP) and `vpg reply` (CLI) post as the authenticated user. Use `complete_review_thread` / `vpg complete-thread` for agent-attributed replies — it accepts `agent_name`, `agent_model`, `agent_session_id` and may resolve the thread in one call.
+- `update_thread` (MCP) and `vpg reply` / `vpg complete-thread` (CLI) handle replies. Use `update_thread` with `agent_name`, `agent_model`, `agent_session_id` for agent-attributed replies and `resolve` to close the thread in one call.
 - Avoid returning magic-link URLs or invite tokens to untrusted logs.
 - Do not install skills automatically from package install scripts. Use explicit `vpg skills install --agent all --scope user` and avoid overwriting user files unless `--force` is set.
 - After npm updates, refresh installed global skills with `vpg skills update --agent all --scope user`; this overwrites only the VegaStack Pages skill/adapters managed by the current binary.

@@ -1,5 +1,4 @@
 import cloudflare from "@astrojs/cloudflare";
-import mdx from "@astrojs/mdx";
 import node from "@astrojs/node";
 import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
@@ -54,6 +53,10 @@ function toAllowedDomain(source) {
 
 export default defineConfig({
   output: "server",
+  prefetch: {
+    prefetchAll: false,
+    defaultStrategy: "hover",
+  },
   security: {
     // OAuth token/device endpoints must accept standards-compliant
     // application/x-www-form-urlencoded POSTs from MCP brokers. Astro's global
@@ -70,7 +73,7 @@ export default defineConfig({
           imageService: { build: "compile", runtime: "passthrough" },
           prerenderEnvironment: "node",
         }),
-  integrations: [react(), mdx()],
+  integrations: [react()],
   fonts: [
     {
       name: "Geist",

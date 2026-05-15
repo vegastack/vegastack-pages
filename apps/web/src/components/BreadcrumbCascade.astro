@@ -1,0 +1,100 @@
+---
+import type { BreadcrumbSegment, BreadcrumbSibling } from "./BreadcrumbCascade";
+
+type Props = {
+  workspaceName: string;
+  workspaceHref: string;
+  segments: BreadcrumbSegment[];
+};
+
+const { workspaceName, workspaceHref, segments } = Astro.props;
+
+const fileIcon = `<svg class="vpg-breadcrumb-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`;
+const folderIcon = `<svg class="vpg-breadcrumb-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.5l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"></path></svg>`;
+
+const iconFor = (item: BreadcrumbSibling) =>
+  item.isFolder ? folderIcon : fileIcon;
+---
+
+<nav class="vpg-breadcrumb" aria-label="Page breadcrumb">
+  <a
+    class="vpg-breadcrumb-segment"
+    href={workspaceHref}
+    aria-label={`Workspace ${workspaceName}`}
+  >
+    <span>{workspaceName}</span>
+  </a>
+  {
+    segments.map((segment, index) => {
+      const isLast = index === segments.length - 1;
+      const hasSiblings = segment.siblings.length > 0;
+      return (
+        <>
+          <span class="vpg-breadcrumb-sep" aria-hidden="true">
+            /
+          </span>
+          {hasSiblings ? (
+            <details class="vpg-breadcrumb-details">
+              <summary
+                class="vpg-breadcrumb-segment"
+                data-current={segment.isCurrent ? "true" : undefined}
+                aria-label={segment.name}
+              >
+                <span>{segment.name}</span>
+              </summary>
+              <div class="vpg-dropdown-content vpg-breadcrumb-menu">
+                {segment.siblings.map((sibling) => (
+                  <>
+                    <a
+                      class="vpg-dropdown-item vpg-breadcrumb-menu-row"
+                      data-current={sibling.isCurrent ? "true" : undefined}
+                      href={sibling.href}
+                    >
+                      <Fragment set:html={iconFor(sibling)} />
+                      <span class="vpg-breadcrumb-menu-label">
+                        {sibling.name}
+                      </span>
+                    </a>
+                    {(sibling.children ?? []).slice(0, 8).map((child) => (
+                      <a
+                        class="vpg-dropdown-item vpg-breadcrumb-menu-row vpg-breadcrumb-menu-child"
+                        data-current={child.isCurrent ? "true" : undefined}
+                        href={child.href}
+                      >
+                        <Fragment set:html={iconFor(child)} />
+                        <span class="vpg-breadcrumb-menu-label">
+                          {child.name}
+                        </span>
+                      </a>
+                    ))}
+                  </>
+                ))}
+                {segment.allChildrenHref ? (
+                  <>
+                    <div class="vpg-dropdown-separator" />
+                    <a
+                      href={segment.allChildrenHref}
+                      class="vpg-dropdown-item vpg-breadcrumb-menu-all"
+                    >
+                      <Fragment set:html={folderIcon} />
+                      <span>Open {segment.name}</span>
+                    </a>
+                  </>
+                ) : null}
+              </div>
+            </details>
+          ) : (
+            <a
+              class="vpg-breadcrumb-segment"
+              href={segment.href}
+              data-current={isLast ? "true" : undefined}
+              aria-current={isLast ? "page" : undefined}
+            >
+              <span>{segment.name}</span>
+            </a>
+          )}
+        </>
+      );
+    })
+  }
+</nav>

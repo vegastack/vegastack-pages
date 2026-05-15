@@ -6,7 +6,7 @@ import { numericEnv, readJsonBody } from "../../../../lib/request-body";
 import {
   commentService,
   ensureSeedData,
-  indexCommentThread,
+  scheduleIndexCommentThread,
   pageService,
 } from "../../../../lib/runtime";
 
@@ -54,7 +54,7 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
         confidence: "fuzzy",
       }),
     });
-    await indexCommentThread(thread.thread.id);
+    scheduleIndexCommentThread(thread.thread.id);
     return Response.json({ anchor: updated });
   } catch (error) {
     return jsonAppError(error, "Anchor update failed.");

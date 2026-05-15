@@ -175,7 +175,7 @@ Session:
 Page lifecycle:
 
 - `create_page`, `create_page_from_template`
-- `get_page`, `get_rendered_page`, `list_page_versions`
+- `get_page` with `include`, `list_page_versions`
 - `prepare_page_edit`, `patch_page`, `update_page`, `validate_page_source`
 - `move_page`, `create_page_snapshot`, `restore_page_version`
 - `upload_attachment`
@@ -184,19 +184,18 @@ Review:
 
 - `wait_for_review` (accepts `after_event_id` cursor; emits `status: matched | timeout`)
 - `list_comments`, `create_comment`
-- `reply_to_thread` (user attribution only)
-- `complete_review_thread` (agent-attributed; accepts `agent_name`, `agent_model`, `agent_session_id`; optional `resolve` in one call)
-- `resolve_thread`, `unresolve_thread`, `update_comment_anchor`, `delete_thread`
+- `update_thread` for replies, resolve, reopen, and agent attribution
+- `update_comment_anchor`, `delete_thread`
 - `list_review_events`
 
 Publishing:
 
-- `publish_page`, `publish_folder`, `update_publication`, `revoke_publication`
+- `publication_apply`, `publication_delete`
 
 Search and navigation:
 
-- `search_workspace`, `search_pages` (page-only compatibility alias)
-- `list_workspace_tree`
+- `search_workspace`
+- `list_workspace`
 
 Templates:
 

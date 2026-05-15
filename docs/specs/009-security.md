@@ -264,7 +264,7 @@ Agents act through workspace-scoped MCP bearer sessions. Three issuance flows (O
 
 MCP tokens are shown once, stored hashed, scoped to one workspace, and revocable from settings.
 
-Agent attribution is recorded only when the agent uses `complete_review_thread` (MCP) or `vpg complete-thread` (CLI). `reply_to_thread` / `vpg reply` post as the authenticated user. Recorded fields:
+Agent attribution is recorded when the agent uses `update_thread` with agent metadata over MCP, or the agent-attributed CLI comment flow. Plain user replies post as the authenticated user. Recorded fields:
 
 - User ID.
 - Agent name.

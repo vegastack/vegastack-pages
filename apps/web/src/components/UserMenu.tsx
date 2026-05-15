@@ -27,6 +27,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { SafeEmailText } from "./SafeEmailText";
 
 const themeOptions: Array<{
   value: ThemeChoice;
@@ -91,7 +92,7 @@ export function UserMenu({
         </span>
         <span className="vpg-user-text">
           <span className="vpg-user-name">{name}</span>
-          <span className="vpg-user-email">{email}</span>
+          <SafeEmailText className="vpg-user-email" email={email} />
         </span>
         <ChevronsUpDown
           className="vpg-user-caret"
@@ -107,7 +108,7 @@ export function UserMenu({
       >
         <DropdownMenuLabel>
           <span className="vpg-user-menu-label-name">{name}</span>
-          <span className="vpg-user-menu-label-email">{email}</span>
+          <SafeEmailText className="vpg-user-menu-label-email" email={email} />
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>

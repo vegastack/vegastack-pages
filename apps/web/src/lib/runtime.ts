@@ -52,6 +52,7 @@ import {
   demoPageSource,
   mcpSetupSource,
 } from "./demo-page";
+import { scheduleBackgroundTask } from "./background";
 
 type D1PreparedStatement = {
   bind(...values: unknown[]): D1PreparedStatement;
@@ -428,6 +429,7 @@ const fallbackMcpSessions = new Map<string, McpSessionRecord>();
 
 let runtimeBindingsPromise: Promise<CloudflareBindings | null> | null = null;
 let runtimeReadyPromise: Promise<void> | null = null;
+let lastRuntimeRefreshAt = 0;
 let runtimeD1: D1Database | null = null;
 let runtimeHydratedFromNormalizedTables = false;
 let activeD1Batch: D1PreparedStatement[] | null = null;
@@ -1765,12 +1767,30 @@ export async function ensureRuntimeReady() {
   await runtimeReadyPromise;
 }
 
-export async function refreshRuntimeState() {
+function runtimeRefreshIntervalMs(input?: { minIntervalMs?: number }) {
+  if (typeof input?.minIntervalMs === "number") {
+    return Math.max(0, input.minIntervalMs);
+  }
+  const configured = Number(process.env.VPG_RUNTIME_REFRESH_INTERVAL_MS ?? "");
+  return Number.isFinite(configured) && configured >= 0 ? configured : 1_000;
+}
+
+export async function refreshRuntimeState(
+  input: { force?: boolean; minIntervalMs?: number } = {},
+) {
   await ensureRuntimeReady();
   if (!runtimeD1) return;
+  if (!input.force) {
+    const now = Date.now();
+    const minIntervalMs = runtimeRefreshIntervalMs(input);
+    if (lastRuntimeRefreshAt && now - lastRuntimeRefreshAt < minIntervalMs) {
+      return;
+    }
+  }
   runtimeHydratedFromNormalizedTables = await hydrateNormalizedRuntimeState({
     rebuildFts: false,
   });
+  lastRuntimeRefreshAt = Date.now();
 }
 
 export async function acquireRuntimeMutationLock(
@@ -3067,11 +3087,21 @@ export async function indexFolder(folderId: string) {
   await indexSearchDocument(document);
 }
 
+export function scheduleIndexFolder(folderId: string) {
+  scheduleBackgroundTask("indexFolder", () => indexFolder(folderId));
+}
+
 export async function indexCommentThread(threadId: string) {
   const document = commentThreadSearchDocument(threadId);
   if (!document) return;
   searchService.index(document);
   await indexSearchDocument(document);
+}
+
+export function scheduleIndexCommentThread(threadId: string) {
+  scheduleBackgroundTask("indexCommentThread", () =>
+    indexCommentThread(threadId),
+  );
 }
 
 export async function removeSearchResource(
@@ -3400,4 +3430,8 @@ export async function indexPage(pageId: string) {
   if (!document) return;
   searchService.index(document);
   await indexSearchDocument(document);
+}
+
+export function scheduleIndexPage(pageId: string) {
+  scheduleBackgroundTask("indexPage", () => indexPage(pageId));
 }

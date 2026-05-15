@@ -81,11 +81,10 @@ Scope:
   - `get_page`
   - `wait_for_review`
   - `list_comments`
-  - `reply_to_thread`
-  - `resolve_thread`
-  - `publish_page`
+  - `update_thread`
+  - `publication_apply`
   - `upload_attachment`
-  - `search_pages`
+  - `search_workspace`
 - Resources:
   - Page source
   - Page rendered metadata

@@ -1,5 +1,6 @@
 ---
 import { Font } from "astro:assets";
+import { ClientRouter } from "astro:transitions";
 import "../styles/global.css";
 import "../styles/shell.css";
 import { SonnerHost } from "../components/SonnerHost";
@@ -60,6 +61,7 @@ const initialTheme =
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={`${baseUrl}/favicon.svg`} />
+    <ClientRouter fallback="swap" />
 
     <script is:inline>
       // Pre-paint: align <html data-theme> with localStorage when it disagrees
@@ -97,13 +99,16 @@ const initialTheme =
       // shell grid track and rail visuals match the user's persisted choice.
       // Reads localStorage first, then falls back to the cookie SSR also reads.
       (() => {
-        let collapsed = false;
+        const stackedLayout =
+          typeof window.matchMedia === "function" &&
+          !window.matchMedia("(min-width: 1180px)").matches;
+        let collapsed = stackedLayout;
         try {
           const stored = window.localStorage.getItem(
             "vpg_comments_rail_expanded",
           );
-          if (stored === "false") collapsed = true;
-          else if (stored !== "true") {
+          if (!stackedLayout && stored === "false") collapsed = true;
+          else if (!stackedLayout && stored !== "true") {
             const prefix = "vpg_comments_rail=";
             const part = document.cookie
               .split(";")

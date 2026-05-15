@@ -99,8 +99,7 @@ Test:
 - `create_page`.
 - `wait_for_review`.
 - `list_comments`.
-- `reply_to_thread`.
-- `resolve_thread`.
+- `update_thread`.
 - Structured errors.
 - Permission denial.
 

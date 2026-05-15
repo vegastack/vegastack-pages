@@ -132,10 +132,10 @@ Use this sequence for reliable edits:
 3. `patch_page` for focused replacements, or `update_page` with `base_version_id` and `base_content_hash`
 4. `validate_page_source`
 5. `list_comments` with `status: "all"` when verifying review state
-6. `complete_review_thread` to reply and optionally resolve
+6. `update_thread` with `body`, agent metadata, and optional `resolve`
 
 Every content change advances `version_id`, even when no checkpoint record is created.
 
 For structured new pages, prefer `create_page_from_template` so the agent starts from the workspace's expected format.
 
-`reply_to_thread` (MCP) and `vpg reply` (CLI) post as the authenticated user. Use `complete_review_thread` / `vpg complete-thread` when the agent needs `agent_name`/`agent_model`/`agent_session_id` attribution.
+`update_thread` posts replies, resolves, reopens, and records agent attribution when `agent_name`/`agent_model`/`agent_session_id` are supplied. CLI review flows should use `vpg wait` plus the comment-thread commands.

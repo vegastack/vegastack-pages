@@ -18,7 +18,7 @@ import {
   dispatchPageFavoriteChange,
   persistPageFavorite,
   type FavoriteChangeDetail,
-} from "./PageStar";
+} from "../lib/page-favorites";
 import { standaloneRadius } from "../lib/radius-tokens";
 import {
   standaloneFooterStyle,
@@ -65,7 +65,7 @@ type Props = {
   initialFavorited?: boolean;
   canRestoreVersions: boolean;
   canExportSource: boolean;
-  renderedHtml: string;
+  autoOpen?: boolean;
 };
 
 type PageVersion = {
@@ -99,8 +99,9 @@ export function PageActionsMenu({
   initialFavorited = false,
   canRestoreVersions,
   canExportSource,
-  renderedHtml,
+  autoOpen = false,
 }: Props) {
+  const [menuOpen, setMenuOpen] = useState(autoOpen);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [pinned, setPinned] = useState(initialFavorited);
@@ -210,12 +211,24 @@ export function PageActionsMenu({
     const next = !pinned;
     setFavoritePending(true);
     setPinned(next);
-    dispatchPageFavoriteChange({ workspaceId, pageId, favorited: next });
+    dispatchPageFavoriteChange({
+      workspaceId,
+      pageId,
+      slugId,
+      title,
+      favorited: next,
+    });
     try {
       await persistPageFavorite(workspaceId, pageId, next);
     } catch {
       setPinned(!next);
-      dispatchPageFavoriteChange({ workspaceId, pageId, favorited: !next });
+      dispatchPageFavoriteChange({
+        workspaceId,
+        pageId,
+        slugId,
+        title,
+        favorited: !next,
+      });
     } finally {
       setFavoritePending(false);
     }
@@ -239,8 +252,11 @@ export function PageActionsMenu({
     );
   }
 
-  function exportPdf() {
-    const html = createPrintDocument(title, renderedHtml);
+  async function exportPdf() {
+    const html = createPrintDocument(
+      title,
+      await currentRenderedHtml(pageId, workspaceId),
+    );
     const url = URL.createObjectURL(
       new Blob([html], { type: "text/html;charset=utf-8" }),
     );
@@ -295,7 +311,7 @@ export function PageActionsMenu({
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
             className="vpg-pheader-btn"
@@ -409,7 +425,12 @@ export function PageActionsMenu({
                     </DropdownMenuItem>
                   ) : null}
                   {canExportPdf ? (
-                    <DropdownMenuItem onSelect={exportPdf}>
+                    <DropdownMenuItem
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        void exportPdf();
+                      }}
+                    >
                       <Download size={14} aria-hidden="true" />
                       <span>Export as PDF</span>
                     </DropdownMenuItem>
@@ -538,6 +559,18 @@ declare global {
   interface Window {
     __vpgEditIntent?: boolean;
   }
+}
+
+async function currentRenderedHtml(pageId: string, workspaceId: string) {
+  const prose = document.querySelector<HTMLElement>("[data-vpg-prose-static]");
+  if (prose?.innerHTML.trim()) return prose.innerHTML;
+
+  const response = await fetch(
+    withPageQuery(`/api/pages/${pageId}/rendered`, workspaceId),
+  );
+  if (!response.ok) return "";
+  const payload = (await response.json()) as { html?: string };
+  return payload.html ?? "";
 }
 
 function withMarkdownFooter(value: string) {

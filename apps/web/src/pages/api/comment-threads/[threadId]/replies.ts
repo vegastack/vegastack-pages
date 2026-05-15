@@ -6,7 +6,7 @@ import { guestSessionForPublication } from "../../../../lib/guest-session";
 import {
   commentService,
   ensureSeedData,
-  indexCommentThread,
+  scheduleIndexCommentThread,
   pageService,
   publicationService,
   reviewEventService,
@@ -81,7 +81,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         reply_id: reply.id,
       },
     });
-    await indexCommentThread(thread.thread.id);
+    scheduleIndexCommentThread(thread.thread.id);
     return Response.json({ reply: enrichReply(reply) });
   } catch (error) {
     return jsonAppError(error, "Reply failed.");

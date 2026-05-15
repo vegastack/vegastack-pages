@@ -9,8 +9,8 @@ import {
 import {
   auditService,
   ensureSeedData,
-  indexFolder,
-  indexPage,
+  scheduleIndexFolder,
+  scheduleIndexPage,
   pageService,
   permissionService,
   removeSearchResource,
@@ -71,9 +71,9 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
     for (const page of affectedPages) {
       const folderPath = `${updated.folder.path}${page.folderPath.slice(updated.previous.path.length)}`;
       const moved = pageService.movePage({ pageId: page.id, folderPath });
-      await indexPage(moved.id);
+      scheduleIndexPage(moved.id);
     }
-    await indexFolder(updated.folder.id);
+    scheduleIndexFolder(updated.folder.id);
 
     auditService.record({
       workspaceId: folder.workspaceId,
@@ -114,7 +114,7 @@ export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
       );
     for (const page of affectedPages) {
       const moved = pageService.movePage({ pageId: page.id, folderPath: "" });
-      await indexPage(moved.id);
+      scheduleIndexPage(moved.id);
     }
     const descendants = workspaceService
       .listFolders(folder.workspaceId)

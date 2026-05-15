@@ -1,8 +1,7 @@
 ---
 import { AppError, hasPermission } from "@vegastack/pages-core";
-import { renderMarkdown } from "@vegastack/pages-renderer";
-import { CommentsRail } from "../../components/CommentsSlideOver";
 import { CommandPalette } from "../../components/CommandPalette";
+import { CommentsRail } from "../../components/CommentsSlideOver";
 import { SharePasswordPrompt } from "../../components/SharePasswordPrompt";
 import MobileTabBar from "../../components/MobileTabBar.astro";
 import PageHeader from "../../components/PageHeader.astro";
@@ -20,7 +19,7 @@ import {
   type PageAccess,
 } from "../../lib/access";
 import { publicSignupEnabled } from "../../lib/deployment";
-import { enrichThreads } from "../../lib/comments-enrich";
+import { renderCachedMarkdown } from "../../lib/render-cache";
 import {
   commentService,
   ensureSeedData,
@@ -32,7 +31,10 @@ import {
   listSelectableWorkspaces,
   listVisibleFoldersForActor,
 } from "../../lib/workspace-visibility";
+import { buildWorkspaceNavigation } from "../../lib/workspace-navigation";
 import AppLayout from "../../layouts/AppLayout.astro";
+import "../../styles/docs.css";
+import "../../styles/comments.css";
 
 export const prerender = false;
 
@@ -113,7 +115,11 @@ const sidebarWorkspaces =
 const isHtmlPage = pageWithSource.page.sourceType === "html";
 const rendered = isHtmlPage
   ? { frontmatter: {}, headings: [], html: "" }
-  : await renderMarkdown(pageWithSource.source);
+  : await renderCachedMarkdown({
+      pageId: pageWithSource.page.id,
+      contentHash: pageWithSource.page.contentHash,
+      source: pageWithSource.source,
+    });
 const frontmatter = rendered.frontmatter as Record<string, unknown>;
 const title = isHtmlPage
   ? pageWithSource.page.title
@@ -260,12 +266,18 @@ const displayedHtml =
 const publicIndexable = Boolean(
   publicPublication?.indexingEnabled && !publicPublication.passwordHash,
 );
-const initialThreads = enrichThreads(
-  commentService.listForPage(pageWithSource.page.id, "all"),
+const initialThreadRecords = commentService.listForPage(
+  pageWithSource.page.id,
+  "all",
 );
-const initialOpenThreadCount = initialThreads.filter(
-  (entry) => entry.thread.status === "open",
-).length;
+const initialCommentStats = {
+  open: initialThreadRecords.filter((entry) => entry.thread.status === "open")
+    .length,
+  resolved: initialThreadRecords.filter(
+    (entry) => entry.thread.status === "resolved",
+  ).length,
+  total: initialThreadRecords.length,
+};
 
 const workspaceHref = workspaceRecord
   ? `/app?workspace_id=${encodeURIComponent(sidebarWorkspace.id)}`
@@ -291,6 +303,9 @@ const sidebarFoldersForTree = visibleFolders.map((folder) => ({
   path: folder.path,
   parentFolderId: folder.parentFolderId,
 }));
+const sidebarTreeVersion = isPublicPublication
+  ? null
+  : buildWorkspaceNavigation(actor, sidebarWorkspace.id).treeVersion;
 // The same shell layout in every state — the TOC column is always reserved
 // so unlocking the editor never shifts the main column.
 const shellClasses = [
@@ -1040,6 +1055,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
             canWrite={canWrite}
             currentPageId={pageWithSource.page.id}
             initialFavoriteIds={initialFavoriteIds}
+            treeVersion={sidebarTreeVersion}
           />
         )}
         {isPublicPublication && publicRootFolder && (
@@ -1070,9 +1086,8 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
             initialFavorited={initialFavoriteIds.includes(
               pageWithSource.page.id,
             )}
-            commentsBadge={initialOpenThreadCount}
+            commentsBadge={initialCommentStats.open}
             headings={displayedHeadings}
-            renderedHtml={displayedHtml}
             updatedAt={pageWithSource.page.updatedAt}
           />
 
@@ -1155,7 +1170,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                 sourceType={pageWithSource.page.sourceType}
                 guestNameRequired={pageAccess.guestNameRequired}
                 currentUserName={sidebarUser.displayName}
-                initialThreads={initialThreads}
+                initialStats={initialCommentStats}
                 initialExpanded={commentsRailInitialExpanded}
               />
             )}
@@ -1163,17 +1178,14 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette
-            client:only="react"
-            workspaceId={sidebarWorkspace.id}
-          />
+          <CommandPalette client:load workspaceId={sidebarWorkspace.id} />
         )}
 
         {!isPublicPublication && (
           <MobileTabBar
             pageId={pageWithSource.page.id}
             showComments={canComment}
-            commentsBadge={initialOpenThreadCount}
+            commentsBadge={initialCommentStats.open}
           />
         )}
       </div>

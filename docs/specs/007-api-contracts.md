@@ -222,7 +222,7 @@ Input:
     "type": "spec"
   },
   "position": 1000,
-  "publish_page": {
+  "publication_apply": {
     "permission": "comment",
     "expires_at": null,
     "password": null

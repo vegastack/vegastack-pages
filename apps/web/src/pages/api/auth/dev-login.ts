@@ -11,8 +11,17 @@ import {
 
 export const prerender = false;
 
+function localDiagnosticLoginEnabled() {
+  return (
+    process.env.VPG_ENABLE_DEV_LOGIN === "true" &&
+    process.env.VPG_ADAPTER === "node" &&
+    process.env.VPG_RUNTIME === "node" &&
+    process.env.VPG_PROD_DATA_DEV !== "true"
+  );
+}
+
 export const GET: APIRoute = async ({ cookies, redirect, url }) => {
-  if (!import.meta.env.DEV) {
+  if (!import.meta.env.DEV && !localDiagnosticLoginEnabled()) {
     return Response.json(
       {
         error: {

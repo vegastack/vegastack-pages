@@ -1,9 +1,6 @@
 ---
 import { SidebarWorkspace } from "./SidebarWorkspace";
-import { SidebarSearch } from "./SidebarSearch";
-import { SidebarFavorites } from "./SidebarFavorites";
 import { SidebarUserPill } from "./SidebarUserPill";
-import { SidebarCreateMenu } from "./SidebarCreateMenu";
 import SidebarTreeNode from "./SidebarTreeNode.astro";
 
 type FolderRecord = {
@@ -34,6 +31,7 @@ interface Props {
   currentPageId?: string;
   currentFolderId?: string;
   initialFavoriteIds?: string[];
+  treeVersion?: string | null;
 }
 
 const {
@@ -46,6 +44,7 @@ const {
   currentPageId,
   currentFolderId,
   initialFavoriteIds = [],
+  treeVersion = null,
 } = Astro.props;
 
 type FolderNode = {
@@ -102,6 +101,10 @@ pages.forEach((page) => {
 });
 
 const rootPages = pages.filter((page) => !page.folderPath);
+const pageById = new Map(pages.map((page) => [page.id, page]));
+const favoritePages = initialFavoriteIds
+  .map((id) => pageById.get(id))
+  .filter((page): page is PageRecord => Boolean(page));
 const initialsOf = (name: string) =>
   name
     .split(/\s+/)
@@ -110,11 +113,22 @@ const initialsOf = (name: string) =>
     .slice(0, 2)
     .toUpperCase() || "WS";
 const userInitials = initialsOf(currentUser.displayName);
+const navCacheCookieName = `vpg_tree_${workspace.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+const navCacheValue = treeVersion ? `${currentUser.id}:${treeVersion}` : "";
+const navCacheKey = treeVersion
+  ? `vpg:sidebar:${workspace.id}:${currentUser.id}:${treeVersion}`
+  : "";
+// Keep the server-rendered navigation as the source of truth. The previous
+// private sidebar HTML cache could reconstruct a different tree shape in
+// browsers that had a stale version cookie/sessionStorage entry, so page
+// navigation became browser-state dependent.
+const canUseCachedNav = false;
 ---
 
 <aside
   class="vpg-shell-sidebar"
   id="vpg-sidebar"
+  data-workspace-id={workspace.id}
   data-open="false"
   aria-label="Workspace navigation"
 >
@@ -128,155 +142,288 @@ const userInitials = initialsOf(currentUser.displayName);
       {
         canWrite && (
           <div class="vpg-sidebar-create-slot" aria-label="Create new">
-            <SidebarCreateMenu
-              client:load
-              workspaceId={workspace.id}
-              currentFolderId={null}
-              currentFolderPath=""
-            />
+            <button
+              type="button"
+              class="vpg-button vpg-button-icon vpg-button-ghost"
+              data-vpg-create-trigger
+              data-folder-path=""
+              data-can-create-subfolder="false"
+              aria-label="Create page or folder"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
+            </button>
           </div>
         )
       }
     </div>
-    <SidebarSearch client:load />
+    <button
+      type="button"
+      class="vpg-sidebar-search"
+      data-vpg-sidebar-search
+      aria-label="Search workspace"
+    >
+      <svg
+        class="vpg-sidebar-search-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="11" cy="11" r="8"></circle>
+        <path d="m21 21-4.35-4.35"></path>
+      </svg>
+      <span class="vpg-sidebar-search-label">Search</span>
+      <kbd class="vpg-sidebar-search-kbd" aria-hidden="true">
+        <span>⌘</span><span>K</span>
+      </kbd>
+    </button>
   </div>
 
-  <div class="vpg-sidebar-scroll" data-vpg-sidebar-scroll>
-    <SidebarFavorites
-      client:load
-      workspaceId={workspace.id}
-      pages={pages.map((p) => ({
-        id: p.id,
-        slugId: p.slugId,
-        title: p.title,
-      }))}
-      currentPageId={currentPageId}
-      initialFavoriteIds={initialFavoriteIds}
-    />
-
+  <div
+    class="vpg-sidebar-scroll"
+    data-vpg-sidebar-scroll
+    data-nav-cache-key={navCacheKey || undefined}
+    data-nav-cache-cookie={navCacheCookieName}
+    data-nav-cache-value={navCacheValue || undefined}
+    data-workspace-id={workspace.id}
+    data-current-page-id={currentPageId || ""}
+    data-current-folder-id={currentFolderId || ""}
+    data-can-write={canWrite ? "true" : "false"}
+    data-nav-cache-hit={canUseCachedNav ? "true" : "false"}
+  >
     {
-      rootPages.length > 0 && (
-        <section class="vpg-sidebar-section">
-          <header class="vpg-sidebar-section-head">
-            <span class="vpg-sidebar-section-label">Pages</span>
-            {canWrite && (
-              <div class="vpg-sidebar-section-action">
-                <SidebarCreateMenu
-                  client:load
-                  workspaceId={workspace.id}
-                  currentFolderId={null}
-                  currentFolderPath=""
-                />
-              </div>
-            )}
-          </header>
-          <ul class="vpg-sidebar-tree">
-            {rootPages.map((page) => (
-              <li>
-                <a
-                  class="vpg-sidebar-row"
-                  href={`/p/${page.slugId}`}
-                  data-active={page.id === currentPageId ? "true" : undefined}
-                >
-                  <span class="vpg-sidebar-row-icon" aria-hidden="true">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.9"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="16" x2="8" y1="13" y2="13" />
-                      <line x1="16" x2="8" y1="17" y2="17" />
-                    </svg>
-                  </span>
-                  <span class="vpg-sidebar-row-label">{page.title}</span>
-                  <span class="vpg-sidebar-row-trail" aria-hidden="true" />
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )
-    }
-
-    {
-      rootFolders.map((node) => (
-        <section class="vpg-sidebar-section">
-          <header class="vpg-sidebar-section-head vpg-sidebar-folder-section-head">
-            <a
-              class="vpg-sidebar-section-label vpg-sidebar-section-label-link"
-              href={`/f/${node.folder.slugId}`}
-            >
-              {node.folder.name}
-            </a>
-            {canWrite && (
-              <div class="vpg-sidebar-section-action">
-                <SidebarCreateMenu
-                  client:load
-                  workspaceId={workspace.id}
-                  currentFolderId={node.folder.id}
-                  currentFolderPath={node.folder.path}
-                />
-              </div>
-            )}
-          </header>
-          <ul class="vpg-sidebar-tree">
-            {canWrite &&
-              node.pages.length === 0 &&
-              node.children.length === 0 && (
-                <li class="vpg-sidebar-empty-folder">
-                  <SidebarCreateMenu
-                    client:load
-                    workspaceId={workspace.id}
-                    currentFolderId={node.folder.id}
-                    currentFolderPath={node.folder.path}
-                    triggerClassName="vpg-sidebar-empty-folder-action"
-                    triggerLabel="New"
-                  />
+      !canUseCachedNav && (
+        <>
+          <section
+            class="vpg-sidebar-section"
+            data-vpg-sidebar-favorites
+            data-workspace-id={workspace.id}
+            hidden={favoritePages.length === 0}
+          >
+            <header class="vpg-sidebar-section-head">
+              <span class="vpg-sidebar-section-label">Favorites</span>
+            </header>
+            <ul class="vpg-sidebar-tree" data-vpg-sidebar-favorites-list>
+              {favoritePages.map((page) => (
+                <li data-vpg-favorite-page-id={page.id}>
+                  <a
+                    class="vpg-sidebar-row"
+                    href={`/p/${page.slugId}`}
+                    data-astro-prefetch="hover"
+                    data-active={page.id === currentPageId ? "true" : undefined}
+                  >
+                    <span class="vpg-sidebar-row-icon" aria-hidden="true">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.9"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" x2="8" y1="13" y2="13" />
+                        <line x1="16" x2="8" y1="17" y2="17" />
+                      </svg>
+                    </span>
+                    <span class="vpg-sidebar-row-label">{page.title}</span>
+                    <span class="vpg-sidebar-row-trail" aria-hidden="true" />
+                  </a>
                 </li>
-              )}
-            {node.pages.map((page) => (
-              <li>
-                <a
-                  class="vpg-sidebar-row"
-                  href={`/p/${page.slugId}`}
-                  data-active={page.id === currentPageId ? "true" : undefined}
-                >
-                  <span class="vpg-sidebar-row-icon" aria-hidden="true">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.9"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+              ))}
+            </ul>
+          </section>
+
+          {rootPages.length > 0 && (
+            <section class="vpg-sidebar-section">
+              <header class="vpg-sidebar-section-head">
+                <span class="vpg-sidebar-section-label">Pages</span>
+                {canWrite && (
+                  <div class="vpg-sidebar-section-action">
+                    <button
+                      type="button"
+                      class="vpg-button vpg-button-icon vpg-button-ghost"
+                      data-vpg-create-trigger
+                      data-folder-path=""
+                      data-can-create-subfolder="false"
+                      aria-label="Create page or folder"
                     >
-                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="16" x2="8" y1="13" y2="13" />
-                      <line x1="16" x2="8" y1="17" y2="17" />
-                    </svg>
-                  </span>
-                  <span class="vpg-sidebar-row-label">{page.title}</span>
-                  <span class="vpg-sidebar-row-trail" aria-hidden="true" />
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M5 12h14" />
+                        <path d="M12 5v14" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </header>
+              <ul class="vpg-sidebar-tree">
+                {rootPages.map((page) => (
+                  <li>
+                    <a
+                      class="vpg-sidebar-row"
+                      href={`/p/${page.slugId}`}
+                      data-astro-prefetch
+                      data-active={
+                        page.id === currentPageId ? "true" : undefined
+                      }
+                    >
+                      <span class="vpg-sidebar-row-icon" aria-hidden="true">
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.9"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" x2="8" y1="13" y2="13" />
+                          <line x1="16" x2="8" y1="17" y2="17" />
+                        </svg>
+                      </span>
+                      <span class="vpg-sidebar-row-label">{page.title}</span>
+                      <span class="vpg-sidebar-row-trail" aria-hidden="true" />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {rootFolders.map((node) => (
+            <section class="vpg-sidebar-section">
+              <header class="vpg-sidebar-section-head vpg-sidebar-folder-section-head">
+                <a
+                  class="vpg-sidebar-section-label vpg-sidebar-section-label-link"
+                  href={`/f/${node.folder.slugId}`}
+                  data-astro-prefetch
+                >
+                  {node.folder.name}
                 </a>
-              </li>
-            ))}
-            {node.children.map((child) => (
-              <SidebarTreeNode
-                node={child}
-                currentPageId={currentPageId}
-                currentFolderId={currentFolderId}
-                folderOverrides={folderOverrides}
-              />
-            ))}
-          </ul>
-        </section>
-      ))
+                {canWrite && (
+                  <div class="vpg-sidebar-section-action">
+                    <button
+                      type="button"
+                      class="vpg-button vpg-button-icon vpg-button-ghost"
+                      data-vpg-create-trigger
+                      data-folder-id={node.folder.id}
+                      data-folder-path={node.folder.path}
+                      data-can-create-subfolder="true"
+                      aria-label="Create page or folder"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M5 12h14" />
+                        <path d="M12 5v14" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </header>
+              <ul class="vpg-sidebar-tree">
+                {canWrite &&
+                  node.pages.length === 0 &&
+                  node.children.length === 0 && (
+                    <li class="vpg-sidebar-empty-folder">
+                      <button
+                        type="button"
+                        class="vpg-button vpg-button-sm vpg-button-ghost vpg-sidebar-empty-folder-action"
+                        data-vpg-create-trigger
+                        data-folder-id={node.folder.id}
+                        data-folder-path={node.folder.path}
+                        data-can-create-subfolder="true"
+                        aria-label={`Create in ${node.folder.path}`}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M5 12h14" />
+                          <path d="M12 5v14" />
+                        </svg>
+                        <span>New</span>
+                      </button>
+                    </li>
+                  )}
+                {node.pages.map((page) => (
+                  <li>
+                    <a
+                      class="vpg-sidebar-row"
+                      href={`/p/${page.slugId}`}
+                      data-astro-prefetch
+                      data-active={
+                        page.id === currentPageId ? "true" : undefined
+                      }
+                    >
+                      <span class="vpg-sidebar-row-icon" aria-hidden="true">
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.9"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" x2="8" y1="13" y2="13" />
+                          <line x1="16" x2="8" y1="17" y2="17" />
+                        </svg>
+                      </span>
+                      <span class="vpg-sidebar-row-label">{page.title}</span>
+                      <span class="vpg-sidebar-row-trail" aria-hidden="true" />
+                    </a>
+                  </li>
+                ))}
+                {node.children.map((child) => (
+                  <SidebarTreeNode
+                    node={child}
+                    currentPageId={currentPageId}
+                    currentFolderId={currentFolderId}
+                    folderOverrides={folderOverrides}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </>
+      )
     }
   </div>
 
@@ -335,11 +482,17 @@ const userInitials = initialsOf(currentUser.displayName);
 
 <script is:inline>
   (() => {
-    const sidebar = document.getElementById("vpg-sidebar");
-    const backdrop = document.querySelector("[data-vpg-sidebar-backdrop]");
-    if (!sidebar || !backdrop) return;
+    if (window.__vpgSidebarInitialized) return;
+    window.__vpgSidebarInitialized = true;
+
+    const currentSidebar = () => document.getElementById("vpg-sidebar");
+    const currentBackdrop = () =>
+      document.querySelector("[data-vpg-sidebar-backdrop]");
 
     function setOpen(open) {
+      const sidebar = currentSidebar();
+      const backdrop = currentBackdrop();
+      if (!sidebar || !backdrop) return;
       sidebar.dataset.open = open ? "true" : "false";
       backdrop.dataset.open = open ? "true" : "false";
       document
@@ -351,8 +504,9 @@ const userInitials = initialsOf(currentUser.displayName);
     }
 
     document.addEventListener("click", (event) => {
+      const sidebar = currentSidebar();
       const target = event.target;
-      if (!(target instanceof Element)) return;
+      if (!sidebar || !(target instanceof Element)) return;
       const toggle = target.closest("[data-vpg-sidebar-toggle]");
       if (toggle) {
         event.preventDefault();
@@ -365,9 +519,18 @@ const userInitials = initialsOf(currentUser.displayName);
       }
     });
 
-    backdrop.addEventListener("click", () => setOpen(false));
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("[data-vpg-sidebar-backdrop]")
+      ) {
+        setOpen(false);
+      }
+    });
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && sidebar.dataset.open === "true") {
+      const sidebar = currentSidebar();
+      if (event.key === "Escape" && sidebar?.dataset.open === "true") {
         setOpen(false);
       }
     });
@@ -379,26 +542,29 @@ const userInitials = initialsOf(currentUser.displayName);
     //   o:<csv>|c:<csv>
     // matching the format Sidebar.astro parses on the server.
     const FOLDER_COOKIE_KEY = "vpg_folders";
-    const folderOverrides = (() => {
-      const map = new Map();
-      const prefix = FOLDER_COOKIE_KEY + "=";
-      const part = document.cookie
-        .split(";")
-        .map((s) => s.trim())
-        .find((s) => s.startsWith(prefix));
-      if (!part) return map;
-      for (const section of part.slice(prefix.length).split("|")) {
-        const idx = section.indexOf(":");
-        if (idx <= 0) continue;
-        const kind = section.slice(0, idx);
-        const state = kind === "o" ? "o" : kind === "c" ? "c" : null;
-        if (!state) continue;
-        for (const id of section.slice(idx + 1).split(",")) {
-          if (id) map.set(id, state);
+    const folderOverrides =
+      window.__vpgFolderOverrides ??
+      (() => {
+        const map = new Map();
+        const prefix = FOLDER_COOKIE_KEY + "=";
+        const part = document.cookie
+          .split(";")
+          .map((s) => s.trim())
+          .find((s) => s.startsWith(prefix));
+        if (!part) return map;
+        for (const section of part.slice(prefix.length).split("|")) {
+          const idx = section.indexOf(":");
+          if (idx <= 0) continue;
+          const kind = section.slice(0, idx);
+          const state = kind === "o" ? "o" : kind === "c" ? "c" : null;
+          if (!state) continue;
+          for (const id of section.slice(idx + 1).split(",")) {
+            if (id) map.set(id, state);
+          }
         }
-      }
-      return map;
-    })();
+        return map;
+      })();
+    window.__vpgFolderOverrides = folderOverrides;
 
     function writeFolderCookie() {
       const open = [];
@@ -455,5 +621,144 @@ const userInitials = initialsOf(currentUser.displayName);
     }
     hydrateFolders();
     document.addEventListener("astro:page-load", hydrateFolders);
+
+    function currentFavoritesSection() {
+      return document.querySelector("[data-vpg-sidebar-favorites]");
+    }
+
+    function currentFavoritesList() {
+      return document.querySelector("[data-vpg-sidebar-favorites-list]");
+    }
+
+    function favoriteItemFor(pageId) {
+      const list = currentFavoritesList();
+      if (!list) return null;
+      for (const item of list.querySelectorAll("[data-vpg-favorite-page-id]")) {
+        if (item.getAttribute("data-vpg-favorite-page-id") === pageId) {
+          return item;
+        }
+      }
+      return null;
+    }
+
+    function syncFavoritesVisibility() {
+      const section = currentFavoritesSection();
+      const list = currentFavoritesList();
+      if (!(section instanceof HTMLElement) || !list) return;
+      section.hidden = list.children.length === 0;
+    }
+
+    function createFavoriteItem(detail) {
+      if (!detail?.pageId || !detail.slugId || !detail.title) return null;
+      const item = document.createElement("li");
+      item.setAttribute("data-vpg-favorite-page-id", detail.pageId);
+
+      const link = document.createElement("a");
+      link.className = "vpg-sidebar-row";
+      link.href = "/p/" + encodeURIComponent(detail.slugId);
+      link.setAttribute("data-astro-prefetch", "hover");
+      if (window.location.pathname === "/p/" + detail.slugId) {
+        link.setAttribute("data-active", "true");
+      }
+
+      const icon = document.createElement("span");
+      icon.className = "vpg-sidebar-row-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line></svg>';
+
+      const label = document.createElement("span");
+      label.className = "vpg-sidebar-row-label";
+      label.textContent = detail.title;
+
+      const trail = document.createElement("span");
+      trail.className = "vpg-sidebar-row-trail";
+      trail.setAttribute("aria-hidden", "true");
+
+      link.append(icon, label, trail);
+      item.append(link);
+      return item;
+    }
+
+    window.addEventListener("vpg:favorites-changed", (event) => {
+      const detail = event.detail;
+      const section = currentFavoritesSection();
+      const workspaceId =
+        section instanceof HTMLElement ? section.dataset.workspaceId : null;
+      if (
+        detail?.workspaceId &&
+        workspaceId &&
+        detail.workspaceId !== workspaceId
+      ) {
+        return;
+      }
+      if (!detail?.pageId) return;
+      const list = currentFavoritesList();
+      if (!list) return;
+
+      const existing = favoriteItemFor(detail.pageId);
+      if (detail.favorited) {
+        if (!existing) {
+          const nextItem = createFavoriteItem(detail);
+          if (nextItem) list.append(nextItem);
+        }
+      } else {
+        existing?.remove();
+      }
+      syncFavoritesVisibility();
+      cacheSidebarNav();
+    });
+
+    function updateSidebarActive(scroll) {
+      const currentPath = window.location.pathname;
+      const currentPageId = scroll.dataset.currentPageId || "";
+      const currentFolderId = scroll.dataset.currentFolderId || "";
+      scroll.querySelectorAll("[data-active]").forEach((node) => {
+        node.removeAttribute("data-active");
+      });
+      scroll.querySelectorAll("a[href]").forEach((link) => {
+        if (!(link instanceof HTMLAnchorElement)) return;
+        if (link.pathname === currentPath) {
+          link.setAttribute("data-active", "true");
+          const summary = link.closest("summary");
+          summary?.setAttribute("data-active", "true");
+        }
+      });
+      if (currentFolderId) {
+        const folder = scroll.querySelector(
+          `details[data-folder-id="${CSS.escape(currentFolderId)}"] > summary`,
+        );
+        folder?.setAttribute("data-active", "true");
+      }
+      if (currentPageId) {
+        const favorite = scroll.querySelector(
+          `[data-vpg-favorite-page-id="${CSS.escape(currentPageId)}"] a`,
+        );
+        favorite?.setAttribute("data-active", "true");
+      }
+    }
+
+    function hydrateCachedSidebarNav() {
+      const scroll = document.querySelector("[data-vpg-sidebar-scroll]");
+      if (!(scroll instanceof HTMLElement)) return;
+      updateSidebarActive(scroll);
+    }
+
+    function cacheSidebarNav() {
+      // No-op: see `canUseCachedNav` above. Keep this function so existing
+      // favorite/change handlers can call it without coupling to cache state.
+    }
+
+    hydrateCachedSidebarNav();
+    document.addEventListener("astro:page-load", hydrateCachedSidebarNav);
   })();
 </script>
+
+{
+  canWrite && (
+    <script>
+      import {initSidebarCreateController} from
+      "../scripts/sidebar-create-controller"; initSidebarCreateController();
+    </script>
+  )
+}

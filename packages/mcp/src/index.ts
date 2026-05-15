@@ -6,7 +6,6 @@ export const mcpToolNames = [
   "prepare_page_edit",
   "patch_page",
   "get_page",
-  "get_rendered_page",
   "list_page_versions",
   "create_page_snapshot",
   "restore_page_version",
@@ -15,20 +14,14 @@ export const mcpToolNames = [
   "wait_for_review",
   "list_comments",
   "create_comment",
-  "reply_to_thread",
-  "resolve_thread",
-  "unresolve_thread",
-  "complete_review_thread",
+  "update_thread",
   "update_comment_anchor",
   "delete_thread",
   "list_review_events",
-  "publish_page",
-  "publish_folder",
-  "update_publication",
-  "revoke_publication",
+  "publication_apply",
+  "publication_delete",
   "search_workspace",
-  "search_pages",
-  "list_workspace_tree",
+  "list_workspace",
   "move_page",
   "invite_workspace_member",
   "list_templates",
@@ -57,7 +50,7 @@ export type McpToolSpec = {
   };
 };
 
-export const mcpToolSpecs: McpToolSpec[] = [
+export const mcpToolSpecs = [
   {
     name: "create_page",
     description:
@@ -134,26 +127,95 @@ export const mcpToolSpecs: McpToolSpec[] = [
   },
   {
     name: "get_page",
-    description: "Read page metadata and source.",
+    description:
+      "Read page metadata with optional source, rendered output, versions, comments, and publication state.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "page_id"],
       properties: {
         workspace_id: { type: "string" },
         page_id: { type: "string" },
+        include: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "metadata",
+              "source",
+              "rendered",
+              "versions",
+              "comments",
+              "publication",
+            ],
+          },
+        },
       },
     },
   },
   {
-    name: "get_rendered_page",
+    name: "update_thread",
     description:
-      "Read rendered page output, headings, frontmatter, and render mode.",
+      "Reply to, resolve, reopen, or complete a comment thread in one call.",
     inputSchema: {
       type: "object",
-      required: ["workspace_id", "page_id"],
+      required: ["workspace_id", "thread_id"],
       properties: {
         workspace_id: { type: "string" },
-        page_id: { type: "string" },
+        thread_id: { type: "string" },
+        body: { type: "string" },
+        status: { type: "string", enum: ["resolved", "open"] },
+        resolve: { type: "boolean" },
+        agent_name: { type: "string" },
+        agent_model: { type: "string" },
+        agent_session_id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "publication_apply",
+    description: "Create or update a page/folder publication.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id", "resource_type", "resource_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        resource_type: { type: "string", enum: ["page", "folder"] },
+        resource_id: { type: "string" },
+        publication_id: { type: "string" },
+        permission: { type: "string", enum: ["view", "comment", "edit"] },
+        expires_at: { type: "string" },
+        clear_expires_at: { type: "boolean" },
+        password: { type: "string" },
+        clear_password: { type: "boolean" },
+        indexing_enabled: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "publication_delete",
+    description: "Revoke a page or folder publication.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id", "publication_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        publication_id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "list_workspace",
+    description:
+      "List visible workspace pages/folders with optional depth, folder, counts, and updated-after filters.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        depth: { type: "number" },
+        folder_id: { type: "string" },
+        include_counts: { type: "boolean" },
+        updated_after: { type: "string" },
       },
     },
   },
@@ -305,62 +367,6 @@ export const mcpToolSpecs: McpToolSpec[] = [
     },
   },
   {
-    name: "reply_to_thread",
-    description:
-      "Reply to a comment thread as the authenticated user. Use complete_review_thread for agent-attributed replies.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "thread_id", "body"],
-      properties: {
-        workspace_id: { type: "string" },
-        thread_id: { type: "string" },
-        body: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "resolve_thread",
-    description: "Resolve a comment thread.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "thread_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        thread_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "unresolve_thread",
-    description: "Reopen a resolved comment thread.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "thread_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        thread_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "complete_review_thread",
-    description:
-      "Reply to a review thread with agent attribution and optionally resolve it in one call.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "thread_id", "body"],
-      properties: {
-        workspace_id: { type: "string" },
-        thread_id: { type: "string" },
-        body: { type: "string" },
-        resolve: { type: "boolean" },
-        agent_name: { type: "string" },
-        agent_model: { type: "string" },
-        agent_session_id: { type: "string" },
-      },
-    },
-  },
-  {
     name: "update_comment_anchor",
     description:
       "Update a thread anchor after moving a fuzzy or stale HTML pin/comment marker.",
@@ -388,70 +394,6 @@ export const mcpToolSpecs: McpToolSpec[] = [
       properties: {
         workspace_id: { type: "string" },
         thread_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "publish_page",
-    description: "Publish one page at its canonical /p/{slug-id} URL.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        permission: { type: "string", enum: ["view", "comment", "edit"] },
-        expires_at: { type: "string" },
-        password: { type: "string" },
-        indexing_enabled: { type: "boolean" },
-      },
-    },
-  },
-  {
-    name: "publish_folder",
-    description:
-      "Publish one folder subtree at its canonical /f/{slug-id} URL.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "folder_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        folder_id: { type: "string" },
-        permission: { type: "string", enum: ["view", "comment", "edit"] },
-        expires_at: { type: "string" },
-        password: { type: "string" },
-        indexing_enabled: { type: "boolean" },
-      },
-    },
-  },
-  {
-    name: "update_publication",
-    description:
-      "Update an existing page or folder publication by publication id.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "publication_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        publication_id: { type: "string" },
-        permission: { type: "string", enum: ["view", "comment", "edit"] },
-        expires_at: { type: "string" },
-        clear_expires_at: { type: "boolean" },
-        password: { type: "string" },
-        clear_password: { type: "boolean" },
-        indexing_enabled: { type: "boolean" },
-      },
-    },
-  },
-  {
-    name: "revoke_publication",
-    description: "Revoke a page or folder publication.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "publication_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        publication_id: { type: "string" },
       },
     },
   },
@@ -485,29 +427,6 @@ export const mcpToolSpecs: McpToolSpec[] = [
           enum: ["all", "page", "folder", "comment_thread", "comment"],
         },
       },
-    },
-  },
-  {
-    name: "search_pages",
-    description:
-      "Search pages in the selected workspace. Use search_workspace for folders and comments too.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "query"],
-      properties: {
-        workspace_id: { type: "string" },
-        query: { type: "string" },
-        limit: { type: "number" },
-      },
-    },
-  },
-  {
-    name: "list_workspace_tree",
-    description: "List folders and pages in a workspace.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id"],
-      properties: { workspace_id: { type: "string" } },
     },
   },
   {
@@ -770,7 +689,7 @@ export const mcpToolSpecs: McpToolSpec[] = [
       "Return the authenticated MCP session: user id, email, accessible workspaces, session kind (manual | cli | oauth), and client name.",
     inputSchema: { type: "object", properties: {} },
   },
-];
+] satisfies McpToolSpec[];
 
 export function jsonRpcResult(id: unknown, result: unknown) {
   return { jsonrpc: "2.0", id, result };

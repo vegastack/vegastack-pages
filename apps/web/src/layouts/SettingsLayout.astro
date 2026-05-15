@@ -1,5 +1,6 @@
 ---
 import AppLayout from "./AppLayout.astro";
+import "../styles/settings.css";
 import { CommandPalette } from "../components/CommandPalette";
 import SettingsSidebar from "../components/SettingsSidebar.astro";
 import type { SettingsContext } from "../lib/settings-data";
@@ -272,7 +273,7 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
       </section>
     </div>
   </div>
-  <CommandPalette client:only="react" workspaceId={workspace.id} />
+  <CommandPalette client:load workspaceId={workspace.id} />
 
   <script
     is:inline

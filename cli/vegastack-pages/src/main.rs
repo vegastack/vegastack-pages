@@ -676,6 +676,15 @@ enum WaitCondition {
     Timeout,
 }
 
+fn wait_condition_api_value(condition: &WaitCondition) -> &'static str {
+    match condition {
+        WaitCondition::FirstResponse => "first_response",
+        WaitCondition::NewComment => "new_comment",
+        WaitCondition::AllThreadsResolved => "all_threads_resolved",
+        WaitCondition::Timeout => "timeout",
+    }
+}
+
 #[derive(Serialize)]
 struct StatusOutput<'a> {
     status: &'a str,
@@ -1934,8 +1943,11 @@ fn resolve_page_id(api: &Api, page: &str, workspace: &str) -> Result<String, Str
         return Ok(page.to_string());
     }
     let response = api.get(
-        &format!("/api/pages/by-slug/{page}"),
-        &[("workspace_id", workspace.to_string())],
+        &format!("/api/pages/{page}"),
+        &[
+            ("workspace_id", workspace.to_string()),
+            ("include", "metadata".to_string()),
+        ],
     )?;
     response
         .get("page_id")
@@ -2057,37 +2069,31 @@ fn run(cli: &Cli) -> Result<Value, String> {
             let active_workspace = resolved_workspace(cli)?;
             match command {
                 PageCommand::Get { page } => {
-                    let page_id = resolve_page_id(&api, page, &active_workspace)?;
-                    let mut metadata = api.get(
-                        &format!("/api/pages/{page_id}"),
-                        &[("workspace_id", active_workspace.clone())],
-                    )?;
-                    let source = api.get(
-                        &format!("/api/pages/{page_id}/source"),
-                        &[("workspace_id", active_workspace.clone())],
-                    )?;
-                    if let Some(object) = metadata.as_object_mut() {
-                        object.insert("source".to_string(), source["source"].clone());
-                        object.insert(
-                            "source_version_id".to_string(),
-                            source["version_id"].clone(),
-                        );
-                        object.insert("source_content_hash".to_string(), source["etag"].clone());
-                    }
-                    Ok(metadata)
-                }
-                PageCommand::Rendered { page } => {
-                    let page_id = resolve_page_id(&api, page, &active_workspace)?;
                     api.get(
-                        &format!("/api/pages/{page_id}/rendered"),
-                        &[("workspace_id", active_workspace.clone())],
+                        &format!("/api/pages/{page}"),
+                        &[
+                            ("workspace_id", active_workspace.clone()),
+                            ("include", "source".to_string()),
+                        ],
                     )
                 }
+                PageCommand::Rendered { page } => {
+                    let value = api.get(
+                        &format!("/api/pages/{page}"),
+                        &[
+                            ("workspace_id", active_workspace.clone()),
+                            ("include", "rendered".to_string()),
+                        ],
+                    )?;
+                    Ok(value.get("rendered").cloned().unwrap_or(value))
+                }
                 PageCommand::Versions { page } => {
-                    let page_id = resolve_page_id(&api, page, &active_workspace)?;
                     api.get(
-                        &format!("/api/pages/{page_id}/versions"),
-                        &[("workspace_id", active_workspace.clone())],
+                        &format!("/api/pages/{page}"),
+                        &[
+                            ("workspace_id", active_workspace.clone()),
+                            ("include", "versions".to_string()),
+                        ],
                     )
                 }
                 PageCommand::Snapshot { page, label } => {
@@ -2692,61 +2698,39 @@ fn wait_for_review(
     poll_seconds: u64,
     after_id: Option<&str>,
 ) -> Result<Value, String> {
-    let page_id = resolve_page_id(api, page, workspace)?;
     let timeout_seconds = timeout_seconds.min(600);
     let started = Instant::now();
+    let mut cursor = after_id.map(str::to_string);
     loop {
-        let mut event_params: Vec<(&str, String)> = vec![
+        let event_params: Vec<(&str, String)> = vec![
             ("limit", "50".to_string()),
             ("workspace_id", workspace.to_string()),
+            ("until", wait_condition_api_value(until).to_string()),
         ];
-        if let Some(after) = after_id {
-            event_params.push(("after_id", after.to_string()));
+        let mut status_params = event_params;
+        if let Some(after) = cursor.as_deref() {
+            status_params.push(("after_id", after.to_string()));
         }
-        let events = api
-            .get(&format!("/api/pages/{page_id}/events"), &event_params)
-            .unwrap_or_else(|_| json!({ "events": [] }));
-        let comments = api.get(
-            &format!("/api/pages/{page_id}/comments"),
-            &[
-                ("status", "all".to_string()),
-                ("workspace_id", workspace.to_string()),
-            ],
+        let status = api.get(
+            &format!("/api/pages/{page}/review-status"),
+            &status_params,
         )?;
-        let event_items = events
+        let page_id = status
+            .get("page_id")
+            .and_then(Value::as_str)
+            .unwrap_or(page)
+            .to_string();
+        let event_items = status
             .get("events")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let threads = comments
+        let threads = status
             .get("threads")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let open_count = threads
-            .iter()
-            .filter(|thread| {
-                thread
-                    .get("thread")
-                    .and_then(|inner| inner.get("status"))
-                    .and_then(Value::as_str)
-                    == Some("open")
-            })
-            .count();
-        let condition_met = match until {
-            WaitCondition::Timeout => false,
-            WaitCondition::FirstResponse | WaitCondition::NewComment => {
-                !threads.is_empty()
-                    || event_items.iter().any(|event| {
-                        event
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .map(|kind| kind.starts_with("comment."))
-                            .unwrap_or(false)
-                    })
-            }
-            WaitCondition::AllThreadsResolved => !threads.is_empty() && open_count == 0,
-        };
+        let condition_met = status.get("status").and_then(Value::as_str) == Some("matched");
         if condition_met {
             return Ok(json!({
                 "status": "matched",
@@ -2756,6 +2740,9 @@ fn wait_for_review(
                 "threads": threads,
                 "events": event_items
             }));
+        }
+        if let Some(next_cursor) = status.get("next_cursor").and_then(Value::as_str) {
+            cursor = Some(next_cursor.to_string());
         }
         if started.elapsed() >= Duration::from_secs(timeout_seconds) {
             return Ok(json!({
@@ -3725,7 +3712,7 @@ mod tests {
         assert!(mcp_source.contains("maximum: 600000"));
         let events_start = mcp_source.find("name: \"list_review_events\"").unwrap();
         let events_end = mcp_source[events_start..]
-            .find("name: \"search_pages\"")
+            .find("name: \"search_workspace\"")
             .unwrap()
             + events_start;
         let events_spec = &mcp_source[events_start..events_end];

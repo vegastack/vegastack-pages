@@ -5,7 +5,7 @@
 MCP:
 
 1. `create_page` or `create_page_from_template`.
-2. `publish_page` with comment permission if an external reviewer needs access.
+2. `publication_apply` with comment permission if an external reviewer needs access.
 3. Tell the user the page public URL and that you are waiting for review for up to 10 minutes.
 4. `wait_for_review` using `timeout_ms: 600000` and `after_event_id` when continuing an existing wait.
 5. When comments arrive, act on them immediately; do not wait for the user to paste the comments back into chat.
@@ -29,7 +29,7 @@ vpg wait pg_123 --until first-response --timeout-seconds 600
 MCP:
 
 ```text
-list_comments -> prepare_page_edit -> validate_page_source -> patch_page -> complete_review_thread
+list_comments -> prepare_page_edit -> validate_page_source -> patch_page -> update_thread
 ```
 
 CLI:

@@ -80,8 +80,8 @@ https://your-domain.example/mcp
 - \`update_page\`
 - \`wait_for_review\`
 - \`list_review_events\`
-- \`reply_to_thread\`
-- \`resolve_thread\`
+- \`update_thread\`
+- \`search_workspace\`
 
 ## Local development
 

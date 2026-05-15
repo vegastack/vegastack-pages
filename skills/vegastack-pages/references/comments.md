@@ -87,5 +87,5 @@ Use `update_comment_anchor` / `vpg update-anchor` only to move a fuzzy, stale, o
 2. For text comments, fetch source with `prepare_page_edit` / `vpg pages prepare-edit`, patch with concurrency tokens, then validate.
 3. For HTML pin comments, inspect the HTML source and selector context. Patch the relevant markup, CSS, or copy. Validate as `html`.
 4. Reply with what changed. Resolve only after the feedback is handled.
-5. Use `unresolve_thread` / `vpg unresolve` if a thread was resolved by mistake.
+5. Use `update_thread` with `status: "open"` / `vpg unresolve` if a thread was resolved by mistake.
 6. Delete threads only when explicitly requested; deletion requires admin permission and removes the whole conversation.

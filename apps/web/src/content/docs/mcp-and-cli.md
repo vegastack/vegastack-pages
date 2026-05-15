@@ -44,19 +44,19 @@ Every workspace-scoped MCP tool call must include `workspace_id`. The token is w
 
 ### Tool surface
 
-| Category  | Tools                                                                                                                                                                                                   |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session   | `list_workspaces`, `whoami`                                                                                                                                                                             |
-| Create    | `create_page`, `create_page_from_template`, `upload_attachment`                                                                                                                                         |
-| Read      | `get_page`, `get_rendered_page`, `list_page_versions`, `list_workspace_tree`                                                                                                                            |
-| Edit      | `prepare_page_edit`, `patch_page`, `update_page`, `validate_page_source`, `move_page`, `create_page_snapshot`, `restore_page_version`                                                                   |
-| Review    | `wait_for_review`, `list_comments`, `create_comment`, `reply_to_thread`, `complete_review_thread`, `resolve_thread`, `unresolve_thread`, `update_comment_anchor`, `delete_thread`, `list_review_events` |
-| Publish   | `publish_page`, `publish_folder`, `update_publication`, `revoke_publication`                                                                                                                            |
-| Search    | `search_workspace`, `search_pages`                                                                                                                                                                      |
-| Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `render_template`                                                                                                               |
-| Members   | `invite_workspace_member`                                                                                                                                                                               |
+| Category  | Tools                                                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Session   | `list_workspaces`, `whoami`                                                                                                           |
+| Create    | `create_page`, `create_page_from_template`, `upload_attachment`                                                                       |
+| Read      | `get_page include=[...]`, `list_page_versions`, `list_workspace`                                                                      |
+| Edit      | `prepare_page_edit`, `patch_page`, `update_page`, `validate_page_source`, `move_page`, `create_page_snapshot`, `restore_page_version` |
+| Review    | `wait_for_review`, `list_comments`, `create_comment`, `update_thread`, `update_comment_anchor`, `delete_thread`, `list_review_events` |
+| Publish   | `publication_apply`, `publication_delete`                                                                                             |
+| Search    | `search_workspace`                                                                                                                    |
+| Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `render_template`                                             |
+| Members   | `invite_workspace_member`                                                                                                             |
 
-`reply_to_thread` posts a reply as the authenticated user. For agent-attributed replies use `complete_review_thread`, which accepts `agent_name`, `agent_model`, and `agent_session_id` and can resolve the thread in the same call. `wait_for_review` accepts `timeout_ms` in milliseconds (default and cap: 10 minutes) and `after_event_id` for cursor-based polling.
+`update_thread` replies, resolves, reopens, or completes a thread in one call. It accepts `agent_name`, `agent_model`, and `agent_session_id` for agent-attributed replies. `wait_for_review` accepts `timeout_ms` in milliseconds (default and cap: 10 minutes) and `after_event_id` for cursor-based polling.
 
 ### Common page loop
 

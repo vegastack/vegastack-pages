@@ -1,10 +1,6 @@
 import { ChevronsLeft, ChevronsRight } from "lucide-react";
 import { useEffect, useState } from "react";
-import {
-  CommentsPanel,
-  type ThreadPayload,
-  type ThreadStats,
-} from "./CommentsPanel";
+import { CommentsPanel, type ThreadStats } from "./CommentsPanel";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 
 type CommentsRailProps = {
@@ -14,13 +10,14 @@ type CommentsRailProps = {
   sourceType: "markdown" | "mdx" | "html";
   guestNameRequired?: boolean;
   currentUserName?: string;
-  initialThreads?: ThreadPayload[];
+  initialStats?: ThreadStats;
   initialExpanded?: boolean;
 };
 
 type TabKey = "open" | "resolved" | "all";
 const RAIL_STORAGE_KEY = "vpg_comments_rail_expanded";
 const RAIL_COOKIE_KEY = "vpg_comments_rail";
+const DESKTOP_RAIL_QUERY = "(min-width: 1180px)";
 
 function readStoredRailExpanded(): boolean | null {
   if (typeof window === "undefined") return null;
@@ -65,21 +62,26 @@ export function CommentsRail({
   sourceType,
   guestNameRequired = false,
   currentUserName,
-  initialThreads,
+  initialStats,
   initialExpanded = true,
 }: CommentsRailProps) {
+  const [desktopRail, setDesktopRail] = useState(() =>
+    typeof window === "undefined" || typeof window.matchMedia !== "function"
+      ? true
+      : window.matchMedia(DESKTOP_RAIL_QUERY).matches,
+  );
   // Seed strictly from the SSR-resolved prop so the first client render
   // matches the server HTML and React never warns about a hydration
   // mismatch. Legacy clients that have only localStorage (no cookie) are
   // reconciled below in a mount effect.
-  const [expanded, setExpanded] = useState(initialExpanded);
+  const [expanded, setExpanded] = useState(
+    () => initialExpanded && desktopRail,
+  );
   const [tab, setTab] = useState<TabKey>("open");
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [stats, setStats] = useState<ThreadStats>({
-    open: 0,
-    resolved: 0,
-    total: 0,
-  });
+  const [stats, setStats] = useState<ThreadStats>(
+    () => initialStats ?? { open: 0, resolved: 0, total: 0 },
+  );
 
   function setRailExpanded(next: boolean) {
     setExpanded(next);
@@ -100,17 +102,33 @@ export function CommentsRail({
   }
 
   useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(DESKTOP_RAIL_QUERY);
+    function onChange() {
+      const nextDesktopRail = media.matches;
+      setDesktopRail(nextDesktopRail);
+      if (!nextDesktopRail) setRailExpanded(false);
+    }
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+    // setRailExpanded intentionally persists a forced collapse when entering
+    // the stacked layout so later navigations do not open on a blank rail.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     // Reconcile from localStorage on mount for legacy clients that have it
     // set but no cookie yet (SSR fell back to the prop default). If
     // localStorage disagrees with the rendered state, flip and persist
     // cookie + dataset so the next navigation SSRs correctly.
-    const stored = readStoredRailExpanded();
-    const next = stored ?? initialExpanded;
+    const stored = desktopRail ? readStoredRailExpanded() : false;
+    const next = desktopRail && (stored ?? initialExpanded);
     if (next !== expanded) setExpanded(next);
     persistRailExpanded(next);
     // Runs once; later toggles persist inline via setRailExpanded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [desktopRail]);
 
   useEffect(() => {
     function onOpenComments(event: Event) {
@@ -232,8 +250,8 @@ export function CommentsRail({
         onActiveThreadChange={setActiveThreadId}
         onThreadStats={setStats}
         railExpanded={expanded}
+        desktopRail={desktopRail}
         onRequestOpenDraft={openRailForDraft}
-        initialThreads={initialThreads}
       />
     </aside>
   );

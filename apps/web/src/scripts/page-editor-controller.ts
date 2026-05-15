@@ -29,6 +29,8 @@ type ControllerState = {
 export function initPageEditorController() {
   const root = document.querySelector<HTMLElement>("[data-vpg-page-editor]");
   if (!root || root.dataset.editorInitialized === "true") return;
+  window.__vpgPageEditorControllerCleanup?.();
+  window.__vpgPageEditorControllerCleanup = undefined;
   root.dataset.editorInitialized = "true";
 
   const pageId = root.dataset.pageId;
@@ -150,6 +152,12 @@ export function initPageEditorController() {
   window.addEventListener("vpg:toggle-edit", toggle);
   document.addEventListener("pointerenter", onIntent, true);
   document.addEventListener("focusin", onIntent, true);
+  window.__vpgPageEditorControllerCleanup = () => {
+    window.removeEventListener("vpg:toggle-edit", toggle);
+    document.removeEventListener("pointerenter", onIntent, true);
+    document.removeEventListener("focusin", onIntent, true);
+    window.__vpgPageEditorControllerCleanup = undefined;
+  };
   scheduleIdlePreload(preload);
   if (window.__vpgEditIntent) toggle();
 }
@@ -383,5 +391,6 @@ declare global {
   interface Window {
     __vpgEditIntent?: boolean;
     __vpgCurrentSource?: string;
+    __vpgPageEditorControllerCleanup?: () => void;
   }
 }

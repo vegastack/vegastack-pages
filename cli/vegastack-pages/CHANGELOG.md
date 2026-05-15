@@ -1,5 +1,11 @@
 # @vegastack/pages
 
+## 0.1.13
+
+### Patch Changes
+
+- Consolidate the MCP tool surface around `get_page`, `search_workspace`, `update_thread`, `publication_apply`, `publication_delete`, and `list_workspace`; add consolidated page-ref and review-status APIs for faster CLI/MCP reads; improve authenticated page navigation, comments, share, sidebar, and command palette loading paths; and enable persistent Cloudflare Workers observability logs with request timing diagnostics.
+
 ## 0.1.12
 
 ### Patch Changes

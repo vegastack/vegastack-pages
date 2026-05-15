@@ -7,6 +7,9 @@
    tokens in @vegastack/pages-ui/styles.css alias the cssVariable that
    Astro emits (--font-geist / --font-geist-mono). */
 @import "@vegastack/pages-ui/styles.css";
+/* Keep @imports before normal CSS rules. Astro/Vite may tolerate later imports
+   in a full refresh, but client-side route swaps can miss the imported rules. */
+@import "./auth.css";
 
 /* Tailwind v4 theme bridge — exposes our --vsk-*, shadcn, and spacing tokens
    so utility classes like `bg-background`, `border-border`, `text-muted-foreground`,
@@ -89,16 +92,6 @@
   --radius-3xl: var(--vsk-radius-3xl);
   --radius-full: var(--vsk-radius-full);
 }
-
-/* Feature-scoped stylesheets. Order matters for cascade: comments and
-   prose-related decoration come AFTER prose typography (which lives in
-   this file's prose section); settings/auth/home/docs are self-contained
-   and order-insensitive. */
-@import "./comments.css";
-@import "./auth.css";
-@import "./settings.css";
-@import "./home.css";
-@import "./docs.css";
 
 :root {
   --space-2xs: 0.25rem;
@@ -223,6 +216,12 @@ textarea {
   border-radius: var(--vsk-radius-icon-button);
 }
 
+.vpg-button > svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+}
+
 .vpg-button-default,
 .vpg-button-subtle {
   background: var(--vsk-tint-7);
@@ -264,6 +263,42 @@ textarea {
   box-shadow: none;
   outline: 0;
   font-size: var(--text-small);
+}
+
+.vpg-input:hover,
+.vpg-textarea:hover,
+.vpg-select-trigger:hover {
+  border-color: var(--vsk-tint-22);
+}
+
+.vpg-input:focus,
+.vpg-input:focus-visible,
+.vpg-textarea:focus,
+.vpg-textarea:focus-visible,
+.vpg-select-trigger:focus,
+.vpg-select-trigger:focus-visible {
+  border-color: var(--vsk-border-strong);
+  background: var(--vsk-control-bg);
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
+.vpg-input::selection,
+.vpg-textarea::selection {
+  background: var(--vsk-tint-24);
+  color: var(--vsk-text);
+}
+
+.vpg-input:-webkit-autofill,
+.vpg-input:-webkit-autofill:hover,
+.vpg-input:-webkit-autofill:focus,
+.vpg-textarea:-webkit-autofill,
+.vpg-textarea:-webkit-autofill:hover,
+.vpg-textarea:-webkit-autofill:focus {
+  border-color: var(--vsk-border-strong);
+  -webkit-text-fill-color: var(--vsk-text);
+  box-shadow: 0 0 0 1000px var(--vsk-control-bg) inset !important;
+  caret-color: var(--vsk-text);
 }
 
 .vpg-input::placeholder,
@@ -584,8 +619,12 @@ textarea {
   margin-left: auto;
 }
 
+.vpg-dropdown-item:hover,
+.vpg-dropdown-item:focus-visible,
 .vpg-dropdown-item[data-highlighted],
 .vpg-dropdown-item[data-state="checked"],
+.vpg-select-item:hover,
+.vpg-select-item:focus-visible,
 .vpg-select-item[data-highlighted],
 .vpg-select-item[data-state="checked"] {
   background: var(--vsk-tint-7);
@@ -604,6 +643,8 @@ textarea {
   flex: 0 0 auto;
 }
 
+.vpg-dropdown-item:hover svg,
+.vpg-dropdown-item:focus-visible svg,
 .vpg-dropdown-item[data-highlighted] svg {
   color: var(--vsk-text);
 }
@@ -1307,13 +1348,23 @@ textarea {
 .create-dialog-form input,
 .create-dialog-form select {
   width: 100%;
-  border: 0;
+  border: var(--vsk-line);
   border-radius: var(--vsk-radius-control);
   background: var(--vsk-control-bg);
   color: var(--vsk-text);
   padding: 0.62rem 0.7rem;
   box-shadow: none;
   outline: 0;
+}
+
+.create-dialog-form input:hover,
+.create-dialog-form select:hover {
+  border-color: var(--vsk-tint-22);
+}
+
+.create-dialog-form input:focus,
+.create-dialog-form select:focus {
+  border-color: var(--vsk-muted);
 }
 
 .create-dialog-error {

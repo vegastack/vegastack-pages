@@ -14,12 +14,16 @@ describe("mcp tool registry", () => {
     expect(mcpToolNames).toContain("prepare_page_edit");
     expect(mcpToolNames).toContain("patch_page");
     expect(mcpToolNames).toContain("validate_page_source");
-    expect(mcpToolNames).toContain("complete_review_thread");
+    expect(mcpToolNames).toContain("update_thread");
     expect(mcpToolNames).toContain("create_comment");
     expect(mcpToolNames).toContain("update_comment_anchor");
-    expect(mcpToolNames).toContain("publish_page");
-    expect(mcpToolNames).toContain("update_publication");
+    expect(mcpToolNames).toContain("publication_apply");
+    expect(mcpToolNames).toContain("publication_delete");
     expect(isMcpToolName("delete_everything")).toBe(false);
+    expect(isMcpToolName("search_pages")).toBe(false);
+    expect(isMcpToolName("get_rendered_page")).toBe(false);
+    expect(isMcpToolName("reply_to_thread")).toBe(false);
+    expect(isMcpToolName("publish_page")).toBe(false);
   });
 
   it("exposes MCP tool specs and JSON-RPC helpers", () => {

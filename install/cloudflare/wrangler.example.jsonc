@@ -9,6 +9,13 @@
   },
   "observability": {
     "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true,
+      "head_sampling_rate": 1,
+    },
   },
   "vars": {
     "VPG_RUNTIME": "cloudflare",

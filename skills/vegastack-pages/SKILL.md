@@ -9,7 +9,7 @@ Use the MCP server when it is connected in the current agent harness. Use the `v
 
 ## Surface Selection
 
-1. If MCP tools named `create_page`, `prepare_page_edit`, `patch_page`, or `complete_review_thread` are available, use MCP.
+1. If MCP tools named `create_page`, `prepare_page_edit`, `patch_page`, or `update_thread` are available, use MCP.
 2. If no MCP tools are available, use the standalone `vpg` CLI with `--base-url`, `--workspace`, and either `--token` or stored login. CLI workflows do not require MCP.
 3. If both are available, prefer MCP for agent review workflows and the CLI for local files, scripts, CI, exports, or installation tasks.
 4. Never store tokens in this skill or in generated documents. Use the host agent's secret storage, `VPG_TOKEN`, or `vpg login --token`.
@@ -34,7 +34,7 @@ For edits, always fetch the live source and concurrency tokens first.
 MCP:
 
 ```text
-prepare_page_edit -> validate_page_source -> patch_page or update_page -> complete_review_thread
+prepare_page_edit -> validate_page_source -> patch_page or update_page -> update_thread
 ```
 
 CLI:

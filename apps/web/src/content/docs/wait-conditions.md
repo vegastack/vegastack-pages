@@ -48,7 +48,7 @@ sequenceDiagram
   R->>V: open /p/...
   R->>V: select text + comment
   V-->>A: resume(page, threads, version)
-  A->>V: reply_to_thread + patch source
+  A->>V: update_thread + patch source
   A->>V: wait_for_review(until=all_threads_resolved)
   R->>V: resolve thread
   V-->>A: resume(done)

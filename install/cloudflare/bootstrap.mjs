@@ -258,6 +258,14 @@ function writeWranglerConfig(databaseId, kvNamespaceId) {
       head_sampling_rate: Number(
         process.env.VPG_OBSERVABILITY_SAMPLING_RATE ?? "1",
       ),
+      logs: {
+        enabled: true,
+        invocation_logs: true,
+        persist: true,
+        head_sampling_rate: Number(
+          process.env.VPG_OBSERVABILITY_SAMPLING_RATE ?? "1",
+        ),
+      },
     },
     workers_dev: !customDomain,
     vars,

@@ -3,7 +3,7 @@ import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   auditService,
   ensureSeedData,
-  indexFolder,
+  scheduleIndexFolder,
   permissionService,
   workspaceService,
 } from "../../../../lib/runtime";
@@ -38,7 +38,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         ? Number(body.position)
         : undefined,
     });
-    await indexFolder(folder.id);
+    scheduleIndexFolder(folder.id);
     auditService.record({
       workspaceId: folder.workspaceId,
       actorUserId: actor.user?.id ?? null,

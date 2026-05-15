@@ -4,7 +4,7 @@ import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   auditService,
   ensureSeedData,
-  indexPage,
+  scheduleIndexPage,
   pageService,
   permissionService,
   reviewEventService,
@@ -67,7 +67,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       title: body.title === undefined ? undefined : String(body.title),
       folderPath,
     });
-    await indexPage(updated.id);
+    scheduleIndexPage(updated.id);
     auditService.record({
       workspaceId: updated.workspaceId,
       actorUserId: access.actor.user?.id ?? null,

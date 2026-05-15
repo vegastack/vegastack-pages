@@ -1,26 +1,19 @@
 import type { APIRoute } from "astro";
-import {
-  AppError,
-  hasPermission,
-  type SearchResourceType,
-} from "@vegastack/pages-core";
-import {
-  getApiRequestActor,
-  jsonAppError,
-  resolveActorPermission,
-} from "../../lib/access";
+import { AppError, type SearchResourceType } from "@vegastack/pages-core";
+import { getApiRequestActor, jsonAppError } from "../../lib/access";
 import {
   ensureSeedData,
   favoriteService,
   listRecentSearchResources,
-  pageService,
   recordSearchResourceOpen,
   searchIndexedResources,
 } from "../../lib/runtime";
+import { canReadWorkspaceOrScopedPages } from "../../lib/workspace-visibility";
 import {
-  canReadFolderOrVisibleDescendants,
-  canReadWorkspaceOrScopedPages,
-} from "../../lib/workspace-visibility";
+  buildWorkspaceNavigation,
+  canReadFolderFromNavigation,
+  type WorkspaceNavigationModel,
+} from "../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -67,14 +60,51 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
     if (actor.user && !canReadWorkspaceOrScopedPages(actor, workspaceId)) {
       return Response.json({ results: [] });
     }
+    const nav = buildWorkspaceNavigation(actor, workspaceId);
     if (!query.trim()) {
       const recent = await listRecentSearchResources({
         userId: actor.user?.id ?? null,
         workspaceId,
         limit,
       });
+      const include = new Set(
+        (url.searchParams.get("include") ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
+      const favorites =
+        actor.user && include.has("favorites")
+          ? favoriteService
+              .listForWorkspace(actor.user.id, workspaceId)
+              .map((favorite) => {
+                const page = nav.visiblePageById.get(favorite.pageId);
+                if (!page) return null;
+                return {
+                  type: "page" as const,
+                  id: page.id,
+                  pageId: page.id,
+                  folderId: null,
+                  title: page.title,
+                  url: `/p/${page.slugId}`,
+                  path: page.folderPath
+                    ? `${page.folderPath}/${page.title}`
+                    : page.title,
+                  subtitle: "Favorite",
+                  snippet: "",
+                  updatedAt: favorite.createdAt,
+                  icon: "file-text" as const,
+                  matchedField: "title" as const,
+                };
+              })
+              .filter((favorite): favorite is NonNullable<typeof favorite> =>
+                Boolean(favorite),
+              )
+              .slice(0, Math.min(limit, 10))
+          : [];
       return Response.json({
-        results: filterSearchResultsByPermission(recent, actor, workspaceId),
+        results: filterSearchResultsByPermission(recent, nav),
+        favorites,
       });
     }
     const favoritePageIds = actor.user
@@ -90,7 +120,7 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
         type: requestedType,
         favoritePageIds,
       })
-    ).filter((result) => canReadSearchResult({ result, actor, workspaceId }));
+    ).filter((result) => canReadSearchResult({ result, nav }));
 
     return Response.json({ results });
   } catch (error) {
@@ -110,31 +140,22 @@ function normalizeSearchType(value: string | null): SearchResourceType | "all" {
 
 function filterSearchResultsByPermission(
   results: Awaited<ReturnType<typeof searchIndexedResources>>,
-  actor: Awaited<ReturnType<typeof getApiRequestActor>>,
-  workspaceId: string,
+  nav: WorkspaceNavigationModel,
 ) {
-  return results.filter((result) =>
-    canReadSearchResult({ result, actor, workspaceId }),
-  );
+  return results.filter((result) => canReadSearchResult({ result, nav }));
 }
 
 function canReadSearchResult(input: {
   result: Awaited<ReturnType<typeof searchIndexedResources>>[number];
-  actor: Awaited<ReturnType<typeof getApiRequestActor>>;
-  workspaceId: string;
+  nav: WorkspaceNavigationModel;
 }) {
   if (input.result.type === "folder") {
     return (
       input.result.folderId &&
-      canReadFolderOrVisibleDescendants(input.actor, input.result.folderId)
+      canReadFolderFromNavigation(input.nav, input.result.folderId)
     );
   }
   const pageId = input.result.pageId;
   if (!pageId) return false;
-  const page = pageService
-    .listPages(input.workspaceId)
-    .find((candidate) => candidate.id === pageId);
-  if (!page) return false;
-  const permission = resolveActorPermission({ actor: input.actor, page });
-  return hasPermission(permission, "read");
+  return input.nav.visiblePageById.has(pageId);
 }
