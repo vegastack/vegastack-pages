@@ -26,10 +26,7 @@ export function scheduleBackgroundTask(
 async function cloudflareWaitUntil() {
   if (!waitUntilImport) {
     waitUntilImport = (async () => {
-      const isCloudflareRuntime =
-        process.env.VPG_ADAPTER === "cloudflare" ||
-        process.env.VPG_RUNTIME === "cloudflare" ||
-        process.env.CF_PAGES === "1";
+      const isCloudflareRuntime = process.env.VPG_RUNTIME === "cloudflare";
       if (!isCloudflareRuntime) return null;
       try {
         const specifier = "cloudflare:workers";

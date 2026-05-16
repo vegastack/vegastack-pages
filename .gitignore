@@ -2,7 +2,8 @@ node_modules/
 dist/
 .astro/
 .wrangler/
-apps/web/wrangler.jsonc
+# wrangler-generated runtime + Env types. Regenerate with `wrangler types`.
+apps/web/worker-configuration.d.ts
 .vegastack-pages/
 **/.vegastack-pages/
 .dev.vars

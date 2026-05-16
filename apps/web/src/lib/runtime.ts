@@ -436,9 +436,7 @@ let activeD1Batch: D1PreparedStatement[] | null = null;
 const defaultD1BatchStatementLimit = 1000;
 
 function isNodeRuntime() {
-  return (
-    process.env.VPG_ADAPTER === "node" || process.env.VPG_RUNTIME === "node"
-  );
+  return process.env.VPG_RUNTIME === "node";
 }
 
 export async function sha256Hex(input: string): Promise<string> {
@@ -513,10 +511,7 @@ export function assertRuntimeStorageBindings(input: {
 export async function getRuntimeBindings(): Promise<CloudflareBindings | null> {
   if (!runtimeBindingsPromise) {
     runtimeBindingsPromise = (async () => {
-      const isCloudflareRuntime =
-        process.env.VPG_ADAPTER === "cloudflare" ||
-        process.env.VPG_RUNTIME === "cloudflare" ||
-        process.env.CF_PAGES === "1";
+      const isCloudflareRuntime = process.env.VPG_RUNTIME === "cloudflare";
       if (!isCloudflareRuntime) return null;
       try {
         const specifier = "cloudflare:workers";

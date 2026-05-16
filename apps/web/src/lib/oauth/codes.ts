@@ -80,7 +80,7 @@ export type OAuthGrantRow = {
 };
 
 // Process-local fallback for environments without D1 (test runners, dev with
-// `VPG_ADAPTER` unset). Mirrors the persistence pattern used elsewhere in
+// `VPG_RUNTIME` unset). Mirrors the persistence pattern used elsewhere in
 // runtime.ts so the OAuth surface works identically in both modes.
 const fallbackGrants = new Map<string, OAuthGrantRow>();
 

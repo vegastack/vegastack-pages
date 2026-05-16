@@ -18,7 +18,6 @@ export const GET: APIRoute = () => {
   return Response.json({
     ok: true,
     runtime: process.env.VPG_RUNTIME ?? null,
-    adapter: process.env.VPG_ADAPTER ?? null,
     prod_data_dev: process.env.VPG_PROD_DATA_DEV === "true",
     sqlite_path: process.env.VPG_SQLITE_PATH ?? null,
     object_store_dir: process.env.VPG_OBJECT_STORE_DIR ?? null,

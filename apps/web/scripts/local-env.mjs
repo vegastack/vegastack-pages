@@ -94,7 +94,6 @@ export function resolvePublicUrl(args) {
 export function localEnv({ baseUrl } = {}) {
   return {
     ...process.env,
-    VPG_ADAPTER: "node",
     VPG_RUNTIME: "node",
     VPG_DEPLOYMENT_MODE: process.env.VPG_DEPLOYMENT_MODE ?? "self_hosted",
     VPG_PUBLIC_SIGNUP: process.env.VPG_PUBLIC_SIGNUP ?? "false",

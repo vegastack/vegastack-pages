@@ -32,7 +32,7 @@ function remarkMermaid() {
 }
 
 const target =
-  process.env.VPG_ADAPTER ??
+  process.env.VPG_RUNTIME ??
   (process.env.NODE_ENV === "development" ? "node" : "cloudflare");
 const allowedDomainSources = [
   "http://127.0.0.1:4322",

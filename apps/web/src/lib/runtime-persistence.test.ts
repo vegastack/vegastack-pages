@@ -8,7 +8,6 @@ type RuntimeModule = typeof import("./runtime");
 const tempDirs: string[] = [];
 
 afterEach(() => {
-  delete process.env.VPG_ADAPTER;
   delete process.env.VPG_RUNTIME;
   delete process.env.VPG_SQLITE_PATH;
   delete process.env.VPG_STATE_DIR;
@@ -262,7 +261,7 @@ describe("runtime D1 persistence", () => {
     const dir = mkdtempSync(join(tmpdir(), "vpg-comment-schema-repair-"));
     tempDirs.push(dir);
     const sqlitePath = join(dir, "runtime.sqlite");
-    process.env.VPG_ADAPTER = "node";
+    process.env.VPG_RUNTIME = "node";
     process.env.VPG_SQLITE_PATH = sqlitePath;
     process.env.VPG_STATE_DIR = dir;
     process.env.VPG_DB_MIGRATIONS_DIR = join(
@@ -308,7 +307,7 @@ async function freshNodeRuntime(): Promise<{
 }> {
   const dir = mkdtempSync(join(tmpdir(), "vpg-runtime-"));
   tempDirs.push(dir);
-  process.env.VPG_ADAPTER = "node";
+  process.env.VPG_RUNTIME = "node";
   process.env.VPG_SQLITE_PATH = join(dir, "runtime.sqlite");
   process.env.VPG_STATE_DIR = dir;
   process.env.VPG_DB_MIGRATIONS_DIR = join(

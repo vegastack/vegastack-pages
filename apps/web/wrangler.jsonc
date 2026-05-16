@@ -1,0 +1,106 @@
+{
+  // VegaStack Pages — production Cloudflare Worker.
+  //
+  // This file is the canonical deploy config. CI substitutes the
+  // `__VPG_*__` placeholders below with values from GitHub secrets
+  // before running `wrangler deploy`. Self-hosters can copy this file,
+  // replace the placeholders with their own resource ids, and deploy
+  // directly with `wrangler deploy`.
+  //
+  // Secrets (set via `wrangler secret put <NAME>` — never in this file):
+  //   - RESEND_API_KEY
+  //   - VPG_GITHUB_APP_PRIVATE_KEY
+  //   - VPG_GITHUB_APP_CLIENT_ID
+  //   - VPG_GITHUB_APP_CLIENT_SECRET
+  //   - VPG_SETUP_TOKEN
+  //   - ASTRO_KEY                (for Astro server-island prop crypto)
+
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Worker name. CI substitutes this with VPG_WORKER_NAME from secrets.
+  // Lowercase alphanumeric + dashes only.
+  "name": "vegastack-pages",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-05-14",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Smart Placement moves the Worker close to D1 automatically.
+  "placement": { "mode": "smart" },
+
+  "workers_dev": false,
+  "routes": [
+    // CI substitutes the pattern with VPG_CUSTOM_DOMAIN at deploy time.
+    { "pattern": "pages.vegastack.com", "custom_domain": true },
+  ],
+
+  // Astro emits the client bundle under dist/client. Hashed assets get
+  // immutable cache headers automatically via the adapter.
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+  },
+
+  // 100% log sampling + invocation logs. Tracing → Sentry is enabled
+  // via the Cloudflare dashboard (Observability → Destinations → Sentry
+  // OTLP) once per environment; the wrangler `tracing` block lands in
+  // v5 and is not enforced here.
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+    },
+  },
+
+  // ---------------------------------------------------------------------
+  // Bindings
+  // ---------------------------------------------------------------------
+
+  // D1 + R2 names/ids are CI-substituted at deploy time. The values
+  // below are valid placeholders that pass wrangler's schema validator
+  // so `wrangler types` and local builds work without secrets present.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vegastack-pages-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "CONTENT",
+      "bucket_name": "vegastack-pages-content",
+    },
+  ],
+
+  // Workers Images — runtime image transforms for embedded pictures.
+  "images": { "binding": "IMAGES" },
+
+  // Per-user rate limiting on Astro Actions (60 req/min/user).
+  "ratelimits": [
+    {
+      "name": "ACTIONS_RL",
+      "namespace_id": "1001",
+      "simple": { "limit": 60, "period": 60 },
+    },
+  ],
+
+  // Nightly GitHub backup sync.
+  "triggers": {
+    "crons": ["0 3 * * *"],
+  },
+
+  // ---------------------------------------------------------------------
+  // Plain vars (non-secret strings, type-checked via astro:env)
+  // ---------------------------------------------------------------------
+  "vars": {
+    "VPG_RUNTIME": "cloudflare",
+    "VPG_DEPLOYMENT_MODE": "managed",
+    "VPG_PUBLIC_SIGNUP": "true",
+    "VPG_HOME_MODE": "landing",
+    "VPG_BASE_URL": "https://pages.vegastack.com",
+    "VPG_EMAIL_FROM": "login@pages.vegastack.com",
+  },
+}

@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "VPG_ADAPTER=cloudflare astro build && pagefind --site dist/client --output-subdir pagefind",
-    "build:node": "VPG_ADAPTER=node astro build && pagefind --site dist/client --output-subdir pagefind",
-    "check": "astro check",
+    "build": "wrangler types && VPG_RUNTIME=cloudflare astro build && pagefind --site dist/client --output-subdir pagefind",
+    "build:node": "VPG_RUNTIME=node astro build && pagefind --site dist/client --output-subdir pagefind",
+    "check": "wrangler types && astro check",
     "dev": "node scripts/dev-local.mjs",
     "dev:local": "node scripts/dev-local.mjs",
     "dev:prod-data": "pnpm build && node scripts/dev-prod-data.mjs",
