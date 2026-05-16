@@ -107,7 +107,7 @@ export function SidebarUserPill({ name, email, initials }: Props) {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <a href="/app/profile">
+          <a href="/app/settings/profile">
             <UserIcon size={14} aria-hidden="true" />
             <span>Profile</span>
           </a>

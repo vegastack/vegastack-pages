@@ -1,7 +1,0 @@
----
-// Profile moved into the settings IA at /app/settings/profile in 0.2.0.
-// Preserve the legacy top-level route by redirecting permanently so old
-// bookmarks and inbound links continue to work.
-export const prerender = false;
-return Astro.redirect("/app/settings/profile", 301);
----

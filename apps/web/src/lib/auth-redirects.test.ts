@@ -21,8 +21,17 @@ describe("safeLocalRedirectPath", () => {
 });
 
 describe("loginRedirectTarget", () => {
-  it("does not bounce signed-in users back to auth pages", () => {
-    expect(loginRedirectTarget("/login")).toBe("/app");
+  it("does not bounce signed-in users back to the login page", () => {
     expect(loginRedirectTarget("/app/login")).toBe("/app");
+  });
+  it("keeps valid in-app targets", () => {
+    expect(loginRedirectTarget("/app/settings/profile")).toBe(
+      "/app/settings/profile",
+    );
+    expect(loginRedirectTarget("/p/some-page")).toBe("/p/some-page");
+  });
+  it("falls back to /app for unsafe redirect_to values", () => {
+    expect(loginRedirectTarget("https://attacker.example")).toBe("/app");
+    expect(loginRedirectTarget(null)).toBe("/app");
   });
 });

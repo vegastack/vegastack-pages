@@ -269,7 +269,7 @@ export function CommandPaletteDialog({
             <CommandGroup heading="Account">
               <CommandItem
                 value="profile account user"
-                onSelect={() => go("/app/profile")}
+                onSelect={() => go("/app/settings/profile")}
               >
                 <User size={14} aria-hidden="true" />
                 <span>View profile</span>

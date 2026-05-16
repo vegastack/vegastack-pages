@@ -16,5 +16,5 @@ export function safeLocalRedirectPath(
 
 export function loginRedirectTarget(value: string | null | undefined) {
   const target = safeLocalRedirectPath(value, "/app");
-  return target === "/login" || target === "/app/login" ? "/app" : target;
+  return target === "/app/login" ? "/app" : target;
 }
