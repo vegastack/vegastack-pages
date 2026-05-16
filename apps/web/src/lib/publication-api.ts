@@ -4,7 +4,7 @@ import {
   type PageRecord,
 } from "@vegastack/pages-core";
 import type { AstroCookies } from "astro";
-import { assertResourceAccessAdmin } from "./resource-access-api";
+import { assertResourceAccessAdmin } from "./access";
 import { assertPublicationPasswordPolicy } from "./share-password-policy";
 import {
   auditService,

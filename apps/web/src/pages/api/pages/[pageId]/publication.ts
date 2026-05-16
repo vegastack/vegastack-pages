@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { buildEnvelope, attachEnvelope } from "@vegastack/pages-services";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   deletePublication,
@@ -54,8 +54,8 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       actor,
       resource.page.workspaceId,
     ).treeVersion;
-    return attachEnvelope(
-      Response.json(result),
+    return jsonWithEnvelope(
+      result as Record<string, unknown>,
       buildEnvelope({
         treeVersion,
         navigationInvalidated: false,
@@ -85,8 +85,8 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       actor,
       resource.page.workspaceId,
     ).treeVersion;
-    return attachEnvelope(
-      Response.json(result),
+    return jsonWithEnvelope(
+      result as Record<string, unknown>,
       buildEnvelope({
         treeVersion,
         navigationInvalidated: false,

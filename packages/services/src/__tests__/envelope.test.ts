@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEnvelope, attachEnvelope, jsonWithEnvelope } from "../envelope";
+import { buildEnvelope, jsonWithEnvelope } from "../envelope";
 
 describe("buildEnvelope", () => {
   it("emits the minimum required fields with sensible defaults", () => {
@@ -56,72 +56,15 @@ describe("jsonWithEnvelope", () => {
     expect(body.version_id).toBe("ver_1");
     expect(body.envelope).toEqual(envelope);
   });
-});
 
-describe("attachEnvelope", () => {
-  it("inserts envelope into an existing JSON response", async () => {
-    const original = Response.json({ ok: true, page_id: "pg_1" });
+  it("honors a custom status via ResponseInit", async () => {
     const envelope = buildEnvelope({
       treeVersion: "nav_xyz",
       changedResources: ["page:pg_1"],
     });
-    const wrapped = await attachEnvelope(original, envelope);
-    const body = (await wrapped.json()) as Record<string, unknown>;
-    expect(body.ok).toBe(true);
-    expect(body.page_id).toBe("pg_1");
-    expect(body.envelope).toEqual(envelope);
-  });
-
-  it("throws when the response body isn't JSON (audit F-014)", async () => {
-    const original = new Response("plain text", {
-      headers: { "content-type": "text/plain" },
+    const response = jsonWithEnvelope({ created: true }, envelope, {
+      status: 201,
     });
-    const envelope = buildEnvelope({
-      treeVersion: "nav_xyz",
-      changedResources: ["page:pg_1"],
-    });
-    await expect(attachEnvelope(original, envelope)).rejects.toThrow(
-      /JSON response/,
-    );
-  });
-
-  it("throws when the JSON body is malformed (audit F-014)", async () => {
-    const original = new Response("not-json {", {
-      headers: { "content-type": "application/json" },
-    });
-    const envelope = buildEnvelope({
-      treeVersion: "nav_xyz",
-      changedResources: ["page:pg_1"],
-    });
-    await expect(attachEnvelope(original, envelope)).rejects.toThrow(
-      /could not parse/,
-    );
-  });
-
-  it("doesn't mutate error responses", async () => {
-    const original = Response.json(
-      { error: { code: "NOT_FOUND" } },
-      { status: 404 },
-    );
-    const envelope = buildEnvelope({
-      treeVersion: "nav_xyz",
-      changedResources: ["page:pg_1"],
-    });
-    const wrapped = await attachEnvelope(original, envelope);
-    expect(wrapped.status).toBe(404);
-    const body = (await wrapped.json()) as Record<string, unknown>;
-    expect(body.envelope).toBeUndefined();
-  });
-
-  it("wraps non-object JSON bodies under data + envelope", async () => {
-    const original = Response.json([1, 2, 3]);
-    const envelope = buildEnvelope({
-      treeVersion: "nav_xyz",
-      changedResources: ["page:pg_1"],
-    });
-    const wrapped = await attachEnvelope(original, envelope);
-    const body = (await wrapped.json()) as Record<string, unknown>;
-    expect(body.data).toEqual([1, 2, 3]);
-    expect(body.envelope).toEqual(envelope);
+    expect(response.status).toBe(201);
   });
 });

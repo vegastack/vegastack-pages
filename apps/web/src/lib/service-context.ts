@@ -1,17 +1,10 @@
 // Build a ServiceContext from a route handler's parameters.
 //
 // Every route that consumes @vegastack/pages-services constructs the
-// same shape: actor identity + the in-memory repo registry + a
-// no-op waitUntil + a no-op log. This helper factors that out so
-// route handlers stay focused on HTTP-layer concerns (validation,
-// status codes, envelope shaping) and delegate everything else to
-// the service layer.
-//
-// When the D1 adapters land in Workstream A, this is the single
-// place that switches between in-memory and D1 implementations.
-// Routes don't change.
-//
-// Plan: docs/plans/007-instant-workspace-architecture.md §F.
+// same shape: actor identity + the in-memory repo registry + waitUntil
+// + log. This helper factors that out so route handlers stay focused
+// on HTTP-layer concerns (validation, status codes, envelope shaping)
+// and delegate everything else to the service layer.
 
 import { isServiceError, type ServiceContext } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError, type RequestActor } from "./access";
@@ -24,10 +17,6 @@ export type RouteServiceContextInput = {
   workspaceId?: string | null;
 };
 
-// Build a ServiceContext from a Route's cookies + request. The actor's
-// workspaceId defaults to the actor's bound workspace; pass an explicit
-// workspaceId to override when the route operates on a specific
-// workspace different from the actor's default.
 export async function buildServiceContext(
   input: RouteServiceContextInput,
 ): Promise<{ ctx: ServiceContext; actor: RequestActor }> {
@@ -39,31 +28,11 @@ export async function buildServiceContext(
       email: actor.user?.email ?? null,
       workspaceId,
     },
-    session: {
-      bookmark: null,
-      prepare: () => {
-        throw new Error(
-          "ServiceContext.session is D1-only and not available in this adapter.",
-        );
-      },
-      batch: async () => {
-        throw new Error(
-          "ServiceContext.session is D1-only and not available in this adapter.",
-        );
-      },
-    },
     repo: repos,
     async computeTreeVersion(targetWorkspaceId: string) {
-      // Recomputes the workspace navigation hash from the post-write
-      // in-memory state. Cheap on the current in-memory adapter (one
-      // listFolders + listPages + sort + hash). When the D1-direct
-      // adapter lands, this becomes the per-request cached lookup.
       return buildWorkspaceNavigation(actor, targetWorkspaceId).treeVersion;
     },
     waitUntil(promise: Promise<unknown>) {
-      // Local fallback: run the promise and log any rejection so
-      // failures aren't silently dropped. The Cloudflare adapter will
-      // forward to the runtime's ctx.waitUntil() when wired.
       void promise.catch((err) => {
         console.warn("[vpg-service] waitUntil rejected:", err);
       });

@@ -63,15 +63,6 @@ async function seedFixture() {
   };
   const ctx: ServiceContext = {
     actor: { userId: user.id, email: user.email, workspaceId: workspace.id },
-    session: {
-      bookmark: null,
-      prepare: () => {
-        throw new Error("not used");
-      },
-      batch: async () => {
-        throw new Error("not used");
-      },
-    },
     repo: repos,
     async computeTreeVersion(workspaceId: string) {
       return buildWorkspaceNavigation(actor, workspaceId).treeVersion;

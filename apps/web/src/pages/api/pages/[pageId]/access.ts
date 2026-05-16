@@ -1,12 +1,13 @@
 import type { APIRoute } from "astro";
 import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
+  assertResourceAccessAdmin,
   deleteResourceAccess,
+  getApiRequestActor,
+  jsonAppError,
   listResourceAccess,
   setResourceAccess,
-  assertResourceAccessAdmin,
-} from "../../../../lib/resource-access-api";
+} from "../../../../lib/access";
 import { ensureSeedData, pageService } from "../../../../lib/runtime";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 

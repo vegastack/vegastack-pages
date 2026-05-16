@@ -1,5 +1,5 @@
 import type { APIRoute, AstroCookies } from "astro";
-import { buildEnvelope, attachEnvelope } from "@vegastack/pages-services";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import {
   getApiRequestActor,
   jsonAppError,
@@ -38,8 +38,8 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       actor,
       workspaceId,
     ).treeVersion;
-    return attachEnvelope(
-      Response.json(result),
+    return jsonWithEnvelope(
+      result as Record<string, unknown>,
       buildEnvelope({
         treeVersion,
         navigationInvalidated: true,

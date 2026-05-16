@@ -1,24 +1,9 @@
-// Mutation envelope builder + Response helpers.
+// Mutation envelope builder + JSON Response helper.
 //
-// Every nav-affecting POST/PUT/PATCH/DELETE endpoint should call
-// attachEnvelope() before returning. The envelope is added under the
-// "envelope" key in the JSON body so existing top-level fields are
-// preserved (backward compatibility — clients that don't know about
-// the envelope just ignore it).
-//
-// Usage from a route handler:
-//
-//   import { buildEnvelope, attachEnvelope } from "@vegastack/pages-services";
-//   ...
-//   const updated = await pageService.updateSource({...});
-//   return attachEnvelope(
-//     Response.json({ page_id: updated.page.id, ... }),
-//     buildEnvelope({
-//       treeVersion,
-//       contentHash: updated.page.contentHash,
-//       changedResources: [`page:${updated.page.id}`],
-//     }),
-//   );
+// Every nav-affecting POST/PUT/PATCH/DELETE endpoint that returns JSON
+// should call jsonWithEnvelope() so the envelope is part of the
+// response body under the "envelope" key. Clients (browser shell,
+// MCP, CLI) read it to invalidate caches without polling.
 
 import type { MutationEnvelope } from "./context.ts";
 
@@ -43,55 +28,7 @@ export function buildEnvelope(input: EnvelopeInput): MutationEnvelope {
   return envelope;
 }
 
-// Merges the envelope into an existing JSON Response. The Response body
-// is consumed and rewritten. Headers and status are preserved.
-//
-// Single contract: the envelope is ALWAYS in the JSON body under the
-// `envelope` key. Non-JSON or malformed-JSON responses throw rather than
-// silently falling back to an x-vpg-envelope header — having two
-// contracts means clients must check two places, which leads to bugs.
-// If a nav-affecting route needs to return a non-JSON payload (file
-// download, etc.), it should return JSON metadata alongside or wrap the
-// download in a JSON envelope.
-export async function attachEnvelope(
-  response: Response,
-  envelope: MutationEnvelope,
-): Promise<Response> {
-  if (!response.ok) return response;
-  const headers = new Headers(response.headers);
-  const contentType = headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/json")) {
-    throw new Error(
-      `attachEnvelope requires a JSON response (got content-type "${contentType}"). ` +
-        "Nav-affecting routes must return application/json so the envelope " +
-        "can be merged into the body.",
-    );
-  }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch (error) {
-    throw new Error(
-      `attachEnvelope could not parse the response JSON body: ${
-        (error as Error).message
-      }`,
-    );
-  }
-  if (body && typeof body === "object" && !Array.isArray(body)) {
-    (body as Record<string, unknown>).envelope = envelope;
-  } else {
-    body = { data: body, envelope };
-  }
-  return new Response(JSON.stringify(body), {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
-
-// One-call helper: build the JSON response and the envelope in a single
-// statement. Most route handlers will use this rather than calling
-// Response.json() + attachEnvelope() separately.
+// Build the JSON response and merge in the envelope in one call.
 export function jsonWithEnvelope(
   body: Record<string, unknown>,
   envelope: MutationEnvelope,

@@ -42,7 +42,10 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
     }
     const page = await pageService.getPage(thread.thread.pageId);
     if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
-    const access = await resolvePageAccess({
+    // Authorization side-effect: throws on insufficient access. We don't
+    // need the return value because the service call below uses
+    // ctx.actor for identity and the page itself for workspace scope.
+    await resolvePageAccess({
       cookies,
       request,
       url,

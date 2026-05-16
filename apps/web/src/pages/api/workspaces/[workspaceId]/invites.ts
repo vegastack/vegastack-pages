@@ -1,7 +1,7 @@
 import { AppError } from "@vegastack/pages-core";
 import type { WorkspaceRole } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { buildEnvelope, attachEnvelope } from "@vegastack/pages-services";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import { safeLocalRedirectPath } from "../../../../lib/auth-redirects";
 import { sendMagicLinkEmail } from "../../../../lib/email";
@@ -224,8 +224,8 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       actor,
       workspaceId,
     ).treeVersion;
-    return attachEnvelope(
-      Response.json(response),
+    return jsonWithEnvelope(
+      response,
       buildEnvelope({
         treeVersion,
         navigationInvalidated: true,

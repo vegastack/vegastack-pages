@@ -10,18 +10,6 @@ function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
 }
 
-function unusedSession() {
-  return {
-    bookmark: null,
-    prepare: () => {
-      throw new Error("not used");
-    },
-    batch: async () => {
-      throw new Error("not used");
-    },
-  };
-}
-
 async function seedFixture() {
   const workspace = workspaceService.createWorkspace({
     id: uniqueId("wks"),
@@ -48,7 +36,6 @@ async function seedFixture() {
   };
   const ctx: ServiceContext = {
     actor: { userId: user.id, email: user.email, workspaceId: workspace.id },
-    session: unusedSession(),
     repo: repos,
     async computeTreeVersion(workspaceId: string) {
       return buildWorkspaceNavigation(actor, workspaceId).treeVersion;
@@ -74,7 +61,6 @@ describe("workspaces.service", () => {
   it("whoami returns null for unauthenticated actors", async () => {
     const anonCtx: ServiceContext = {
       actor: { userId: "", email: null, workspaceId: null },
-      session: unusedSession(),
       repo: repos,
       async computeTreeVersion() {
         return "nav_anonymous";

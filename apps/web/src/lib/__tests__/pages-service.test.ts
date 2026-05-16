@@ -10,18 +10,6 @@ function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
 }
 
-function unusedSession() {
-  return {
-    bookmark: null,
-    prepare: () => {
-      throw new Error("session.prepare not used");
-    },
-    batch: async () => {
-      throw new Error("session.batch not used");
-    },
-  };
-}
-
 async function seedFixture() {
   const workspace = workspaceService.createWorkspace({
     id: uniqueId("wks"),
@@ -58,7 +46,6 @@ async function seedFixture() {
       email: user.email,
       workspaceId: workspace.id,
     },
-    session: unusedSession(),
     repo: repos,
     async computeTreeVersion(workspaceId: string) {
       return buildWorkspaceNavigation(actor, workspaceId).treeVersion;
