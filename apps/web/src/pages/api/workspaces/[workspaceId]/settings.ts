@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   auditService,
@@ -8,6 +9,7 @@ import {
   permissionService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -108,7 +110,21 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
         version_retention_days: workspace.versionRetentionDays,
       },
     });
-    return Response.json({ workspace });
+    // Workspace name/slug change is visible in the breadcrumb root; the
+    // shell uses tree_version to detect this. Slug changes also affect any
+    // cached workspace URL.
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { workspace },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [`workspace:${workspaceId}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Workspace settings update failed.");
   }

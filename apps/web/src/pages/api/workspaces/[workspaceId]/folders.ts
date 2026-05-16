@@ -1,4 +1,8 @@
 import type { APIRoute } from "astro";
+import {
+  workspaces as workspacesService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   auditService,
@@ -7,6 +11,7 @@ import {
   permissionService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -28,7 +33,12 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
           });
     permissionService.assert({ actual: permission, required: "write" });
     const body = await request.json();
-    const folder = workspaceService.createFolder({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    const result = await workspacesService.createFolder(ctx, {
       workspaceId,
       parentFolderId: body.parent_folder_id
         ? String(body.parent_folder_id)
@@ -38,6 +48,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         ? Number(body.position)
         : undefined,
     });
+    const folder = result.data;
     scheduleIndexFolder(folder.id);
     auditService.record({
       workspaceId: folder.workspaceId,
@@ -47,8 +58,14 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       targetId: folder.id,
       metadata: { name: folder.name, parent_folder_id: folder.parentFolderId },
     });
-    return Response.json({ folder });
+    return Response.json({ folder, envelope: result.envelope });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Folder creation failed.");
   }
 };

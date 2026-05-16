@@ -6,6 +6,7 @@ import {
   type TemplateProperty,
 } from "@vegastack/pages-core";
 import type { APIRoute, AstroCookies } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import {
   assertApiWorkspaceId,
   getApiRequestActor,
@@ -18,6 +19,7 @@ import {
   templateService,
   workspaceService,
 } from "../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -153,11 +155,25 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
         name: updated.template.name,
       },
     });
-    return Response.json({
-      template: serializeTemplate(updated.template),
-      source: updated.source,
-      builder: templateBuilderFromMarkdown(updated.source),
-    });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      updated.template.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        template: serializeTemplate(updated.template),
+        source: updated.source,
+        builder: templateBuilderFromMarkdown(updated.source),
+      },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `templates:${updated.template.workspaceId}`,
+          `template:${updated.template.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Template update failed.");
   }
@@ -193,7 +209,21 @@ export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
       targetId: deleted.id,
       metadata: { slug: deleted.slug, name: deleted.name },
     });
-    return Response.json({ template: serializeTemplate(deleted) });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      deleted.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { template: serializeTemplate(deleted) },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `templates:${deleted.workspaceId}`,
+          `template:${deleted.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Template delete failed.");
   }

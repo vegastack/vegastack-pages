@@ -1,5 +1,9 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  comments as commentsService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import { clientRateLimitKey } from "../../../../lib/client-address";
 import { coerceCommentAnchor } from "../../../../lib/comment-anchor-api";
@@ -19,6 +23,7 @@ import {
   publicationService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 const defaultMaxPublicCommentBodyBytes = 10_000;
@@ -143,7 +148,12 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         };
       }
     }
-    const created = commentService.createThread({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
+    });
+    const result = await commentsService.createThread(ctx, {
       pageId: page.page.id,
       workspaceId: page.page.workspaceId,
       body: commentBody,
@@ -153,18 +163,26 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       publicationId: guestSession?.publicationId ?? null,
       anchor,
     });
+    const created = result.data;
     reviewEventService.emit({
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
       type: "comment.created",
       actorUserId: access.actor.user?.id ?? null,
-      payload: {
-        thread_id: created.thread.id,
-      },
+      payload: { thread_id: created.thread.id },
     });
     scheduleIndexCommentThread(created.thread.id);
-    return Response.json(enrichThread(created));
+    return Response.json({
+      ...enrichThread(created),
+      envelope: result.envelope,
+    });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Comment creation failed.");
   }
 };

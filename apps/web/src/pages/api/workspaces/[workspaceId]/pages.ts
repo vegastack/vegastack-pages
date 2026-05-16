@@ -1,15 +1,19 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  pages as pagesService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   auditService,
   ensureSeedData,
   scheduleIndexPage,
-  pageService,
   permissionService,
   reviewEventService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -44,7 +48,12 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         404,
       );
     }
-    const created = await pageService.createPage({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    const result = await pagesService.create(ctx, {
       workspaceId,
       folderPath:
         folder?.path ??
@@ -56,6 +65,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
           : "markdown",
       source: String(body.source ?? ""),
     });
+    const created = result.data;
     scheduleIndexPage(created.page.id);
     auditService.record({
       workspaceId: created.page.workspaceId,
@@ -81,8 +91,15 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       slug_id: created.page.slugId,
       url: `/p/${created.page.slugId}`,
       version_id: created.page.versionId,
+      envelope: result.envelope,
     });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Page creation failed.");
   }
 };

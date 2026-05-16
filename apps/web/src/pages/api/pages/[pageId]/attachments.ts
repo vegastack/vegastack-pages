@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import { numericEnv, readJsonBody } from "../../../../lib/request-body";
 import {
@@ -9,6 +10,7 @@ import {
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 const defaultMaxAttachmentBytes = 10_485_760;
@@ -97,10 +99,24 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       actorUserId: access.actor.user?.id ?? null,
       payload: { attachment_id: attachment.id, filename: attachment.filename },
     });
-    return Response.json({
-      attachment,
-      url: `/api/attachments/${attachment.id}?workspace_id=${encodeURIComponent(page.page.workspaceId)}`,
-    });
+    const treeVersion = buildWorkspaceNavigation(
+      access.actor,
+      page.page.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        attachment,
+        url: `/api/attachments/${attachment.id}?workspace_id=${encodeURIComponent(page.page.workspaceId)}`,
+      },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `attachment:${attachment.id}`,
+          `attachments:${page.page.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Attachment upload failed.");
   }

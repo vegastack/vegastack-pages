@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
-import { jsonAppError } from "../../../../lib/access";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   assertResourceAccessAdmin,
   deleteResourceAccess,
@@ -7,6 +8,7 @@ import {
   setResourceAccess,
 } from "../../../../lib/resource-access-api";
 import { ensureSeedData, workspaceService } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -53,7 +55,22 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       resource,
       body: await request.json(),
     });
-    return Response.json({ grant });
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      resource.folder.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { grant },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [
+          `permission:folder:${resource.folder.id}`,
+          `folder:${resource.folder.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Folder access update failed.");
   }
@@ -78,7 +95,22 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       resource,
       grantId: String(body.grant_id ?? ""),
     });
-    return Response.json({ grant });
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      resource.folder.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { grant },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [
+          `permission:folder:${resource.folder.id}`,
+          `folder:${resource.folder.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Folder access deletion failed.");
   }

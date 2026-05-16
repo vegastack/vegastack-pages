@@ -1,6 +1,7 @@
 ---
 import AppLayout from "../layouts/AppLayout.astro";
 import { pageService, setupService } from "../lib/runtime";
+import { readInitialTheme } from "../lib/theme";
 
 export const prerender = false;
 
@@ -11,9 +12,10 @@ const setupWorkspacePages = status.firstWorkspaceId
 const setupRedirect = setupWorkspacePages[0]
   ? `/p/${setupWorkspacePages[0].slugId}`
   : "/";
+const initialTheme = readInitialTheme(Astro.cookies);
 ---
 
-<AppLayout title="Setup - VegaStack Pages">
+<AppLayout title="Setup - VegaStack Pages" initialTheme={initialTheme}>
   <main class="auth-shell">
     <section class="auth-form-side" aria-labelledby="setup-heading">
       <header>

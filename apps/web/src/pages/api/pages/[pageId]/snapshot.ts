@@ -1,11 +1,16 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  pages as pagesService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   ensureSeedData,
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -24,13 +29,21 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       page: page.page,
       required: "write",
     });
-    const updated = await pageService.updateSource({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
+    });
+    // Manual snapshot: write the existing source through updateSource with
+    // checkpoint=true. The service returns the new versionId.
+    const result = await pagesService.updateSource(ctx, {
       pageId: page.page.id,
       source: page.source,
       baseVersionId: page.page.versionId,
       checkpoint: true,
       checkpointLabel: body.label ? String(body.label) : "Manual snapshot",
     });
+    const updated = result.data;
     reviewEventService.emit({
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
@@ -46,8 +59,21 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       version_id: updated.page.versionId,
       updated_at: updated.page.updatedAt,
       checkpoint_created: updated.checkpointCreated,
+      envelope: {
+        ...result.envelope,
+        // Manual snapshot doesn't actually invalidate nav since the source
+        // didn't change. The service infers it from updated.changed, but
+        // for the snapshot semantics we want to explicitly state false.
+        navigation_invalidated: false,
+      },
     });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Snapshot failed.");
   }
 };

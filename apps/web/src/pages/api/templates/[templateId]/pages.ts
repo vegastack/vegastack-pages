@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import {
   assertApiWorkspaceId,
   getApiRequestActor,
@@ -15,6 +16,7 @@ import {
   templateService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -90,14 +92,26 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         template_slug: template.slug,
       },
     });
-    return Response.json({
-      page_id: created.page.id,
-      slug_id: created.page.slugId,
-      url: `/p/${created.page.slugId}`,
-      version_id: created.page.versionId,
-      template_id: template.id,
-      template_slug: template.slug,
-    });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      created.page.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        page_id: created.page.id,
+        slug_id: created.page.slugId,
+        url: `/p/${created.page.slugId}`,
+        version_id: created.page.versionId,
+        template_id: template.id,
+        template_slug: template.slug,
+      },
+      buildEnvelope({
+        treeVersion,
+        contentHash: created.page.contentHash,
+        navigationInvalidated: true,
+        changedResources: [`page:${created.page.id}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Page creation from template failed.");
   }

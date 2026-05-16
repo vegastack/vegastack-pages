@@ -1,5 +1,9 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  comments as commentsService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import { enrichReply } from "../../../../lib/comments-enrich";
 import { guestSessionForPublication } from "../../../../lib/guest-session";
@@ -11,6 +15,7 @@ import {
   publicationService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -61,8 +66,15 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         requestedName: body.guest_name ? String(body.guest_name) : null,
       });
     }
-    const reply = commentService.reply({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
+    });
+    const result = await commentsService.reply(ctx, {
       threadId: params.threadId ?? "",
+      pageId: page.page.id,
+      workspaceId: page.page.workspaceId,
       body: String(body.body ?? ""),
       authorType: access.actor.user ? "user" : "guest",
       authorUserId: access.actor.user?.id ?? null,
@@ -71,6 +83,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       publicationId: guestSession?.publicationId ?? null,
       agent: null,
     });
+    const reply = result.data;
     reviewEventService.emit({
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
@@ -82,8 +95,17 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       },
     });
     scheduleIndexCommentThread(thread.thread.id);
-    return Response.json({ reply: enrichReply(reply) });
+    return Response.json({
+      reply: enrichReply(reply),
+      envelope: result.envelope,
+    });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Reply failed.");
   }
 };

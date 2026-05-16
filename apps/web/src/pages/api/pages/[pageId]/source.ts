@@ -1,4 +1,8 @@
 import type { APIRoute } from "astro";
+import {
+  pages as pagesService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   assertUtf8ByteLimit,
@@ -11,6 +15,7 @@ import {
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 const defaultMaxPageSourceBytes = 1_048_576;
@@ -118,7 +123,16 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
       label: "Page source",
       detailKey: "max_page_source_bytes",
     });
-    const updated = await pageService.updateSource({
+
+    // Hand off to the service layer. The route keeps HTTP-shaped
+    // validation (conflict check, noop check, byte limit) above; the
+    // service layer owns the actual mutation + envelope construction.
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
+    });
+    const result = await pagesService.updateSource(ctx, {
       pageId: params.pageId ?? "",
       source,
       baseVersionId: String(body.base_version_id ?? ""),
@@ -127,6 +141,11 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
         ? String(body.checkpoint_label)
         : null,
     });
+    const updated = result.data;
+
+    // Side effects that remain outside the service: review event emission
+    // and search re-indexing. These should move to ctx.waitUntil once the
+    // Cloudflare runtime adapter is wired (plan §A.4).
     scheduleIndexPage(updated.page.id);
     reviewEventService.emit({
       workspaceId: updated.page.workspaceId,
@@ -149,8 +168,15 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
       checkpoint_created: updated.checkpointCreated,
       changed: updated.changed,
       render_status: "queued",
+      envelope: result.envelope,
     });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Source update failed.");
   }
 };

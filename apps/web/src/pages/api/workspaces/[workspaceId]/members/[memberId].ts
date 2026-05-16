@@ -1,5 +1,6 @@
 import { AppError, type WorkspaceRole } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../../lib/access";
 import {
   auditService,
@@ -9,6 +10,7 @@ import {
   revokeMcpSession,
   workspaceService,
 } from "../../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../../lib/workspace-navigation";
 
 export const prerender = false;
 const workspaceRoles = ["reader", "commenter", "editor", "admin"] as const;
@@ -185,7 +187,18 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
         display_name: updatedUser?.displayName ?? null,
       },
     });
-    return Response.json({ member: serializeMember(member) });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { member: serializeMember(member) },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [`members:${workspaceId}`, `member:${member.id}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Workspace member update failed.");
   }
@@ -235,11 +248,22 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
         revoked_mcp_sessions: mcpSessions.length,
       },
     });
-    return Response.json({
-      member: serializeMember(member),
-      removed_grants: removedGrants.length,
-      revoked_mcp_sessions: mcpSessions.length,
-    });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        member: serializeMember(member),
+        removed_grants: removedGrants.length,
+        revoked_mcp_sessions: mcpSessions.length,
+      },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [`members:${workspaceId}`, `member:${member.id}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Workspace member removal failed.");
   }

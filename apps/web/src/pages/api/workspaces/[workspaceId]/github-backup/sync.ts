@@ -1,4 +1,5 @@
 import type { APIRoute, AstroCookies } from "astro";
+import { buildEnvelope, attachEnvelope } from "@vegastack/pages-services";
 import {
   getApiRequestActor,
   jsonAppError,
@@ -6,6 +7,7 @@ import {
 } from "../../../../../lib/access";
 import { runGitHubBackupSync } from "../../../../../lib/github-backup";
 import { ensureSeedData, permissionService } from "../../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -31,7 +33,19 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
     });
-    return Response.json(result);
+    // Sync can pull in new pages from the repo, invalidating the tree.
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return attachEnvelope(
+      Response.json(result),
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [`github_backup:${workspaceId}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "GitHub backup sync failed.");
   }

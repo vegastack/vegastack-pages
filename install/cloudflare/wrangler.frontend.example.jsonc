@@ -1,0 +1,69 @@
+// Edge Worker — vegastack-pages-edge
+//
+// Role:
+//   - Astro SSR for /p/*, /f/*, public publication routes, app shell, settings.
+//   - Static assets via the ASTRO_KEY-aware ./dist/client directory.
+//   - Owns the auth session lookup against KV.
+//   - Forwards /api/* and /mcp to the backend Worker via Service Binding,
+//     adding a signed x-vpg-actor header for the backend to trust.
+//
+// What this Worker MUST NOT do:
+//   - Hold the D1 binding (lives on backend only).
+//   - Hold the R2 binding (lives on backend only).
+//   - Hold the cron trigger (lives on backend only).
+//   - Enable Smart Placement (it serves static assets — placement degrades
+//     asset serving per cloudflare/.../smart-placement/gotchas.md).
+//
+// Deploy with:
+//   wrangler deploy --config apps/web/wrangler.frontend.jsonc
+//
+// Secrets needed (set via `wrangler secret put ... --config <this file>`):
+//   ASTRO_KEY          — Astro Server Islands prop encryption
+//   VPG_INTERNAL_KEY   — HMAC signing key for the actor header
+{
+  "name": "vegastack-pages-edge",
+  "main": "./apps/web/dist/_worker.js/index.js",
+  "compatibility_date": "2026-05-10",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./apps/web/dist/client",
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true,
+      "head_sampling_rate": 1,
+    },
+  },
+  "vars": {
+    "VPG_RUNTIME": "cloudflare-edge",
+    "VPG_DEPLOYMENT_MODE": "self_hosted",
+    "VPG_PUBLIC_SIGNUP": "false",
+    "VPG_BASE_URL": "https://pages.example.com",
+    "VPG_HOME_MODE": "landing",
+    "VPG_GITHUB_APP_ID": "",
+    "VPG_GITHUB_APP_SLUG": "",
+  },
+  // Auth sessions live on KV. Edge owns this binding; backend never reads KV.
+  "kv_namespaces": [
+    {
+      "binding": "SESSION",
+      "id": "<generated>",
+    },
+  ],
+  // Service binding to the backend Worker. /api/* and /mcp forward here.
+  "services": [
+    {
+      "binding": "API",
+      "service": "vegastack-pages-api",
+    },
+  ],
+  // No D1 binding on edge.
+  // No R2 binding on edge.
+  // No cron triggers on edge.
+  // No placement field — explicit "off" by omission.
+}

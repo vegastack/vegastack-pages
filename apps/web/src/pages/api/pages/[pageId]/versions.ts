@@ -1,4 +1,8 @@
 import type { APIRoute } from "astro";
+import {
+  pages as pagesService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   auditService,
@@ -7,6 +11,7 @@ import {
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -58,14 +63,16 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     });
     const body = await request.json();
     const versionId = String(body.version_id ?? "");
-    const version = await pageService.getVersionSource(page.page.id, versionId);
-    const restored = await pageService.updateSource({
-      pageId: page.page.id,
-      source: version.source,
-      baseVersionId: page.page.versionId,
-      checkpoint: true,
-      checkpointLabel: `Restored ${version.version.createdAt}`,
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
     });
+    const result = await pagesService.restoreVersion(ctx, {
+      pageId: page.page.id,
+      versionId,
+    });
+    const restored = result.data;
     scheduleIndexPage(page.page.id);
     auditService.record({
       workspaceId: page.page.workspaceId,
@@ -88,8 +95,14 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         version_id: restored.page.versionId,
       },
     });
-    return Response.json({ page: restored.page });
+    return Response.json({ page: restored.page, envelope: result.envelope });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Version restore failed.");
   }
 };

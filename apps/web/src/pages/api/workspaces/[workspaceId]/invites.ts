@@ -1,6 +1,7 @@
 import { AppError } from "@vegastack/pages-core";
 import type { WorkspaceRole } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { buildEnvelope, attachEnvelope } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import { safeLocalRedirectPath } from "../../../../lib/auth-redirects";
 import { sendMagicLinkEmail } from "../../../../lib/email";
@@ -12,6 +13,7 @@ import {
   permissionService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 const workspaceRoles = ["reader", "commenter", "editor", "admin"] as const;
@@ -218,7 +220,18 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     if (magic && import.meta.env.DEV) {
       response.debug_verify_url = verifyUrl;
     }
-    return Response.json(response);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return attachEnvelope(
+      Response.json(response),
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [`members:${workspaceId}`, `member:${member.id}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Workspace invite failed.");
   }

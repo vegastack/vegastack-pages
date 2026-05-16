@@ -1,5 +1,9 @@
 import type { APIRoute } from "astro";
 import { AppError } from "@vegastack/pages-core";
+import {
+  pages as pagesService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   auditService,
@@ -10,6 +14,7 @@ import {
   reviewEventService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -50,6 +55,9 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       body.folder_path === undefined
         ? undefined
         : String(body.folder_path).replace(/^\/+|\/+$/g, "");
+    // Route-layer validation: the existing API contract uses
+    // FOLDER_NOT_FOUND (more specific than the service's generic
+    // NOT_FOUND) so we keep this check here to preserve the contract.
     if (
       folderPath &&
       !workspaceService
@@ -62,11 +70,17 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         404,
       );
     }
-    const updated = pageService.movePage({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
+    });
+    const result = await pagesService.move(ctx, {
       pageId: page.page.id,
       title: body.title === undefined ? undefined : String(body.title),
       folderPath,
     });
+    const updated = result.data;
     scheduleIndexPage(updated.id);
     auditService.record({
       workspaceId: updated.workspaceId,
@@ -87,8 +101,18 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         slug_id: updated.slugId,
       },
     });
-    return Response.json({ page: updated, url: `/p/${updated.slugId}` });
+    return Response.json({
+      page: updated,
+      url: `/p/${updated.slugId}`,
+      envelope: result.envelope,
+    });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Page move failed.");
   }
 };

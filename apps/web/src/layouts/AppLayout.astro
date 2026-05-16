@@ -5,11 +5,32 @@ import "../styles/global.css";
 import "../styles/shell.css";
 import { SonnerHost } from "../components/SonnerHost";
 
+// ClientRouter status: KEPT for v1. The workspace shell controller in
+// apps/web/src/scripts/shell is built and tested, and the
+// /api/workspaces/:wid/documents/* partial endpoints serve it — but
+// activating the shell (bootShell() call from a workspace route) is
+// deferred until the React islands that live outside #vpg-document
+// (CommentsRail in particular) are made shell-aware: they currently
+// receive page-scoped props at mount time and would render stale
+// state after a shell-driven swap. ClientRouter re-renders the entire
+// island tree on view transition, so today's behaviour is correct
+// even though shell-driven nav would be faster. The shell + payload
+// infrastructure remains in place for the follow-up that wires the
+// islands to a shell-swap event.
+//
+// Plan: docs/plans/007-instant-workspace-architecture.md §16.5
+// (Implementation progress log — shell activation pending).
+
 interface Props {
   title?: string;
   description?: string;
   canonicalPath?: string;
   robots?: string;
+  // SSR-time theme value. Pass "system" (or omit) on prerendered routes
+  // — reading `Astro.cookies` from a prerendered page triggers an Astro
+  // warning since the request isn't available. Server-rendered routes
+  // can read the cookie themselves and forward it.
+  initialTheme?: "light" | "dark" | "system";
 }
 
 const {
@@ -17,6 +38,7 @@ const {
   description = "VegaStack Pages is an open-source Agentic Knowledge Base for agent-authored pages, human review, MCP workflows, and self-hosted documentation.",
   canonicalPath,
   robots = "noindex",
+  initialTheme = "system",
 } = Astro.props;
 const baseUrl = (process.env.VPG_BASE_URL ?? "https://pages.vegastack.com")
   .replace(/\/+$/, "")
@@ -25,17 +47,13 @@ const canonicalUrl = canonicalPath
   ? `${baseUrl}${canonicalPath.startsWith("/") ? canonicalPath : `/${canonicalPath}`}`
   : null;
 
-// SSR the persisted theme onto <html> so the first paint matches the user's
-// choice. Without this the browser briefly paints dark via the
-// `prefers-color-scheme: dark` rule on `:root:not([data-theme])` when the OS
-// is dark and the user has picked light (or vice versa). The cookie is set
-// by the theme menus alongside localStorage. Default "system" lets the CSS
-// keep its existing OS-aware behavior for first-time visitors.
-const themeCookie = Astro.cookies.get("vpg-theme")?.value;
-const initialTheme =
-  themeCookie === "light" || themeCookie === "dark" || themeCookie === "system"
-    ? themeCookie
-    : "system";
+// initialTheme is now a prop. Server-rendered routes (auth, app, /p, /f)
+// read the cookie themselves and forward; prerendered routes (docs, etc.)
+// pass nothing and inherit the "system" default. The inline pre-paint
+// script below still aligns <html data-theme> with localStorage at first
+// paint, so prerendered pages still respect the user's choice without
+// triggering the Astro prerender cookie warning.
+// Audit reference: docs/audit-cycle-3-findings.md F-022.
 ---
 
 <!doctype html>
@@ -208,5 +226,53 @@ const initialTheme =
   <body>
     <slot />
     <SonnerHost client:load />
+
+    {
+      /* Workspace document initializers. These were previously emitted by
+        /p/[slugId].astro only; moved here so they run on every page
+        (no-op when their target DOM is absent) and so shell-driven nav
+        from /f/* to /p/* (or vice-versa) re-binds them via the same
+        astro:page-load dispatch. Each `init*` function is idempotent
+        and guards against missing DOM. */
+    }
+    <script>
+      import { initPageEditorController } from "../scripts/page-editor-controller";
+      import { enhanceProse } from "../scripts/prose-enhancements";
+      import { initTocRail } from "../scripts/toc-rail";
+
+      function initHtmlPreviewResize() {
+        const root = document.documentElement;
+        if (root.dataset.vpgHtmlPreviewResizeInitialized === "true") return;
+        root.dataset.vpgHtmlPreviewResizeInitialized = "true";
+        window.addEventListener("message", (event) => {
+          const data = event.data;
+          if (
+            !data ||
+            typeof data !== "object" ||
+            data.type !== "vpg:html-preview-resize" ||
+            typeof data.height !== "number"
+          ) {
+            return;
+          }
+          for (const iframe of document.querySelectorAll(
+            "[data-vpg-html-static]",
+          )) {
+            if (!(iframe instanceof HTMLIFrameElement)) continue;
+            if (event.source !== iframe.contentWindow) continue;
+            iframe.style.height = `${Math.ceil(Math.max(0, data.height))}px`;
+            break;
+          }
+        });
+      }
+
+      function runWorkspaceInitializers() {
+        enhanceProse();
+        initTocRail();
+        initHtmlPreviewResize();
+        initPageEditorController();
+      }
+      runWorkspaceInitializers();
+      document.addEventListener("astro:page-load", runWorkspaceInitializers);
+    </script>
   </body>
 </html>

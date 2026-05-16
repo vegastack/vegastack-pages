@@ -1,0 +1,19 @@
+{
+  "name": "@vegastack/pages-services",
+  "version": "0.1.13",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./context": "./src/context.ts",
+    "./errors": "./src/errors.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vegastack/pages-core": "workspace:*",
+    "@vegastack/pages-db": "workspace:*"
+  }
+}

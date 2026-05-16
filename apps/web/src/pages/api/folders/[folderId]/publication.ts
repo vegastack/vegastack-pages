@@ -1,11 +1,13 @@
 import type { APIRoute } from "astro";
-import { jsonAppError } from "../../../../lib/access";
+import { buildEnvelope, attachEnvelope } from "@vegastack/pages-services";
+import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   deletePublication,
   getPublication,
   upsertPublication,
 } from "../../../../lib/publication-api";
 import { ensureSeedData, workspaceService } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -45,12 +47,26 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
         { status: 404 },
       );
     }
-    return Response.json(
-      await upsertPublication({
-        cookies,
-        request,
-        resource,
-        body: await request.json(),
+    const result = await upsertPublication({
+      cookies,
+      request,
+      resource,
+      body: await request.json(),
+    });
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      resource.folder.workspaceId,
+    ).treeVersion;
+    return attachEnvelope(
+      Response.json(result),
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `publication:folder:${resource.folder.id}`,
+          `folder:${resource.folder.id}`,
+        ],
       }),
     );
   } catch (error) {
@@ -69,8 +85,22 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
         { status: 404 },
       );
     }
-    return Response.json(
-      await deletePublication({ cookies, request, resource }),
+    const result = await deletePublication({ cookies, request, resource });
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      resource.folder.workspaceId,
+    ).treeVersion;
+    return attachEnvelope(
+      Response.json(result),
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `publication:folder:${resource.folder.id}`,
+          `folder:${resource.folder.id}`,
+        ],
+      }),
     );
   } catch (error) {
     return jsonAppError(error, "Publication removal failed.");

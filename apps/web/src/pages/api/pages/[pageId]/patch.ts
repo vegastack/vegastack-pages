@@ -1,5 +1,9 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  pages as pagesService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   assertUtf8ByteLimit,
@@ -12,6 +16,7 @@ import {
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 const defaultMaxPageSourceBytes = 1_048_576;
@@ -117,7 +122,12 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       label: "Page source",
       detailKey: "max_page_source_bytes",
     });
-    const updated = await pageService.updateSource({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
+    });
+    const result = await pagesService.updateSource(ctx, {
       pageId: page.page.id,
       source: patched.source,
       baseVersionId: page.page.versionId,
@@ -126,6 +136,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         ? String(body.checkpoint_label)
         : null,
     });
+    const updated = result.data;
     scheduleIndexPage(updated.page.id);
     reviewEventService.emit({
       workspaceId: updated.page.workspaceId,
@@ -148,8 +159,15 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       checkpoint_created: updated.checkpointCreated,
       changed: updated.changed,
       replacement_count: patched.replacementCount,
+      envelope: result.envelope,
     });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Page patch failed.");
   }
 };

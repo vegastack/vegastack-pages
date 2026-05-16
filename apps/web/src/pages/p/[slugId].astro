@@ -32,6 +32,7 @@ import {
   listVisibleFoldersForActor,
 } from "../../lib/workspace-visibility";
 import { buildWorkspaceNavigation } from "../../lib/workspace-navigation";
+import { readInitialTheme } from "../../lib/theme";
 import AppLayout from "../../layouts/AppLayout.astro";
 import "../../styles/docs.css";
 import "../../styles/comments.css";
@@ -91,6 +92,65 @@ const canManageAccess = hasPermission(pageAccess.permission, "admin");
 const isPublicPublication = Boolean(
   passwordPrompt || (pageAccess.publicationId && !pageAccess.actor.user),
 );
+
+// Public publication responses are content-addressable: the rendered HTML
+// depends only on the page's content_hash and the publication record. Two
+// anonymous visitors looking at the same published page should see byte-
+// identical responses. Authenticated workspace views are never edge-cached
+// (Cache-Control: private, no-store) because they contain per-user signals
+// like favorite state and permissions.
+//
+// Plan: docs/plans/007-instant-workspace-architecture.md §10 (Public route caching).
+if (isPublicPublication && pageAccess.publication) {
+  const pub = pageAccess.publication;
+  const passwordGated = Boolean(pub.passwordHash);
+  const indexable = Boolean(pub.indexingEnabled);
+  // ETag combines page content_hash + publication updatedAt + password
+  // state so any of those changing busts the cache without us having to
+  // purge by URL. Quoted weak ETag — body is functionally equivalent on a
+  // match even if header bytes differ (compression, timing).
+  const etag = `W/"${pageWithSource.page.contentHash}.${Date.parse(pub.updatedAt).toString(36)}.${passwordGated ? "p" : "o"}"`;
+  Astro.response.headers.set("ETag", etag);
+  // Three cache policies:
+  //   1. Password-gated   -> private, max-age=60 (cookie-scoped)
+  //   2. Indexable public -> long shared cache (CDN-served)
+  //   3. Link-only public -> short shared cache (300s) — not indexed but
+  //      still URL-public, so a brief shared cache is fine; a year-long
+  //      s-maxage would surprise users who flip indexable off and expect
+  //      stale CDN copies to expire promptly (audit-cycle-3 F-005).
+  let cacheControl: string;
+  if (passwordGated) {
+    cacheControl = "private, max-age=60";
+    Astro.response.headers.set("Vary", "Cookie");
+  } else if (indexable) {
+    cacheControl =
+      "public, max-age=300, s-maxage=31536000, stale-while-revalidate=60";
+  } else {
+    cacheControl =
+      "public, max-age=60, s-maxage=300, stale-while-revalidate=60";
+  }
+  Astro.response.headers.set("Cache-Control", cacheControl);
+  // Browser sends If-None-Match on revisit; respond 304 when the ETag
+  // matches. Mirror the 200-path Cache-Control + Vary on the 304 so
+  // shared and browser caches keep the same policy on revalidation —
+  // otherwise a 304 from a password-gated publication could be treated
+  // as shared-cacheable (audit-cycle-3-findings.md F-003).
+  const ifNoneMatch = Astro.request.headers.get("If-None-Match");
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    const notModifiedHeaders: Record<string, string> = {
+      ETag: etag,
+      "Cache-Control": cacheControl,
+    };
+    if (passwordGated) {
+      notModifiedHeaders["Vary"] = "Cookie";
+    }
+    return new Response(null, { status: 304, headers: notModifiedHeaders });
+  }
+} else {
+  // Authenticated workspace views: never edge-cache. Browser can still
+  // bfcache (back/forward), which is the desired behaviour.
+  Astro.response.headers.set("Cache-Control", "private, no-store");
+}
 const actor = pageAccess.actor;
 const sidebarUser = actor.user ?? {
   id: "guest",
@@ -306,6 +366,7 @@ const sidebarFoldersForTree = visibleFolders.map((folder) => ({
 const sidebarTreeVersion = isPublicPublication
   ? null
   : buildWorkspaceNavigation(actor, sidebarWorkspace.id).treeVersion;
+
 // The same shell layout in every state — the TOC column is always reserved
 // so unlocking the editor never shifts the main column.
 const shellClasses = [
@@ -365,6 +426,8 @@ function htmlPreviewRuntimeScript(pageId: string, nonce: string) {
         max-width: 100%;
         overflow-x: hidden;
         overflow-x: clip;
+        overflow-y: hidden;
+        overflow-y: clip;
       }
       *,
       *::before,
@@ -1027,6 +1090,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
 <AppLayout
   title={`${title} - VegaStack Pages`}
   robots={publicIndexable ? "index,follow" : "noindex"}
+  initialTheme={readInitialTheme(Astro.cookies)}
 >
   {
     passwordPrompt ? (
@@ -1109,34 +1173,42 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                 }
                 data-workspace-id={sidebarWorkspace.id}
               >
-                {!isHtmlPage && <h1 class="prose-title">{title}</h1>}
-                {description && (
-                  <p class="prose-description" data-vpg-description-static>
-                    {description}
-                  </p>
-                )}
+                {/* Shell swap zone: the workspace shell controller replaces
+                    the inner HTML of this div on /p/* and /f/* navigation.
+                    The article wrapper persists with its data-* attributes
+                    so the editor host below stays mounted across nav. */}
+                <div
+                  id="vpg-document"
+                  class="vpg-document-zone"
+                  data-vpg-document
+                >
+                  {!isHtmlPage && <h1 class="prose-title">{title}</h1>}
+                  {description && (
+                    <p class="prose-description" data-vpg-description-static>
+                      {description}
+                    </p>
+                  )}
 
-                {metadataEntries.length > 0 && (
-                  <dl
-                    class="metadata-list"
-                    aria-label="Page metadata"
-                    data-vpg-metadata-static
-                  >
-                    {metadataEntries.map(([key, value]) => (
-                      <div>
-                        <dt>{key}</dt>
-                        <dd>
-                          {typeof value === "string"
-                            ? value
-                            : JSON.stringify(value)}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                )}
+                  {metadataEntries.length > 0 && (
+                    <dl
+                      class="metadata-list"
+                      aria-label="Page metadata"
+                      data-vpg-metadata-static
+                    >
+                      {metadataEntries.map(([key, value]) => (
+                        <div>
+                          <dt>{key}</dt>
+                          <dd>
+                            {typeof value === "string"
+                              ? value
+                              : JSON.stringify(value)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
 
-                {pageWithSource.page.sourceType === "html" ? (
-                  <>
+                  {pageWithSource.page.sourceType === "html" ? (
                     <iframe
                       class="html-preview"
                       data-vpg-html-static
@@ -1145,10 +1217,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                       srcdoc={htmlPreviewSrcdoc}
                       title={title}
                     />
-                    {canWrite && <div data-vpg-editor-host hidden />}
-                  </>
-                ) : (
-                  <>
+                  ) : (
                     <div
                       class="prose"
                       data-context="app"
@@ -1156,14 +1225,14 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                       data-vpg-prose-static
                       set:html={displayedHtml}
                     />
-                    {canWrite && <div data-vpg-editor-host hidden />}
-                  </>
-                )}
+                  )}
+                </div>
+                {canWrite && <div data-vpg-editor-host hidden />}
               </article>
             </main>
             {canComment && (
               <CommentsRail
-                client:load
+                client:idle
                 workspaceId={sidebarWorkspace.id}
                 pageId={pageWithSource.page.id}
                 contentHash={pageWithSource.page.contentHash}
@@ -1178,7 +1247,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette client:load workspaceId={sidebarWorkspace.id} />
+          <CommandPalette client:idle workspaceId={sidebarWorkspace.id} />
         )}
 
         {!isPublicPublication && (
@@ -1192,45 +1261,19 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
     )
   }
 
-  <script>
-    import { initPageEditorController } from "../../scripts/page-editor-controller";
-    import { enhanceProse } from "../../scripts/prose-enhancements";
-    import { initTocRail } from "../../scripts/toc-rail";
+  {
+    /* Shell controller activation is deferred — the controller and
+      partial endpoints are built (apps/web/src/scripts/shell and
+      /api/workspaces/:wid/documents/*) but bootShell() is not yet
+      called from this route. The follow-up wires up the React
+      islands (CommentsRail, etc.) to a shell-swap event so they
+      reset state on each swap; today's ClientRouter-driven nav
+      already re-renders them correctly. Plan §16.5. */
+  }
 
-    function initHtmlPreviewResize() {
-      const root = document.documentElement;
-      if (root.dataset.vpgHtmlPreviewResizeInitialized === "true") return;
-      root.dataset.vpgHtmlPreviewResizeInitialized = "true";
-      window.addEventListener("message", (event) => {
-        const data = event.data;
-        if (
-          !data ||
-          typeof data !== "object" ||
-          data.type !== "vpg:html-preview-resize" ||
-          typeof data.height !== "number"
-        ) {
-          return;
-        }
-        for (const iframe of document.querySelectorAll(
-          "[data-vpg-html-static]",
-        )) {
-          if (!(iframe instanceof HTMLIFrameElement)) continue;
-          if (event.source !== iframe.contentWindow) continue;
-          iframe.style.height = `${Math.ceil(Math.max(0, data.height))}px`;
-          break;
-        }
-      });
-    }
-
-    enhanceProse();
-    initTocRail();
-    initHtmlPreviewResize();
-    initPageEditorController();
-    document.addEventListener("astro:page-load", () => {
-      enhanceProse();
-      initTocRail();
-      initHtmlPreviewResize();
-      initPageEditorController();
-    });
-  </script>
+  {
+    /* Prose / editor / TOC initializers moved into AppLayout.astro so
+      they run uniformly under ClientRouter view transitions or the
+      future shell-driven swaps. */
+  }
 </AppLayout>

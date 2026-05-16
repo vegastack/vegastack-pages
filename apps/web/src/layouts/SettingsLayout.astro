@@ -4,6 +4,7 @@ import "../styles/settings.css";
 import { CommandPalette } from "../components/CommandPalette";
 import SettingsSidebar from "../components/SettingsSidebar.astro";
 import type { SettingsContext } from "../lib/settings-data";
+import { readInitialTheme } from "../lib/theme";
 
 interface Props {
   title: string;
@@ -69,7 +70,7 @@ const firstPage = pages[0];
 const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
 ---
 
-<AppLayout title={title}>
+<AppLayout title={title} initialTheme={readInitialTheme(Astro.cookies)}>
   <div
     class="vpg-shell"
     data-workspace-id={workspace.id}

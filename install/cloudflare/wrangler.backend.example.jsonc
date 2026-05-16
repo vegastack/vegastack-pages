@@ -1,0 +1,94 @@
+// Backend Worker — vegastack-pages-api
+//
+// Role:
+//   - Owns D1 (primary + replica binding for read-after-write via Sessions API).
+//   - Owns R2 CONTENT bucket (source markdown and rendered HTML artifacts).
+//   - Owns the GitHub-sync cron trigger.
+//   - Serves /api/* and /mcp, called only via the edge Worker's service
+//     binding. NO public hostname — edge is the only ingress.
+//   - Smart Placement enabled: this Worker only does backend work (D1/R2),
+//     so placement-mode:smart routes invocations close to the database.
+//
+// What this Worker MUST NOT do:
+//   - Serve static assets (no `assets` binding here).
+//   - Have a public route mapping (Cloudflare-side; this is service-binding-only).
+//
+// Deploy with:
+//   wrangler deploy --config apps/web/wrangler.backend.jsonc
+//
+// Secrets needed (set via `wrangler secret put ... --config <this file>`):
+//   VPG_INTERNAL_KEY    — HMAC verification key for the x-vpg-actor header
+//   VPG_EMAIL_*         — provider secrets if not using send_email binding
+{
+  "name": "vegastack-pages-api",
+  "main": "./apps/web/dist/backend/index.js",
+  "compatibility_date": "2026-05-10",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // Smart Placement: backend has no assets, no run_worker_first, only D1/R2/KV.
+  // This is the doc-recommended shape from cloudflare/.../smart-placement/.
+  // Monitor placement_status 15 min after first deploy; revert to "off" if
+  // it returns UNSUPPORTED_APPLICATION.
+  "placement": {
+    "mode": "smart",
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true,
+      "head_sampling_rate": 1,
+    },
+  },
+  "vars": {
+    "VPG_RUNTIME": "cloudflare-api",
+    "VPG_DEPLOYMENT_MODE": "self_hosted",
+    "VPG_PUBLIC_SIGNUP": "false",
+    "VPG_BASE_URL": "https://pages.example.com",
+    "VPG_EMAIL_PROVIDER": "auto",
+    "VPG_EMAIL_FROM": "notifications@example.com",
+    "VPG_EMAIL_FROM_NAME": "VegaStack Pages",
+    "VPG_GITHUB_APP_ID": "",
+    "VPG_GITHUB_APP_SLUG": "",
+    "VPG_GITHUB_SYNC_CRON": "17 2 * * *",
+  },
+  "triggers": {
+    "crons": ["17 2 * * *"],
+  },
+  // Primary D1. Writes always go here.
+  // Reads opt-in to the Sessions API + bookmark replay for read-after-write
+  // across replicas (see DB_REPLICA below).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vegastack_pages",
+      "database_id": "<generated>",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+    // Replica binding. Same database_id; experimental_remote routes reads to
+    // the nearest replica when configured (NA + EU initially). Sessions API
+    // bookmark replay ensures read-after-write consistency.
+    // Requires paid D1 plan with read replication enabled.
+    {
+      "binding": "DB_REPLICA",
+      "database_name": "vegastack_pages",
+      "database_id": "<generated>",
+      "experimental_remote": true,
+    },
+  ],
+  // R2 — source markdown + rendered HTML artifacts keyed by content hash.
+  "r2_buckets": [
+    {
+      "binding": "CONTENT",
+      "bucket_name": "vegastack-pages-content",
+    },
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+    },
+  ],
+  // No `assets` binding here. Edge serves all static assets.
+  // No KV binding here. Edge owns sessions.
+}

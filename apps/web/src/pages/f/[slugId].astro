@@ -24,6 +24,7 @@ import {
   listVisibleFoldersForActor,
 } from "../../lib/workspace-visibility";
 import { buildWorkspaceNavigation } from "../../lib/workspace-navigation";
+import { readInitialTheme } from "../../lib/theme";
 import {
   commentService,
   ensureSeedData,
@@ -84,6 +85,50 @@ if (
   !canReadFolderOrVisibleDescendants(actor, currentFolderId)
 ) {
   return new Response("Permission denied", { status: 403 });
+}
+
+// Public folder publication caching — mirrors /p/[slugId].astro. Public
+// + indexable shares get long shared-cache; password-gated shares get a
+// short private cache keyed by Cookie; authenticated workspace views are
+// never edge-cached. ETag combines workspaceId + folder updatedAt +
+// publication record + password-state, so any structural or auth change
+// busts the cache without us purging by URL.
+//
+// Audit reference: docs/audit-cycle-3-findings.md F-004.
+if (isPublicPublication && folderAccess.publication) {
+  const pub = folderAccess.publication;
+  const passwordGated = Boolean(pub.passwordHash);
+  const indexable = Boolean(pub.indexingEnabled);
+  const etag = `W/"folder.${folder.id}.${Date.parse(folder.updatedAt).toString(36)}.${Date.parse(pub.updatedAt).toString(36)}.${passwordGated ? "p" : "o"}"`;
+  Astro.response.headers.set("ETag", etag);
+  // Three cache policies — see /p/[slugId].astro for the rationale.
+  let cacheControl: string;
+  if (passwordGated) {
+    cacheControl = "private, max-age=60";
+    Astro.response.headers.set("Vary", "Cookie");
+  } else if (indexable) {
+    cacheControl =
+      "public, max-age=300, s-maxage=31536000, stale-while-revalidate=60";
+  } else {
+    cacheControl =
+      "public, max-age=60, s-maxage=300, stale-while-revalidate=60";
+  }
+  Astro.response.headers.set("Cache-Control", cacheControl);
+  const ifNoneMatch = Astro.request.headers.get("If-None-Match");
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    // Mirror the 200-path cache headers on the 304 so shared/browser
+    // caches don't lose the policy on revalidation.
+    const not304Headers: Record<string, string> = {
+      ETag: etag,
+      "Cache-Control": cacheControl,
+    };
+    if (passwordGated) {
+      not304Headers["Vary"] = "Cookie";
+    }
+    return new Response(null, { status: 304, headers: not304Headers });
+  }
+} else {
+  Astro.response.headers.set("Cache-Control", "private, no-store");
 }
 
 const sidebarUser = actor.user ?? {
@@ -268,6 +313,10 @@ const sidebarFoldersForTree = visibleFolders.map((node) => ({
 const sidebarTreeVersion = isPublicPublication
   ? null
   : buildWorkspaceNavigation(actor, sidebarWorkspace.id).treeVersion;
+
+// buildFolderDocumentPayload (apps/web/src/lib/document-payload.ts) is
+// the canonical builder used by the folder partial endpoint. SSR does
+// not call it today — see /p/[slugId].astro for the rationale.
 const canWrite =
   !isPublicPublication &&
   hasPermission(resolveFolderActorPermission({ actor, folder }), "write");
@@ -281,6 +330,7 @@ const publicIndexable = Boolean(
 <AppLayout
   title={`${folder.name} - VegaStack Pages`}
   robots={publicIndexable ? "index,follow" : "noindex"}
+  initialTheme={readInitialTheme(Astro.cookies)}
 >
   {
     passwordPrompt ? (
@@ -350,22 +400,29 @@ const publicIndexable = Boolean(
           <div class="vpg-shell-body">
             <main class="vpg-shell-main">
               <article class="vpg-shell-article prose-article">
-                <p class="prose-eyebrow">Folder</p>
-                <h1 class="prose-title">{folder.name}</h1>
+                {/* Shell swap zone — same contract as /p/* routes. */}
+                <div
+                  id="vpg-document"
+                  class="vpg-document-zone"
+                  data-vpg-document
+                >
+                  <p class="prose-eyebrow">Folder</p>
+                  <h1 class="prose-title">{folder.name}</h1>
 
-                <FolderPageList
-                  rows={listRows}
-                  workspaceId={sidebarWorkspace.id}
-                  folderId={folder.id}
-                  canWrite={canWrite}
-                />
+                  <FolderPageList
+                    rows={listRows}
+                    workspaceId={sidebarWorkspace.id}
+                    folderId={folder.id}
+                    canWrite={canWrite}
+                  />
+                </div>
               </article>
             </main>
           </div>
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette client:load workspaceId={sidebarWorkspace.id} />
+          <CommandPalette client:idle workspaceId={sidebarWorkspace.id} />
         )}
 
         {!isPublicPublication && (
@@ -378,4 +435,6 @@ const publicIndexable = Boolean(
       </div>
     )
   }
+
+  {/* Shell controller activation deferred — see /p/[slugId].astro. */}
 </AppLayout>

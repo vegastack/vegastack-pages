@@ -14,7 +14,14 @@ playwright-report/
 test-results/
 target/
 cli/vegastack-pages/npm-publish/
-.agents/skills/impeccable/
+# Agent-side skill installs. Only .agents/skills/ship/ is intentionally
+# tracked (release runbook used by the ship skill). Everything else under
+# this path is vendored agent reference material — large, frequently
+# regenerated, and not part of the product source.
+.agents/skills/*
+!.agents/skills/ship/
+skills/*
+!skills/vegastack-pages/
 VegaStack
 *.log
 .DS_Store

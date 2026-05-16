@@ -1,6 +1,10 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
+  workspaces as workspacesService,
+  isServiceError,
+} from "@vegastack/pages-services";
+import {
   assertApiWorkspaceId,
   getApiRequestActor,
   jsonAppError,
@@ -12,6 +16,7 @@ import {
   permissionService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -51,7 +56,16 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         400,
       );
     }
-    const reordered = workspaceService.reorderFolder({ folderId, direction });
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: folder.workspaceId,
+    });
+    const result = await workspacesService.reorderFolder(ctx, {
+      folderId,
+      direction,
+    });
+    const reordered = result.data;
     auditService.record({
       workspaceId: folder.workspaceId,
       actorUserId: actor.user?.id ?? null,
@@ -67,8 +81,15 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     return Response.json({
       folder: reordered.folder,
       siblings: reordered.siblings,
+      envelope: result.envelope,
     });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Folder reorder failed.");
   }
 };

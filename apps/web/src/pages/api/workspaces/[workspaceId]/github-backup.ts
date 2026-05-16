@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute, AstroCookies } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import {
   getApiRequestActor,
   jsonAppError,
@@ -25,6 +26,7 @@ import {
   permissionService,
   persistRuntimeState,
 } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -153,7 +155,18 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       },
     });
     await persistRuntimeState();
-    return Response.json({ connection: saved });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { connection: saved },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [`github_backup:${workspaceId}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "GitHub backup update failed.");
   }
@@ -174,7 +187,18 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       metadata: {},
     });
     await persistRuntimeState();
-    return Response.json({ ok: true });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { ok: true },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [`github_backup:${workspaceId}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "GitHub backup disconnect failed.");
   }

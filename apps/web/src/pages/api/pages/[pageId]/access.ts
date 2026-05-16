@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
-import { jsonAppError } from "../../../../lib/access";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   deleteResourceAccess,
   listResourceAccess,
@@ -7,6 +8,7 @@ import {
   assertResourceAccessAdmin,
 } from "../../../../lib/resource-access-api";
 import { ensureSeedData, pageService } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -51,7 +53,22 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       resource,
       body: await request.json(),
     });
-    return Response.json({ grant });
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      resource.page.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { grant },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [
+          `permission:page:${resource.page.id}`,
+          `page:${resource.page.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Page access update failed.");
   }
@@ -74,7 +91,22 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       resource,
       grantId: String(body.grant_id ?? ""),
     });
-    return Response.json({ grant });
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      resource.page.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { grant },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [
+          `permission:page:${resource.page.id}`,
+          `page:${resource.page.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Page access deletion failed.");
   }

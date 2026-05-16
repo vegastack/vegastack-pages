@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   auditService,
@@ -9,6 +10,7 @@ import {
   revokeMcpSession,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -76,11 +78,25 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         revoked_mcp_sessions: mcpSessions.length,
       },
     });
-    return Response.json({
-      member: { ...removed, user: workspaceService.getUser(removed.userId) },
-      removed_grants: removedGrants.length,
-      revoked_mcp_sessions: mcpSessions.length,
-    });
+    // Compute tree_version against the actor's now-empty membership. This
+    // signals to any other tabs that the workspace tree should be refetched
+    // (and will likely 403, prompting a workspace switch).
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        member: { ...removed, user: workspaceService.getUser(removed.userId) },
+        removed_grants: removedGrants.length,
+        revoked_mcp_sessions: mcpSessions.length,
+      },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [`members:${workspaceId}`, `member:${removed.id}`],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Leaving workspace failed.");
   }

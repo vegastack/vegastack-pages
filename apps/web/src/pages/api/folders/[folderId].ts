@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import {
   assertApiWorkspaceId,
   getApiRequestActor,
@@ -16,6 +17,7 @@ import {
   removeSearchResource,
   workspaceService,
 } from "../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -86,10 +88,24 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
         path: updated.folder.path,
       },
     });
-    return Response.json({
-      folder: updated.folder,
-      updated_pages: affectedPages.length,
-    });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      folder.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        folder: updated.folder,
+        updated_pages: affectedPages.length,
+      },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [
+          `folder:${updated.folder.id}`,
+          ...affectedPages.map((page) => `page:${page.id}`),
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Folder update failed.");
   }
@@ -138,11 +154,26 @@ export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
         deleted_child_folders: descendants.length,
       },
     });
-    return Response.json({
-      folder: deleted,
-      moved_pages: affectedPages.length,
-      deleted_child_folders: descendants.length,
-    });
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      folder.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        folder: deleted,
+        moved_pages: affectedPages.length,
+        deleted_child_folders: descendants.length,
+      },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: true,
+        changedResources: [
+          `folder:${deleted.id}`,
+          ...descendants.map((entry) => `folder:${entry.id}`),
+          ...affectedPages.map((page) => `page:${page.id}`),
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Folder delete failed.");
   }

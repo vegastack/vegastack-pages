@@ -1,4 +1,15 @@
+import type { AstroCookies } from "astro";
+
 export type ThemeChoice = "system" | "light" | "dark";
+export type InitialTheme = ThemeChoice;
+
+export function readInitialTheme(cookies: AstroCookies): InitialTheme {
+  const value = cookies.get(THEME_COOKIE_KEY)?.value;
+  if (value === "light" || value === "dark" || value === "system") {
+    return value;
+  }
+  return "system";
+}
 
 export const THEME_STORAGE_KEY = "vpg-theme";
 export const THEME_COOKIE_KEY = "vpg-theme";

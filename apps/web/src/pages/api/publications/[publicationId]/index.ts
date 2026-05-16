@@ -1,5 +1,6 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { assertApiWorkspaceId, jsonAppError } from "../../../../lib/access";
 import { assertPublicationPasswordPolicy } from "../../../../lib/share-password-policy";
 import {
@@ -14,6 +15,7 @@ import {
   resolveFolderActorPermission,
   getApiRequestActor,
 } from "../../../../lib/access";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -96,7 +98,22 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
           ? undefined
           : Boolean(body.indexing_enabled),
     });
-    return Response.json({ publication: updated });
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      publication.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { publication: updated },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `publication:${publication.id}`,
+          `publication:${publication.resourceType}:${publication.resourceId}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Publication update failed.");
   }
@@ -110,9 +127,23 @@ export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
       url,
       publicationId: params.publicationId ?? "",
     });
-    return Response.json({
-      publication: publicationService.revoke(publication.id),
-    });
+    const revoked = publicationService.revoke(publication.id);
+    const actor = await getApiRequestActor(cookies, request);
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      publication.workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      { publication: revoked },
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `publication:${publication.id}`,
+          `publication:${publication.resourceType}:${publication.resourceId}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Publication removal failed.");
   }

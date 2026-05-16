@@ -6,6 +6,7 @@ import VegaStackLogo from "../assets/vegastack-logo.svg";
 import GithubMark from "../components/GithubMark.astro";
 import { formatStarCount, getGithubStars } from "../lib/github-stars.ts";
 import { getRequestActor } from "../lib/access";
+import { readInitialTheme } from "../lib/theme";
 
 export const prerender = false;
 
@@ -24,6 +25,7 @@ if (
 
 const githubRepo = "vegastack/vegastack-pages";
 const githubStars = await getGithubStars(githubRepo);
+const initialTheme = readInitialTheme(Astro.cookies);
 
 const agents = [
   { name: "Claude Code", note: "Anthropic", initial: "C" },
@@ -135,6 +137,7 @@ const startLinks = [
   description="VegaStack Pages is an open-source Agentic Knowledge Base where agents create Markdown, MDX, and HTML pages through MCP or CLI, humans review with anchored comments, and teams keep versioned knowledge backed up to Git."
   canonicalPath="/"
   robots="index,follow"
+  initialTheme={initialTheme}
 >
   <main class="home-shell">
     <header class="home-nav" aria-label="Primary">

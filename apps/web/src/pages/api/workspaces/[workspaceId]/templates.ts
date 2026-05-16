@@ -5,6 +5,7 @@ import {
   type TemplateBuilderDocument,
   type TemplateProperty,
 } from "@vegastack/pages-core";
+import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
   auditService,
@@ -13,6 +14,7 @@ import {
   templateService,
   workspaceService,
 } from "../../../../lib/runtime";
+import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
@@ -103,23 +105,40 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       targetId: created.template.id,
       metadata: { slug: created.template.slug, name: created.template.name },
     });
-    return Response.json({
-      template: {
-        id: created.template.id,
-        slug: created.template.slug,
-        name: created.template.name,
-        description: created.template.description,
-        category: created.template.category,
-        source_type: created.template.sourceType,
-        version_id: created.template.versionId,
-        properties: created.template.properties,
-        is_builtin: created.template.isBuiltin,
-        created_at: created.template.createdAt,
-        updated_at: created.template.updatedAt,
+    // Templates don't appear in the sidebar tree, but the workspace's
+    // template catalog DID change — emit a changed_resources hint so any
+    // open template-picker pane refetches.
+    const treeVersion = buildWorkspaceNavigation(
+      actor,
+      workspaceId,
+    ).treeVersion;
+    return jsonWithEnvelope(
+      {
+        template: {
+          id: created.template.id,
+          slug: created.template.slug,
+          name: created.template.name,
+          description: created.template.description,
+          category: created.template.category,
+          source_type: created.template.sourceType,
+          version_id: created.template.versionId,
+          properties: created.template.properties,
+          is_builtin: created.template.isBuiltin,
+          created_at: created.template.createdAt,
+          updated_at: created.template.updatedAt,
+        },
+        source: created.source,
+        builder: templateBuilderFromMarkdown(created.source),
       },
-      source: created.source,
-      builder: templateBuilderFromMarkdown(created.source),
-    });
+      buildEnvelope({
+        treeVersion,
+        navigationInvalidated: false,
+        changedResources: [
+          `templates:${workspaceId}`,
+          `template:${created.template.id}`,
+        ],
+      }),
+    );
   } catch (error) {
     return jsonAppError(error, "Template creation failed.");
   }

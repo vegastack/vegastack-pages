@@ -1,5 +1,9 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  comments as commentsService,
+  isServiceError,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import {
   commentService,
@@ -8,6 +12,7 @@ import {
   pageService,
   reviewEventService,
 } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -32,8 +37,15 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       page: page.page,
       required: "comment",
     });
-    const reply = commentService.reply({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: page.page.workspaceId,
+    });
+    const replyResult = await commentsService.reply(ctx, {
       threadId: thread.thread.id,
+      pageId: page.page.id,
+      workspaceId: page.page.workspaceId,
       body: String(body.body ?? ""),
       authorType: body.agent_name ? "agent" : "user",
       authorUserId: access.actor.user?.id ?? null,
@@ -50,6 +62,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
           }
         : null,
     });
+    const reply = replyResult.data;
     reviewEventService.emit({
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
@@ -61,8 +74,17 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       },
     });
     let resolved = null;
+    // If we also resolved the thread, merge the resolve envelope's
+    // changed_resources into the reply envelope so clients invalidate
+    // both the reply cache and the thread-status cache.
+    let envelope = replyResult.envelope;
     if (Boolean(body.resolve)) {
-      resolved = commentService.resolve(thread.thread.id);
+      const resolveResult = await commentsService.resolve(ctx, {
+        threadId: thread.thread.id,
+        pageId: page.page.id,
+        workspaceId: page.page.workspaceId,
+      });
+      resolved = resolveResult.data;
       reviewEventService.emit({
         workspaceId: page.page.workspaceId,
         pageId: page.page.id,
@@ -70,14 +92,37 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         actorUserId: access.actor.user?.id ?? null,
         payload: { thread_id: resolved.id },
       });
+      envelope = {
+        // Use the post-resolve tree version (resolve ran last).
+        tree_version: resolveResult.envelope.tree_version,
+        content_hash:
+          resolveResult.envelope.content_hash ??
+          replyResult.envelope.content_hash,
+        navigation_invalidated:
+          replyResult.envelope.navigation_invalidated ||
+          resolveResult.envelope.navigation_invalidated,
+        changed_resources: [
+          ...new Set([
+            ...replyResult.envelope.changed_resources,
+            ...resolveResult.envelope.changed_resources,
+          ]),
+        ],
+      };
     }
     scheduleIndexCommentThread(thread.thread.id);
     return Response.json({
       reply,
       resolved,
       thread: commentService.getThread(thread.thread.id),
+      envelope,
     });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Thread completion failed.");
   }
 };
