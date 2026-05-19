@@ -336,8 +336,8 @@ jobs:
             ['"bucket_name": "vegastack-pages-content"', `"bucket_name": ${JSON.stringify(process.env.VPG_R2_BUCKET_NAME)}`],
             ['"pattern": "pages.vegastack.com", "custom_domain": true', `"pattern": ${JSON.stringify(process.env.VPG_CUSTOM_DOMAIN)}, "custom_domain": true`],
             ['"VPG_BASE_URL": "https://pages.vegastack.com"', `"VPG_BASE_URL": ${JSON.stringify(`https://${process.env.VPG_CUSTOM_DOMAIN}`)}`],
-            ['"VPG_EMAIL_FROM": "login@pages.vegastack.com"', `"VPG_EMAIL_FROM": ${JSON.stringify(process.env.VPG_EMAIL_FROM || "login@pages.vegastack.com")}`],
-            ['"login@pages.vegastack.com"', JSON.stringify(process.env.VPG_EMAIL_FROM || "login@pages.vegastack.com")],
+            ['"VPG_EMAIL_FROM": "pages@vegastack.com"', `"VPG_EMAIL_FROM": ${JSON.stringify(process.env.VPG_EMAIL_FROM || "pages@vegastack.com")}`],
+            ['"pages@vegastack.com"', JSON.stringify(process.env.VPG_EMAIL_FROM || "pages@vegastack.com")],
           ];
           for (const [needle, value] of replacements) {
             if (!cfg.includes(needle)) {
