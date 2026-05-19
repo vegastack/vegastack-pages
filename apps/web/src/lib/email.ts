@@ -162,17 +162,42 @@ async function sendWithCloudflareBinding(
       );
       return;
     }
-  } catch {
-    // Local development and older bindings may not expose cloudflare:email.
+  } catch (err) {
+    // Local development and older bindings may not expose
+    // cloudflare:email. Production failures are observable — log the
+    // root cause so operators can distinguish "binding missing" from
+    // "destination not verified" or "sender not allowlisted".
+    console.log(
+      JSON.stringify({
+        event: "vpg.email.cloudflare.email_message_path_failed",
+        level: "warn",
+        to: input.to,
+        from: from.email,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 
-  await bindings.EMAIL.send({
-    to: input.to,
-    from,
-    subject: subject(input),
-    text: textBody(input),
-    html: htmlBody(input),
-  });
+  try {
+    await bindings.EMAIL.send({
+      to: input.to,
+      from,
+      subject: subject(input),
+      text: textBody(input),
+      html: htmlBody(input),
+    });
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        event: "vpg.email.cloudflare.legacy_path_failed",
+        level: "error",
+        to: input.to,
+        from: from.email,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    throw err;
+  }
 }
 
 function bytesToHex(bytes: ArrayBuffer | Uint8Array) {
