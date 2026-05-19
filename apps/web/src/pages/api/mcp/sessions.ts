@@ -1,15 +1,19 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { getApiRequestActor, jsonAppError } from "../../../lib/access";
+import { audit, rateLimit } from "@vegastack/pages-services";
 import {
-  auditService,
-  checkRateLimit,
+  assertWorkspaceActorPermission,
+  getApiRequestActor,
+  resolveWorkspaceActorPermission,
+} from "../../../lib/access";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../lib/service-context";
+import {
   createMcpSession,
-  ensureSeedData,
   listMcpSessions,
-  permissionService,
   revokeMcpSession,
-  workspaceService,
 } from "../../../lib/runtime";
 
 export const prerender = false;
@@ -45,7 +49,6 @@ async function assertWorkspaceAdmin(
   request: Request,
   workspaceId: string,
 ) {
-  await ensureSeedData();
   const actor = await getApiRequestActor(cookies, request);
   if (!actor.user || actor.devFallback || actor.authMode !== "session") {
     throw new AppError(
@@ -54,16 +57,11 @@ async function assertWorkspaceAdmin(
       401,
     );
   }
-  const member = workspaceService.getMember(workspaceId, actor.user.id);
-  const permission =
-    actor.workspaceId && actor.workspaceId !== workspaceId
-      ? "none"
-      : permissionService.resolve({
-          user: actor.user,
-          member,
-          workspaceId,
-        });
-  permissionService.assert({ actual: permission, required: "admin" });
+  await assertWorkspaceActorPermission({
+    actor,
+    workspaceId,
+    required: "admin",
+  });
   return actor as AuthenticatedActor;
 }
 
@@ -72,7 +70,6 @@ async function assertWorkspaceMember(
   request: Request,
   workspaceId: string,
 ) {
-  await ensureSeedData();
   const actor = await getApiRequestActor(cookies, request);
   if (!actor.user || actor.devFallback || actor.authMode !== "session") {
     throw new AppError(
@@ -81,15 +78,7 @@ async function assertWorkspaceMember(
       401,
     );
   }
-  const member = workspaceService.getMember(workspaceId, actor.user.id);
-  const permission =
-    actor.workspaceId && actor.workspaceId !== workspaceId
-      ? "none"
-      : permissionService.resolve({
-          user: actor.user,
-          member,
-          workspaceId,
-        });
+  const permission = await resolveWorkspaceActorPermission(actor, workspaceId);
   if (permission === "none") {
     throw new AppError(
       "PERMISSION_DENIED",
@@ -101,6 +90,24 @@ async function assertWorkspaceMember(
     actor: actor as AuthenticatedActor,
     permission,
   };
+}
+
+async function enforceRateLimit(
+  ctx: Awaited<ReturnType<typeof buildServiceContext>>["ctx"],
+  input: { key: string; limit: number; windowMs: number },
+) {
+  const result = await rateLimit.check(ctx, input);
+  if (!result.ok) {
+    throw new AppError(
+      "RATE_LIMITED",
+      "Too many requests. Try again later.",
+      429,
+      {
+        reset_at: result.resetAt,
+      },
+    );
+  }
+  return result;
 }
 
 export const GET: APIRoute = async ({ cookies, request, url }) => {
@@ -127,7 +134,7 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
     });
     return Response.json({ sessions, view: "mine" });
   } catch (error) {
-    return jsonAppError(error, "Could not list MCP sessions.");
+    return serviceErrorToResponse(error, "Could not list MCP sessions.");
   }
 };
 
@@ -144,7 +151,12 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
       request,
       workspaceId,
     );
-    await checkRateLimit({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    await enforceRateLimit(ctx, {
       key: `mcp-session:${actor.user.id}:${workspaceId}`,
       limit: 10,
       windowMs: 60 * 60_000,
@@ -159,7 +171,7 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
       kind: "manual",
     });
     const { session, rawToken } = created;
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user.id,
       action: "mcp_session.created",
@@ -179,7 +191,7 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
       authorization_header: `Bearer ${rawToken}`,
     });
   } catch (error) {
-    return jsonAppError(error, "Could not create MCP session.");
+    return serviceErrorToResponse(error, "Could not create MCP session.");
   }
 };
 
@@ -223,7 +235,12 @@ export const DELETE: APIRoute = async ({ cookies, request }) => {
         "MCP session not found.",
         404,
       );
-    auditService.record({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user.id,
       action: "mcp_session.revoked",
@@ -233,6 +250,6 @@ export const DELETE: APIRoute = async ({ cookies, request }) => {
     });
     return Response.json({ status: "ok" });
   } catch (error) {
-    return jsonAppError(error, "Could not revoke MCP session.");
+    return serviceErrorToResponse(error, "Could not revoke MCP session.");
   }
 };

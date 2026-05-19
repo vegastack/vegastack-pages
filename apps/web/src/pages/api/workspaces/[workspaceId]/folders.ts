@@ -1,43 +1,46 @@
 import type { APIRoute } from "astro";
 import {
+  audit,
+  permissions as permissionsService,
   workspaces as workspacesService,
-  isServiceError,
 } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
+import { getApiRequestActor } from "../../../../lib/access";
+import { scheduleIndexFolder } from "../../../../lib/runtime";
 import {
-  auditService,
-  ensureSeedData,
-  scheduleIndexFolder,
-  permissionService,
-  workspaceService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const actor = await getApiRequestActor(cookies, request);
     const workspaceId = params.workspaceId ?? "";
-    const member = actor.user
-      ? workspaceService.getMember(workspaceId, actor.user.id)
-      : null;
-    const permission =
-      actor.workspaceId && actor.workspaceId !== workspaceId
-        ? "none"
-        : permissionService.resolve({
-            user: actor.user,
-            member,
-            workspaceId,
-          });
-    permissionService.assert({ actual: permission, required: "write" });
-    const body = await request.json();
     const { ctx } = await buildServiceContext({
       cookies,
       request,
       workspaceId,
     });
+    const member = actor.user
+      ? await workspacesService.getMember(ctx, {
+          workspaceId,
+          userId: actor.user.id,
+        })
+      : null;
+    const permission =
+      actor.workspaceId && actor.workspaceId !== workspaceId
+        ? "none"
+        : await permissionsService.resolve(ctx, {
+            workspaceId,
+            userId: actor.user?.id ?? "",
+            scope: "workspace",
+            targetId: workspaceId,
+            memberRole: member?.role ?? null,
+            instanceRole: actor.user?.role,
+          });
+    permissionsService.assertLevel({ actual: permission, required: "write" });
+    const body = await request.json();
     const result = await workspacesService.createFolder(ctx, {
       workspaceId,
       parentFolderId: body.parent_folder_id
@@ -50,7 +53,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
     });
     const folder = result.data;
     scheduleIndexFolder(folder.id);
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: folder.workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "folder.created",
@@ -60,12 +63,6 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
     });
     return Response.json({ folder, envelope: result.envelope });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Folder creation failed.");
+    return serviceErrorToResponse(error, "Folder creation failed.");
   }
 };

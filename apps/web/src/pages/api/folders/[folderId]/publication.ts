@@ -1,19 +1,31 @@
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
+import {
+  buildEnvelope,
+  folders as foldersService,
+  jsonWithEnvelope,
+} from "@vegastack/pages-services";
+import { getApiRequestActor } from "../../../../lib/access";
 import {
   deletePublication,
   getPublication,
   upsertPublication,
 } from "../../../../lib/publication-api";
-import { ensureSeedData, workspaceService } from "../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
-async function folderResource(folderId: string | undefined) {
-  await ensureSeedData();
-  const folder = folderId ? workspaceService.getFolder(folderId) : null;
+async function folderResource(
+  cookies: Parameters<APIRoute>[0]["cookies"],
+  request: Request,
+  folderId: string | undefined,
+) {
+  if (!folderId) return null;
+  const { ctx } = await buildServiceContext({ cookies, request });
+  const folder = await foldersService.get(ctx, folderId);
   return folder
     ? { type: "folder" as const, folder, slugId: folder.slugId }
     : null;
@@ -21,7 +33,7 @@ async function folderResource(folderId: string | undefined) {
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    const resource = await folderResource(params.folderId);
+    const resource = await folderResource(cookies, request, params.folderId);
     if (!resource) {
       return Response.json(
         {
@@ -32,13 +44,13 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
     }
     return Response.json(await getPublication({ cookies, request, resource }));
   } catch (error) {
-    return jsonAppError(error, "Publication lookup failed.");
+    return serviceErrorToResponse(error, "Publication lookup failed.");
   }
 };
 
 export const PUT: APIRoute = async ({ cookies, params, request }) => {
   try {
-    const resource = await folderResource(params.folderId);
+    const resource = await folderResource(cookies, request, params.folderId);
     if (!resource) {
       return Response.json(
         {
@@ -54,9 +66,8 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       body: await request.json(),
     });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.folder.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.folder.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       result as Record<string, unknown>,
@@ -70,13 +81,13 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Publication update failed.");
+    return serviceErrorToResponse(error, "Publication update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request }) => {
   try {
-    const resource = await folderResource(params.folderId);
+    const resource = await folderResource(cookies, request, params.folderId);
     if (!resource) {
       return Response.json(
         {
@@ -87,9 +98,8 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
     }
     const result = await deletePublication({ cookies, request, resource });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.folder.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.folder.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       result as Record<string, unknown>,
@@ -103,6 +113,6 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Publication removal failed.");
+    return serviceErrorToResponse(error, "Publication removal failed.");
   }
 };

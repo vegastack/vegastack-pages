@@ -1,11 +1,13 @@
 ---
+import {
+  permissions as permissionsService,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
 import SettingsLayout from "../../../../layouts/SettingsLayout.astro";
 import { formatDate, loadSettings } from "../../../../lib/settings-data";
-import {
-  listMcpSessions,
-  permissionService,
-  workspaceService,
-} from "../../../../lib/runtime";
+import { listMcpSessions } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { vendorForClient } from "../../../../lib/oauth/vendor-map";
 
 export const prerender = false;
@@ -14,14 +16,26 @@ const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
 const { workspace, currentUser } = result.context;
 
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+  workspaceId: workspace.id,
+});
+
 // Admin-only surface. A non-admin landing here (typed URL, bookmark, copied
 // link from an admin) is bounced to their personal connections view; the
 // silent-tab-redirect anti-pattern from the old combined page is gone.
-const member = workspaceService.getMember(workspace.id, currentUser.id);
-const permission = permissionService.resolve({
-  user: currentUser,
-  member,
+const member = await workspaces.getMember(ctx, {
   workspaceId: workspace.id,
+  userId: currentUser.id,
+});
+const permission = await permissionsService.resolve(ctx, {
+  workspaceId: workspace.id,
+  userId: currentUser.id,
+  scope: "workspace",
+  targetId: workspace.id,
+  memberRole: member?.role ?? null,
+  instanceRole: currentUser.role,
 });
 if (permission !== "admin") {
   return Astro.redirect("/app/settings/connections", 303);
@@ -55,29 +69,31 @@ function initialsOf(name: string): string {
   );
 }
 
-const cards: Card[] = sessions.map((session) => {
-  const vendor = vendorForClient({
-    clientName: session.clientName,
-    redirectUris: null,
-  });
-  const owner = workspaceService.getUser(session.userId);
-  const displayName = owner?.displayName ?? "Unknown user";
-  const email = owner?.email ?? "—";
-  return {
-    id: session.id,
-    vendorLabel: vendor.label,
-    clientName: session.clientName,
-    sessionSuffix: session.id.slice(-6),
-    kind: session.kind ?? "manual",
-    ownerDisplayName: displayName,
-    ownerEmail: email,
-    ownerInitials: initialsOf(displayName),
-    isCurrentUser: session.userId === currentUser.id,
-    lastSeen: session.lastSeenAt ? formatDate(session.lastSeenAt) : "Never",
-    created: formatDate(session.createdAt),
-    expires: formatDate(session.expiresAt),
-  };
-});
+const cards: Card[] = await Promise.all(
+  sessions.map(async (session) => {
+    const vendor = vendorForClient({
+      clientName: session.clientName,
+      redirectUris: null,
+    });
+    const owner = await users.getById(ctx, session.userId);
+    const displayName = owner?.displayName ?? owner?.email ?? "Unknown user";
+    const email = owner?.email ?? "—";
+    return {
+      id: session.id,
+      vendorLabel: vendor.label,
+      clientName: session.clientName,
+      sessionSuffix: session.id.slice(-6),
+      kind: session.kind ?? "manual",
+      ownerDisplayName: displayName,
+      ownerEmail: email,
+      ownerInitials: initialsOf(displayName),
+      isCurrentUser: session.userId === currentUser.id,
+      lastSeen: session.lastSeenAt ? formatDate(session.lastSeenAt) : "Never",
+      created: formatDate(session.createdAt),
+      expires: formatDate(session.expiresAt),
+    };
+  }),
+);
 ---
 
 <SettingsLayout

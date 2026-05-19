@@ -4,7 +4,7 @@ import AppLayout from "../../layouts/AppLayout.astro";
 
 export const prerender = false;
 
-const actor = getRequestActor(Astro.cookies);
+const actor = await getRequestActor(Astro.cookies);
 if (actor.user) {
   return Astro.redirect("/app");
 }

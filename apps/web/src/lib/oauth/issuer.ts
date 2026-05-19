@@ -1,13 +1,61 @@
-export function issuerForRequest(request: Request): string {
-  const headers = request.headers;
-  const forwardedProto = headers.get("x-forwarded-proto");
-  const forwardedHost = headers.get("x-forwarded-host");
-  if (forwardedHost) {
-    const proto = (forwardedProto ?? "https").split(",")[0]!.trim();
-    const host = forwardedHost.split(",")[0]!.trim();
-    return `${proto}://${host}`;
+// Compute the canonical OAuth issuer URL for a request.
+//
+// We accept `X-Forwarded-Host` / `X-Forwarded-Proto` from a proxy only
+// when the forwarded host appears on an explicit allowlist:
+//
+//   1. The hostname of `VPG_BASE_URL` — the operator-configured public
+//      origin. Always trusted.
+//   2. Any hostname in `VPG_MCP_ALLOWED_HOSTS` (comma-separated) — the
+//      same allowlist used by `validateHost()` for DNS-rebinding
+//      protection on the MCP surface.
+//
+// Without this gate an attacker could probe the
+// `/.well-known/oauth-authorization-server` metadata while injecting
+// their own `X-Forwarded-Host`, causing the server to advertise OAuth
+// endpoints under an attacker-controlled origin to whatever client
+// happened to relay the request. Real proxies (Cloudflare, k8s
+// ingress) sanitise these headers, but defense-in-depth here is cheap.
+const TRUSTED_PROTOS = new Set(["http", "https"]);
+
+function normalizeHost(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function allowedForwardHosts(): Set<string> {
+  const hosts = new Set<string>();
+  const baseUrl = process.env.VPG_BASE_URL ?? "";
+  if (baseUrl) {
+    try {
+      hosts.add(normalizeHost(new URL(baseUrl).host));
+    } catch {
+      // Ignore malformed VPG_BASE_URL — operator misconfiguration
+      // should not enable header trust.
+    }
   }
+  for (const raw of (process.env.VPG_MCP_ALLOWED_HOSTS ?? "").split(",")) {
+    const trimmed = raw.trim();
+    if (trimmed) hosts.add(normalizeHost(trimmed));
+  }
+  return hosts;
+}
+
+export function issuerForRequest(request: Request): string {
   const url = new URL(request.url);
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    ?.trim();
+  if (forwardedHost) {
+    const allowed = allowedForwardHosts();
+    if (allowed.has(normalizeHost(forwardedHost))) {
+      const forwardedProto =
+        request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ?? "";
+      const proto = TRUSTED_PROTOS.has(forwardedProto)
+        ? forwardedProto
+        : url.protocol.replace(":", "");
+      return `${proto}://${forwardedHost}`;
+    }
+  }
   return url.origin;
 }
 

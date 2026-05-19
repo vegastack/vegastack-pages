@@ -9,5 +9,3 @@ export type * from "./favorite.repo.ts";
 export type * from "./page.repo.ts";
 export type * from "./comment.repo.ts";
 export type * from "./workspace.repo.ts";
-export type * from "./template.repo.ts";
-export type * from "./attachment.repo.ts";

@@ -5,15 +5,19 @@ import {
   type TemplateBuilderDocument,
   type TemplateProperty,
 } from "@vegastack/pages-core";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
-  auditService,
-  ensureSeedData,
-  permissionService,
-  templateService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  audit,
+  buildEnvelope,
+  jsonWithEnvelope,
+  permissions as permissionsService,
+  templates,
+  workspaces as workspacesService,
+} from "@vegastack/pages-services";
+import { getApiRequestActor } from "../../../../lib/access";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
@@ -33,113 +37,133 @@ function sourceFromBody(body: Record<string, unknown>): string {
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
     const actor = await getApiRequestActor(cookies, request);
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
     const member = actor.user
-      ? workspaceService.getMember(workspaceId, actor.user.id)
+      ? await workspacesService.getMember(ctx, {
+          workspaceId,
+          userId: actor.user.id,
+        })
       : null;
     const permission =
       actor.workspaceId && actor.workspaceId !== workspaceId
         ? "none"
-        : permissionService.resolve({
-            user: actor.user,
-            member,
+        : await permissionsService.resolve(ctx, {
             workspaceId,
+            userId: actor.user?.id ?? "",
+            scope: "workspace",
+            targetId: workspaceId,
+            memberRole: member?.role ?? null,
+            instanceRole: actor.user?.role,
           });
-    permissionService.assert({ actual: permission, required: "read" });
-    const templates = templateService.listTemplates(workspaceId).map((t) => ({
-      id: t.id,
-      slug: t.slug,
-      name: t.name,
-      description: t.description,
-      category: t.category,
-      source_type: t.sourceType,
-      version_id: t.versionId,
-      properties: t.properties,
-      is_builtin: t.isBuiltin,
-      created_by: t.createdBy,
-      created_at: t.createdAt,
-      updated_at: t.updatedAt,
-    }));
-    return Response.json({ templates });
+    permissionsService.assertLevel({ actual: permission, required: "read" });
+    const records = await templates.listForWorkspace(ctx, { workspaceId });
+    return Response.json({
+      templates: records.map((t) => ({
+        id: t.id,
+        slug: t.slug,
+        name: t.name,
+        description: t.description,
+        category: t.category,
+        source_type: t.sourceType,
+        version_id: t.versionId,
+        properties: t.properties,
+        is_builtin: t.isBuiltin,
+        created_by: t.createdBy,
+        created_at: t.createdAt,
+        updated_at: t.updatedAt,
+      })),
+    });
   } catch (error) {
-    return jsonAppError(error, "Failed to list templates.");
+    return serviceErrorToResponse(error, "Failed to list templates.");
   }
 };
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
     const actor = await getApiRequestActor(cookies, request);
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
     const member = actor.user
-      ? workspaceService.getMember(workspaceId, actor.user.id)
+      ? await workspacesService.getMember(ctx, {
+          workspaceId,
+          userId: actor.user.id,
+        })
       : null;
     const permission =
       actor.workspaceId && actor.workspaceId !== workspaceId
         ? "none"
-        : permissionService.resolve({
-            user: actor.user,
-            member,
+        : await permissionsService.resolve(ctx, {
             workspaceId,
+            userId: actor.user?.id ?? "",
+            scope: "workspace",
+            targetId: workspaceId,
+            memberRole: member?.role ?? null,
+            instanceRole: actor.user?.role,
           });
-    permissionService.assert({ actual: permission, required: "write" });
+    permissionsService.assertLevel({ actual: permission, required: "write" });
     const body = await request.json();
-    const created = await templateService.createTemplate({
+    const source = sourceFromBody(body);
+    const template = await templates.create(ctx, {
       workspaceId,
       name: String(body.name ?? ""),
-      slug: body.slug ? String(body.slug) : undefined,
+      slug: body.slug ? String(body.slug) : "",
       description: body.description ? String(body.description) : "",
       category: body.category ? String(body.category) : "general",
       sourceType: body.source_type === "mdx" ? "mdx" : "markdown",
-      source: sourceFromBody(body),
+      source,
       properties: asProperties(body.properties),
-      createdBy: actor.user?.id ?? null,
     });
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "template.created",
       targetType: "template",
-      targetId: created.template.id,
-      metadata: { slug: created.template.slug, name: created.template.name },
+      targetId: template.id,
+      metadata: { slug: template.slug, name: template.name },
     });
     // Templates don't appear in the sidebar tree, but the workspace's
     // template catalog DID change — emit a changed_resources hint so any
     // open template-picker pane refetches.
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
       {
         template: {
-          id: created.template.id,
-          slug: created.template.slug,
-          name: created.template.name,
-          description: created.template.description,
-          category: created.template.category,
-          source_type: created.template.sourceType,
-          version_id: created.template.versionId,
-          properties: created.template.properties,
-          is_builtin: created.template.isBuiltin,
-          created_at: created.template.createdAt,
-          updated_at: created.template.updatedAt,
+          id: template.id,
+          slug: template.slug,
+          name: template.name,
+          description: template.description,
+          category: template.category,
+          source_type: template.sourceType,
+          version_id: template.versionId,
+          properties: template.properties,
+          is_builtin: template.isBuiltin,
+          created_at: template.createdAt,
+          updated_at: template.updatedAt,
         },
-        source: created.source,
-        builder: templateBuilderFromMarkdown(created.source),
+        source,
+        builder: templateBuilderFromMarkdown(source),
       },
       buildEnvelope({
         treeVersion,
         navigationInvalidated: false,
         changedResources: [
           `templates:${workspaceId}`,
-          `template:${created.template.id}`,
+          `template:${template.id}`,
         ],
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Template creation failed.");
+    return serviceErrorToResponse(error, "Template creation failed.");
   }
 };

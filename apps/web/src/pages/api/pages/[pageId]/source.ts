@@ -1,21 +1,16 @@
 import type { APIRoute } from "astro";
-import {
-  pages as pagesService,
-  isServiceError,
-} from "@vegastack/pages-services";
-import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
+import { pages as pagesService, reviewEvents } from "@vegastack/pages-services";
+import { resolvePageAccess } from "../../../../lib/access";
 import {
   assertUtf8ByteLimit,
   numericEnv,
   readJsonBody,
 } from "../../../../lib/request-body";
+import { scheduleIndexPage } from "../../../../lib/runtime";
 import {
-  ensureSeedData,
-  scheduleIndexPage,
-  pageService,
-  reviewEventService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 const defaultMaxPageSourceBytes = 1_048_576;
@@ -27,9 +22,9 @@ function maxPageSourceBytes() {
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       return Response.json(
@@ -52,20 +47,20 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       etag: page.page.contentHash,
     });
   } catch (error) {
-    return jsonAppError(error, "Source fetch failed.");
+    return serviceErrorToResponse(error, "Source fetch failed.");
   }
 };
 
 export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const maxSourceBytes = maxPageSourceBytes();
     const body = await readJsonBody<Record<string, unknown>>(request, {
       maxBytes: maxSourceBytes + jsonOverheadBytes,
       label: "Page source update",
     });
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       return Response.json(
@@ -127,11 +122,6 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
     // Hand off to the service layer. The route keeps HTTP-shaped
     // validation (conflict check, noop check, byte limit) above; the
     // service layer owns the actual mutation + envelope construction.
-    const { ctx } = await buildServiceContext({
-      cookies,
-      request,
-      workspaceId: page.page.workspaceId,
-    });
     const result = await pagesService.updateSource(ctx, {
       pageId: params.pageId ?? "",
       source,
@@ -147,7 +137,7 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
     // and search re-indexing. These should move to ctx.waitUntil once the
     // Cloudflare runtime adapter is wired (plan §A.4).
     scheduleIndexPage(updated.page.id);
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: updated.page.workspaceId,
       pageId: updated.page.id,
       type: updated.checkpointCreated ? "page.version_created" : "page.updated",
@@ -171,12 +161,6 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
       envelope: result.envelope,
     });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Source update failed.");
+    return serviceErrorToResponse(error, "Source update failed.");
   }
 };

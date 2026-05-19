@@ -3,7 +3,7 @@ title: Templates
 description: Create repeatable page structures for PRDs, RFCs, runbooks, launch plans, and other agent-authored knowledge.
 category: Agents
 order: 15
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 Templates make agent output consistent. A template is a reusable page scaffold with headings, optional visible helper text, hidden guidance comments, and typed properties that render into frontmatter.
@@ -47,36 +47,61 @@ The page created from a template is a normal page. It has versions, comments, at
 
 ## MCP workflow
 
-Agents can list, read, render, create, and update templates:
+Agents list, read, render, create, and update templates through the consolidated tool surface:
 
 ```js
-await mcp.call("list_templates", {
+// List templates: fetch the workspace with include=["templates"].
+await mcp.call("fetch", {
   workspace_id: "wks_123",
+  resource_id: "wks_123",
+  include: ["templates"],
 });
 
-await mcp.call("create_page_from_template", {
+// Read one template (source + properties spec).
+await mcp.call("fetch", {
+  workspace_id: "wks_123",
+  resource_id: "tpl_prd",
+  include: ["source", "properties"],
+});
+
+// Render a template into Markdown without saving.
+await mcp.call("render_template", {
+  workspace_id: "wks_123",
+  template: "prd",
+  title: "Search redesign",
+  properties: { owner: "platform", status: "review" },
+});
+
+// Create a page from a template — create_page accepts template_id directly.
+await mcp.call("create_page", {
   workspace_id: "wks_123",
   template_id: "prd",
   title: "Search redesign",
-  properties: {
-    owner: "platform",
-    status: "review",
-  },
+  properties: { owner: "platform", status: "review" },
 });
 ```
 
-`get_template` returns source with guidance comments intact so agents can follow the intended structure.
+Template `fetch` returns source with guidance comments intact so agents can follow the intended structure.
 
 ## CLI workflow
 
 ```sh
-vpg --workspace wks_123 templates list
-vpg --workspace wks_123 templates show prd
-vpg --workspace wks_123 templates render prd --title "Search redesign" --set owner=platform
-vpg --workspace wks_123 create --template prd --title "Search redesign" --set owner=platform
+vpg templates list
+vpg templates list --category product
+vpg templates get prd
+vpg templates render prd --title "Search redesign" --set owner=platform
+vpg pages create --template prd --title "Search redesign" --set owner=platform
+
+# --agent mode:
+vpg --agent templates render prd --title "Search redesign" --set owner=platform
 ```
 
-Template create and update commands accept JSON:
+Template create and update commands accept JSON via `--args-file` or `--args`, or per-field `--set key=value` (including dotted paths like `--set properties.owner.required=true`):
+
+```sh
+vpg templates create --args-file ./executive-review.json
+vpg templates update prd --set name="PRD (v2)"
+```
 
 ```json
 {

@@ -1,7 +1,8 @@
 ---
+import { attachments as attachmentsService } from "@vegastack/pages-services";
 import SettingsLayout from "../../../layouts/SettingsLayout.astro";
 import { loadSettings, formatDate } from "../../../lib/settings-data";
-import { attachmentService } from "../../../lib/runtime";
+import { buildServiceContext } from "../../../lib/service-context";
 import { UploadAttachmentDialog } from "../../../components/settings/UploadAttachmentDialog";
 
 export const prerender = false;
@@ -10,13 +11,26 @@ const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
 const { workspace, pages } = result.context;
 
-const attachments = pages.flatMap((page) =>
-  attachmentService.listForPage(page.id).map((attachment) => ({
-    ...attachment,
-    pageTitle: page.title,
-    pageSlugId: page.slugId,
-  })),
-);
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+  workspaceId: workspace.id,
+});
+
+const attachments = (
+  await Promise.all(
+    pages.map(async (page) => {
+      const pageAttachments = await attachmentsService.listForPage(ctx, {
+        pageId: page.id,
+      });
+      return pageAttachments.map((attachment) => ({
+        ...attachment,
+        pageTitle: page.title,
+        pageSlugId: page.slugId,
+      }));
+    }),
+  )
+).flat();
 
 const pageOptions = pages.map((page) => ({
   id: page.id,

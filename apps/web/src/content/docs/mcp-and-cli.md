@@ -3,71 +3,159 @@ title: MCP and CLI
 description: Create, edit, review, publish, and template pages from an MCP client or the vpg CLI.
 category: Agents
 order: 10
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
-VegaStack Pages exposes review workflows through a Remote MCP endpoint and a Rust CLI. MCP is the primary agent surface. The CLI is useful from a shell or CI job when the target deployment accepts a bearer token.
+VegaStack Pages exposes review workflows through a Remote MCP server and a Rust CLI. Both surfaces are Notion-style — verb-noun MCP tools with one mega-`fetch` for reads, noun-first CLI hierarchy (`vpg <noun> <verb>`).
+
+The CLI hits the same standalone HTTP API the web app uses; it does not require an MCP client. Sessions issued by either flow appear under **Settings → My Connections** and can be revoked there.
 
 ## MCP endpoint
 
 The Remote MCP server is mounted at `/mcp` on the same app and implements the MCP 2025-11-25 Streamable HTTP transport.
 
-Managed endpoint:
-
 ```text
-https://pages.vegastack.com/mcp
-```
-
-Self-hosted endpoint:
-
-```text
-https://pages.example.com/mcp
+https://pages.vegastack.com/mcp                # managed
+https://pages.example.com/mcp                  # self-hosted
+http://127.0.0.1:4322/mcp                      # local dev
 ```
 
 ### Authentication
 
-The server accepts a bearer token on `Authorization: Bearer <token>`. Tokens come from one of three flows; all three land in the same `Sessions` table and behave identically once issued.
+The server accepts a bearer token via `Authorization: Bearer <token>`. Three flows feed the same `Sessions` table:
 
-1. **Browser OAuth — MCP clients (Claude.ai, ChatGPT, Cursor remote, …).** The client discovers the auth server via `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, registers itself with `POST /oauth/register` (RFC 7591), runs an OAuth 2.1 authorization-code flow with PKCE S256 (RFC 7636), and exchanges the code at `/oauth/token`. The server issues a 1-hour access token and a 60-day rotating refresh token. No setup in the web app is required for this path — pasting the endpoint URL is enough.
-2. **Browser OAuth — `vpg` CLI (RFC 8628 device-code).** `vpg login` with no `--token` opens a verification URL in your browser, you pick a workspace and click **Allow**, the CLI polls `/oauth/token` and receives the access token. Uses the baked-in well-known client `oac_vpg_cli`, so no dynamic registration is needed. Works headless: the URL prints to the terminal — open it on any device (laptop, phone). Sessions issued this way appear under **Settings → My Connections** with `kind=oauth`.
-3. **Manual bearer.** Sign in to the web app, open **Settings → My Connections**, click **Create token**, copy the value. Use it for headless agents, CI runners, MCP-over-stdio bridges, or any environment where the device-code flow isn't desirable. Tokens are shown once and revocable from the same page. Pass via `vpg login --token <tok>` or `VPG_TOKEN`; CLI-stored tokens appear with `kind=cli`.
+1. **Browser OAuth (MCP clients — Claude.ai, ChatGPT, Cursor remote, …).** The client discovers the authorization server via `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, dynamically registers itself via `POST /oauth/register` (RFC 7591), runs an OAuth 2.1 authorization-code flow with PKCE S256 (RFC 7636), and exchanges the code at `/oauth/token`. 1-hour access tokens, 60-day rotating refresh tokens. Pasting the endpoint URL is all the user has to do.
+2. **`vpg login` device-code flow.** `vpg login` with no `--token` starts an RFC 8628 device-code flow against `/oauth/device` and `/oauth/token`, opens the verification URL in the browser, and stores the access token in the OS keychain. `--no-browser` skips the auto-launch (URL still prints — works over SSH).
+3. **Manual bearer.** Open **Settings → My Connections**, click **Create token**, copy the value. Use it as `Authorization: Bearer <token>` or pass `vpg login --token <tok>` / `VPG_TOKEN`. Workspace-scoped server-side.
 
 The `/mcp` endpoint returns `WWW-Authenticate: Bearer realm="VegaStack Pages MCP", resource_metadata="…/.well-known/oauth-protected-resource", error="invalid_token"` on 401 so spec-compliant browser clients can self-onboard.
 
+Bearer-authenticated requests are exempt from CSRF (no cookie ambient authority), so the CLI can write against `/api/*` routes the web app shares.
+
 ### initialize.instructions
 
-After `initialize`, the server sends a curated instruction block (≤8 KB) describing the safe edit workflow, agent-attribution rules, and review-loop pattern. MCP clients that honor `initialize.instructions` inject it into the model's system prompt automatically; clients that don't can still discover the same content under MCP resources at `vpg://skills/vegastack-pages/SKILL.md`.
+After `initialize`, the server sends a curated instruction block (≤8 KB) covering the safe-edit workflow, agent-attribution rules, and review-loop pattern. Clients that honor `initialize.instructions` inject it into the model's system prompt; clients that don't can read the same content from `vpg://skills/vegastack-pages/SKILL.md`.
 
 ### Workspace scoping
 
-Every workspace-scoped MCP tool call must include `workspace_id`. The token is workspace-scoped server-side, but the explicit id is an explicit guard against cross-workspace mistakes. Use `list_workspaces` once at session start to discover the ids your session can access.
+Every workspace-scoped tool call must include `workspace_id`. The token is workspace-scoped server-side; the explicit id is a guard against cross-workspace mistakes. Call `fetch` once with `include=["workspaces"]` and no `resource_id` (or `resource_id: "me"`) to discover ids.
 
-### Tool surface
+## MCP tool surface
 
-| Category  | Tools                                                                                                                                 |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Session   | `list_workspaces`, `whoami`                                                                                                           |
-| Create    | `create_page`, `create_page_from_template`, `upload_attachment`                                                                       |
-| Read      | `get_page include=[...]`, `list_page_versions`, `list_workspace`                                                                      |
-| Edit      | `prepare_page_edit`, `patch_page`, `update_page`, `validate_page_source`, `move_page`, `create_page_snapshot`, `restore_page_version` |
-| Review    | `wait_for_review`, `list_comments`, `create_comment`, `update_thread`, `update_comment_anchor`, `delete_thread`, `list_review_events` |
-| Publish   | `publication_apply`, `publication_delete`                                                                                             |
-| Search    | `search_workspace`                                                                                                                    |
-| Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `render_template`                                             |
-| Members   | `invite_workspace_member`                                                                                                             |
+19 tools total. One mega-`fetch` for reads + verb-noun writes. The reads collapse what used to be ten separate `get_*`/`list_*` tools.
 
-`update_thread` replies, resolves, reopens, or completes a thread in one call. It accepts `agent_name`, `agent_model`, and `agent_session_id` for agent-attributed replies. `wait_for_review` accepts `timeout_ms` in milliseconds (default and cap: 10 minutes) and `after_event_id` for cursor-based polling.
+| Category   | Tools                                                             |
+| ---------- | ----------------------------------------------------------------- |
+| Reads      | `fetch`, `search`, `wait_for_review`, `whoami`                    |
+| Page write | `create_page`, `update_page`, `restore_page_version`, `move_page` |
+| Comments   | `create_comment`, `update_thread`, `delete_thread`                |
+| Publish    | `apply_publication`, `delete_publication`                         |
+| Templates  | `create_template`, `update_template`, `render_template`           |
+| Attachment | `upload_attachment`                                               |
+| Workspace  | `invite_workspace_member`, `validate_page_source`                 |
+
+### `fetch` — one read tool for every resource
+
+`fetch` routes by the `resource_id` prefix: `pg_` → page, `fld_` → folder, `tpl_` → template, `thr_` → comment thread, `pub_` → publication, `wks_` → workspace, `"me"` → authenticated identity. An unknown prefix is rejected — there is no silent slug fallback.
+
+Omit `resource_id` and pass `include=["workspaces"]` to list workspaces the session can access.
+
+`include[]` enum:
+
+| Key             | Use on                         | Returns                                                     |
+| --------------- | ------------------------------ | ----------------------------------------------------------- |
+| `metadata`      | page, folder, template, thread | Core row (default if `include` is empty for pages)          |
+| `source`        | page                           | Live source string (default for pages alongside `metadata`) |
+| `rendered`      | page                           | Pre-rendered HTML                                           |
+| `versions`      | page                           | Version history                                             |
+| `comments`      | page                           | Comment threads (filter with `status`)                      |
+| `publication`   | page, folder                   | Active publication, if any                                  |
+| `edit_tokens`   | page                           | `base_version_id` + `base_content_hash` for `update_page`   |
+| `members`       | workspace                      | Member list                                                 |
+| `properties`    | template                       | Frontmatter property spec                                   |
+| `history`       | page                           | Audit timeline                                              |
+| `review_events` | page                           | Review-event stream tail                                    |
+| `workspaces`    | `me` or omitted `resource_id`  | All workspaces visible to the session                       |
+| `templates`     | workspace                      | Template list                                               |
+| `tree`          | workspace                      | Folder/page tree (use `depth` to limit)                     |
+
+JSON-RPC shape:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "fetch",
+    "arguments": {
+      "workspace_id": "wks_123",
+      "resource_id": "pg_abc",
+      "include": ["source", "edit_tokens", "comments"],
+      "status": "open"
+    }
+  }
+}
+```
+
+### `update_page` — 3 mutually-exclusive modes
+
+All three require `base_version_id` for optimistic concurrency. Re-fetch via `fetch` with `include=["edit_tokens"]` whenever the version mismatches.
+
+| Mode            | Required fields                                                | Optional                                                                                      |
+| --------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Full source     | `source`                                                       | `checkpoint`, `checkpoint_label`, `allow_noop`, `base_content_hash`                           |
+| Find / replace  | `find`, `replace`                                              | `replace_all`, `expected_replacements`, `checkpoint`, `checkpoint_label`, `base_content_hash` |
+| Checkpoint only | `checkpoint: true` (and **no** `source`, `find`, or `replace`) | `checkpoint_label`                                                                            |
+
+Fields not relevant to the chosen mode are omitted on the wire (not sent as `null`) so strict server validators accept the call.
+
+### `update_thread` — one tool, several ops
+
+Pass any combination; the server applies anchor → reply → resolve in that order:
+
+| Op                | Field                                                                           |
+| ----------------- | ------------------------------------------------------------------------------- |
+| Reply             | `body`                                                                          |
+| Resolve / reopen  | `status: "resolved" \| "open"` or `resolve: true`                               |
+| Move anchor       | `anchor: {…}` (same shape as `create_comment`)                                  |
+| Completion reply  | `complete: true` with `body` (writes a closing reply, then optionally resolves) |
+| Agent attribution | `agent_name`, `agent_model`, `agent_session_id`                                 |
+
+### `apply_publication` — page + folder
+
+`resource_type: "page" | "folder"` selects which subtree gets a publication. Pass `publication_id` to update an existing one; omit to create. The server rejects calls where `publication_id` is set but `resource_id` mismatches the target — pure cutover, no silent drift.
+
+### Read example — combined fetch
+
+```json
+{
+  "name": "fetch",
+  "arguments": {
+    "workspace_id": "wks_123",
+    "resource_id": "pg_abc",
+    "include": ["source", "edit_tokens", "comments", "publication"],
+    "status": "all"
+  }
+}
+```
+
+One call returns enough to read, edit, and re-render the page.
 
 ### Common page loop
 
 ```js
-const { workspaces } = await mcp.call("list_workspaces", {});
-const workspaceId = workspaces[0].id;
+const me = await mcp.call("fetch", {
+  workspace_id: "wks_demo",
+  resource_id: "me",
+  include: ["workspaces"],
+});
+const workspaceId = me.workspaces[0].id;
 
-await mcp.call("create_page_from_template", {
+await mcp.call("create_page", {
   workspace_id: workspaceId,
-  template: "prd",
   title: "Search redesign",
+  template_id: "prd",
   properties: { owner: "platform" },
 });
 
@@ -78,19 +166,29 @@ await mcp.call("wait_for_review", {
   timeout_ms: 600000,
 });
 
-const prep = await mcp.call("prepare_page_edit", {
+const { source, base_version_id, base_content_hash } = await mcp.call("fetch", {
   workspace_id: workspaceId,
-  page_id: "pg_123",
+  resource_id: "pg_123",
+  include: ["edit_tokens"],
 });
 
-await mcp.call("patch_page", {
+await mcp.call("update_page", {
   workspace_id: workspaceId,
   page_id: "pg_123",
-  base_version_id: prep.base_version_id,
-  base_content_hash: prep.base_content_hash,
+  base_version_id,
+  base_content_hash,
   find: "old sentence",
   replace: "new sentence",
   expected_replacements: 1,
+});
+
+await mcp.call("update_thread", {
+  workspace_id: workspaceId,
+  thread_id: "thr_42",
+  body: "Done — see version " + base_version_id,
+  resolve: true,
+  agent_name: "Claude",
+  agent_model: "opus-4.7",
 });
 ```
 
@@ -99,68 +197,184 @@ await mcp.call("patch_page", {
 The CLI is a Rust binary distributed through the `@vegastack/pages` npm package. Two aliases run the same binary:
 
 ```sh
-vpg --help
+npm install -g @vegastack/pages
+vpg --help            # short alias
 vegastack-pages --help
 ```
 
-Examples:
+### Shape — noun-first, like `gh` and `wrangler`
 
-```sh
-vpg --workspace wks_123 create --file ./plan.md --title "Plan"
-vpg --workspace wks_123 create --template prd --title "Search redesign" --set owner=platform
-vpg --workspace wks_123 wait pg_123 --until first-response --after-id evt_42
-vpg --workspace wks_123 publish-page pg_123 --permission comment
-vpg --workspace wks_123 whoami
-vpg workspaces
+Top-level commands cover the hot path and cross-cutting verbs:
+
+```text
+vpg login [--token <t>] [--no-browser]
+vpg logout
+vpg whoami
+vpg use <workspace>
+vpg search <query> [--type pages|folders|comments|all] [--limit N]
+vpg events [--page X] [--workspace W] [--after-id A] [--limit N]
+vpg validate [--page <id> | --file <p> | --stdin] [--type markdown|mdx|html]
+vpg deploy [--target cloudflare] [--config vegastack-pages.yaml] [--dry-run] [--managed] [--apply-migrations | --skip-migrations]
+vpg doctor
+vpg update [--check] [--channel latest|next]
+vpg completions <bash|zsh|fish|powershell>
 ```
 
-Equivalent surgical-edit workflow:
+Noun groups for resource CRUD:
 
-```sh
-vpg --base-url https://pages.example.com --workspace wks_123 pages prepare-edit pg_123
-vpg --base-url https://pages.example.com --workspace wks_123 pages patch pg_123 --base-version-id ver_123 --find old --replace new
-vpg --base-url https://pages.example.com --workspace wks_123 pages validate --page pg_123
-vpg --base-url https://pages.example.com --workspace wks_123 complete-thread cmt_123 --body "Fixed." --resolve --agent-name Codex
-vpg --base-url https://pages.example.com --workspace wks_123 events --page pg_123
-vpg --base-url https://pages.example.com --workspace wks_123 search "runbook" --type page
-vpg --base-url https://pages.example.com --workspace wks_123 tree
-vpg --base-url https://pages.example.com --workspace wks_123 export
-vpg --base-url https://pages.example.com --workspace wks_123 revoke-publication pub_123
-vpg --base-url https://pages.example.com --workspace wks_123 templates create --args-file ./template.json
-vpg --base-url https://pages.example.com --workspace wks_123 templates update tpl_123 --args-file ./template-update.json
+```text
+vpg pages       create | get | update | move | restore | versions | wait
+vpg comments    list | create | reply | resolve | reopen | delete | complete | move-anchor
+vpg publish     page | folder | update | revoke
+vpg templates   list | get | create | update | render
+vpg workspaces  list | tree | export | members | invite
+vpg attachments upload
+vpg skills      install | update | print | path | doctor
 ```
 
-The CLI calls the same standalone API routes the web app uses; it does not require an MCP client. Bearer tokens are workspace-scoped server-side. Pass `--workspace <workspace_id>` or run `vpg use <workspace_id>` before workspace-scoped commands; the CLI includes `workspace_id` in every API call.
+`vpg pages get`, `vpg pages update`, `vpg pages move`, `vpg pages restore`, `vpg pages versions`, `vpg pages wait`, `vpg comments *`, `vpg publish page`, `vpg publish folder`, and `vpg attachments upload` all accept either a `pg_…` id or a slug — the CLI resolves the slug server-side via the page-ref endpoint before issuing the actual API call.
 
-Authentication is explicit: `vpg login` (browser device-code, default), `vpg login --token <token>`, `VPG_TOKEN` env, or `--token` per-call. Run `vpg <command> --help` for exact flags.
+### Global flags
 
-### MCP/CLI parity
+Every command honours these:
 
-Every MCP tool has a matching CLI command. `vpg wait` emits status `matched` (was `condition_met`) and accepts `--after-id <event_id>` to mirror `wait_for_review.after_event_id`. CLI-only commands are operator-scoped (`login`, `logout`, `use`, `doctor`, `deploy`, `export`, `update`, `skills`).
+| Flag                              | Behavior                                                                                                                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent`                         | Non-interactive mode: JSON envelope to stdout, structured error JSON to stderr, exit codes 1–8, no prompts, no spinners. Streaming commands (`events`, `pages wait`) emit NDJSON. |
+| `--json`                          | JSON output, otherwise interactive (confirms etc.).                                                                                                                               |
+| `--yes` / `-y`                    | Skip confirmation prompts. Required under `--agent` for destructive ops.                                                                                                          |
+| `--workspace W` / `VPG_WORKSPACE` | Override the active workspace.                                                                                                                                                    |
+| `--token T` / `VPG_TOKEN`         | Override the stored token.                                                                                                                                                        |
+| `--base-url URL` / `VPG_BASE_URL` | Override the API base URL. Stored value is preserved when the flag is omitted.                                                                                                    |
+| `--quiet` / `-q`                  | Suppress non-error output.                                                                                                                                                        |
+| `--verbose` / `-v`                | Verbose diagnostic logging to stderr.                                                                                                                                             |
 
-## Active sessions
+### `--agent` output contract
 
-Open **Settings → My Connections** to see your own active tokens. Workspace admins can also open **Settings → Connections Log** for the full list across every member.
+Success (exit 0, stdout):
 
-- **Mine** lists OAuth, manual, and CLI sessions issued for the signed-in user.
-- **Workspace** (admin only) lists every active session in the workspace.
+```json
+{ "data": { "...": "..." }, "meta": { "request_id": "...", "duration_ms": 42 } }
+```
 
-Each row shows the recognized vendor (Claude, ChatGPT, Cursor, Windsurf, Continue, Cline, Codex, vpg CLI, …), kind chip (`oauth | manual | cli`), last-seen timestamp, expiry, and a one-click revoke. Revoked tokens stop working on the next request.
+Error (non-zero exit, stderr):
 
-## Agent skills
+```json
+{
+  "error": {
+    "code": "VPG_NOT_FOUND",
+    "message": "Page pg_x not found.",
+    "hint": "Run `vpg pages list` to see available pages.",
+    "details": { "...": "..." }
+  }
+}
+```
 
-The canonical portable agent skill is checked into the repository at `skills/vegastack-pages`. The CLI embeds the bundle at build time so installed npm binaries can install it without a source checkout:
+Streaming (`vpg events`, `vpg pages wait`) — NDJSON, one object per line, stdout:
+
+```text
+{"type":"event","event":{ "...": "..." }}
+{"type":"event","event":{ "...": "..." }}
+{"type":"done","matched":{ "...": "..." }}
+```
+
+Exit codes:
+
+| Code | Meaning            |
+| ---- | ------------------ |
+| 0    | Success            |
+| 1    | Generic error      |
+| 2    | Validation         |
+| 3    | Authentication     |
+| 4    | Not found          |
+| 5    | Permission denied  |
+| 6    | Conflict (version) |
+| 7    | Network            |
+| 8    | Rate limited       |
+
+### Examples — interactive
+
+```sh
+vpg login                                                       # browser device-code flow
+vpg use wks_123
+vpg pages create --title "Plan" --file ./plan.md
+vpg pages create --template prd --title "Search redesign" --set owner=platform
+vpg pages get plan-abc123 --include source,edit_tokens
+vpg pages update pg_123 --base-version-id ver_42 --find "old" --replace "new" --expected-replacements 1
+vpg pages restore pg_123 ver_42                                 # confirms y/N
+vpg pages wait pg_123 --until first-response --after-id evt_7
+vpg comments list pg_123 --status open
+vpg comments reply thr_99 --body "Done." --agent-name Claude --agent-model opus-4.7
+vpg comments complete thr_99 --body "Fixed." --resolve --agent-name Claude
+vpg publish page pg_123 --permission comment --expires-at 2026-12-31T00:00:00Z
+vpg publish revoke pub_42                                       # confirms y/N
+vpg templates render prd --title "Search redesign" --set owner=platform
+vpg workspaces tree
+vpg workspaces invite --email teammate@example.com --role editor
+vpg attachments upload pg_123 --filename diagram.png --content-type image/png --base64-file ./diagram.b64
+vpg search "runbook" --type pages
+vpg events --page pg_123
+```
+
+### Examples — `--agent` mode
+
+```sh
+vpg --agent whoami
+vpg --agent pages get pg_123 --include source,edit_tokens
+vpg --agent pages update pg_123 --base-version-id ver_42 --source "# New body"
+vpg --agent pages wait pg_123 --until first-response --timeout 600 --poll 2
+vpg --agent --yes pages restore pg_123 ver_old                  # --yes required for destructive ops
+vpg --agent publish page pg_123 --permission comment
+vpg --agent comments reply thr_99 --body "Done." --agent-name Claude
+```
+
+`--agent` writes one compact JSON line on success, structured error JSON to stderr on failure. Streaming commands emit one JSON line per event.
+
+### Authentication details
+
+- **Browser device-code (default).** `vpg login` calls `/oauth/device`, prints the verification URL, opens it, and polls `/oauth/token` until the user approves. Uses the baked-in well-known client `oac_vpg_cli`. Sets `kind=oauth` on the session.
+- **Manual bearer.** `vpg login --token <tok>` (or `VPG_TOKEN`) stores a workspace-scoped token from **Settings → My Connections**. Sets `kind=cli`.
+- **Storage.** Tokens go to the OS keychain when available, otherwise to an owner-only file under `~/.config/vegastack-pages/`. `vpg logout` clears both.
+
+### Build from source
+
+```sh
+pnpm --filter @vegastack/pages build
+node cli/vegastack-pages/bin/vpg.js --help
+# or, from cli/vegastack-pages:
+node scripts/build-native.mjs
+cargo run --quiet -- --help
+```
+
+### Agent skills
+
+`vpg skills install` writes the portable `SKILL.md` bundle to the host agent's skill directory. Adapters cover Claude, Cursor, Codex, and Gemini layouts:
 
 ```sh
 vpg skills doctor
 vpg skills install --agent all --scope user
-vpg skills update --agent all --scope user
-vpg skills install --agent codex --scope project
 vpg skills install --agent cursor --scope project
+vpg skills update --agent all --scope user
+vpg skills path
 ```
 
-Codex and Claude receive the native `SKILL.md` bundle. Cursor receives a `.mdc` rules adapter. Gemini CLI receives an extension adapter. MCP clients can read the same guidance as resources under `vpg://skills/vegastack-pages/...` and request prompts such as `vegastack_edit_page_safely`. npm installs do not mutate agent config automatically; run `vpg skills install --agent all --scope user` once and `vpg skills update --agent all --scope user` after package updates.
+The bundle is embedded into the Rust binary at build time, so installed npm binaries can run `skills install` without a source checkout. MCP clients can read the same content as resources under `vpg://skills/vegastack-pages/…`.
 
-## Deploy helper
+### Deploy helper
 
-`vpg deploy` shells out to this repository's `pnpm deploy:cloudflare` script. Run it from a source checkout, not as a standalone installer.
+`vpg deploy` shells out to the repository's `pnpm deploy:cloudflare`. Run it from a source checkout. See [Self-host on Cloudflare](cloudflare.md) for the full install flow.
+
+## Active sessions
+
+Open **Settings → My Connections** to see your own active tokens. Workspace admins can also open **Settings → Connections Log** for the workspace-wide list.
+
+Each row shows the recognized vendor (Claude, ChatGPT, Cursor, Windsurf, Continue, Cline, Codex, vpg CLI, …), kind chip (`oauth | manual | cli`), last-seen timestamp, expiry, and a one-click revoke. Revoked tokens stop working on the next request.
+
+## Related docs
+
+- [Quickstart](quickstart.md) — first page, first share, first agent connect
+- [Templates](templates.md) — typed properties and structured builders
+- [Comments and threads](comments-and-threads.md) — anchoring and review surface
+- [Wait conditions](wait-conditions.md) — `wait_for_review` semantics
+- [Public links](public-links.md) — `apply_publication` for pages and folders
+- [Permissions](permissions.md) — what each role can do

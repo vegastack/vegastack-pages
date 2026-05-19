@@ -1,12 +1,15 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { pages as pagesService } from "@vegastack/pages-services";
 import {
   assertWorkspaceActorPermission,
   getApiRequestActor,
-  jsonAppError,
   resolvePageAccess,
 } from "../../lib/access";
-import { ensureSeedData, pageService } from "../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../lib/service-context";
 import {
   validateEditableSource,
   type EditableSourceType,
@@ -22,7 +25,6 @@ function coerceSourceType(value: unknown, fallback: EditableSourceType) {
 
 export const POST: APIRoute = async ({ cookies, request, url }) => {
   try {
-    await ensureSeedData();
     const body = await request.json();
     const actor = await getApiRequestActor(cookies, request);
     if (!actor.user) {
@@ -30,7 +32,13 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
     }
 
     const pageId = body.page_id ? String(body.page_id) : "";
-    const page = pageId ? await pageService.getPage(pageId) : null;
+    const workspaceId = body.workspace_id ? String(body.workspace_id) : null;
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    const page = pageId ? await pagesService.get(ctx, pageId) : null;
     if (pageId && !page) {
       throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
     }
@@ -42,10 +50,10 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
         page: page.page,
         required: "read",
       });
-    } else if (body.workspace_id) {
+    } else if (workspaceId) {
       assertWorkspaceActorPermission({
         actor,
-        workspaceId: String(body.workspace_id),
+        workspaceId,
         required: "read",
       });
     } else {
@@ -69,6 +77,6 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
     );
     return Response.json(await validateEditableSource({ source, sourceType }));
   } catch (error) {
-    return jsonAppError(error, "Source validation failed.");
+    return serviceErrorToResponse(error, "Source validation failed.");
   }
 };

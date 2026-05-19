@@ -58,7 +58,7 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
           name="slug"
           value={workspace.slug}
           required
-          pattern="[a-z0-9-]+"
+          pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
         />
       </label>
       <button class="vpg-button vpg-button-primary vpg-button-md" type="submit">

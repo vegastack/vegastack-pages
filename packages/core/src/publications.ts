@@ -15,6 +15,13 @@ export type PublicationRecord = {
   passwordHash: string | null;
   indexingEnabled: boolean;
   revokedAt: string | null;
+  // R2 key of the latest baked HTML for this publication. Written by
+  // publishFanOut in packages/services/src/publications.service.ts.
+  latestArtifactKey: string | null;
+  // Convenience copy of the page's content_hash at publish time.
+  latestContentHash: string | null;
+  // When the artifact was rebuilt — used in ETag computation.
+  latestRenderedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -100,6 +107,9 @@ export class PublicationService {
       indexingEnabled:
         input.indexingEnabled ?? existing?.indexingEnabled ?? false,
       revokedAt: null,
+      latestArtifactKey: existing?.latestArtifactKey ?? null,
+      latestContentHash: existing?.latestContentHash ?? null,
+      latestRenderedAt: existing?.latestRenderedAt ?? null,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };

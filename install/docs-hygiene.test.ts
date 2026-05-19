@@ -83,8 +83,13 @@ describe("public docs hygiene", () => {
     }
 
     expect(root).toContain("https://pages.vegastack.com/mcp");
-    expect(mcp).toContain("create_page_from_template");
-    expect(mcp).toContain("update_comment_anchor");
+    // Post-cycle-5 surface: create_page accepts template_id (folds the
+    // old create_page_from_template), update_thread accepts anchor moves
+    // (folds the old update_comment_anchor). Pure cutover — the public
+    // docs must teach the live tool names only.
+    expect(mcp).toContain("create_page");
+    expect(mcp).toContain("template_id");
+    expect(mcp).toContain("update_thread");
     expect(templates).toContain("PRD");
     expect(templates).toContain("guidance");
     expect(backup).toContain(".vegastack-pages/manifest.json");

@@ -3,7 +3,7 @@ title: Wait conditions
 description: Pause an agent until a reviewer responds, until a thread changes, or until everything resolves.
 category: Agents
 order: 20
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 `wait_for_review` is the call that turns publish-and-continue into publish-and-pause. The agent yields, the server holds the session, and the response carries the context the agent needs to resume.
@@ -30,7 +30,16 @@ const review = await mcp.call("wait_for_review", {
 });
 ```
 
-The timeout is expressed in milliseconds and is capped at 10 minutes for a single call. The response includes the thread list and recent review events. The agent can then patch source, reply to threads, or call `wait_for_review` again.
+The timeout is expressed in milliseconds and is capped at 10 minutes for a single call. The response includes the thread list and recent review events. The agent can then refresh edit tokens via `fetch(include=["edit_tokens","comments"])`, call `update_page`, reply via `update_thread`, or call `wait_for_review` again.
+
+From the CLI, `vpg pages wait` is the equivalent. Interactive mode prints a spinner + the matched event; `--agent` mode streams NDJSON to stdout:
+
+```sh
+vpg pages wait pg_abc123 --until all-threads-resolved --timeout 600
+vpg --agent pages wait pg_abc123 --until first-response --timeout 600 --poll 2
+```
+
+`--after-id <event_id>` resumes from a known cursor (mirrors `wait_for_review.after_event_id`).
 
 ## Idle behaviour
 

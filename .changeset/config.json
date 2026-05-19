@@ -16,6 +16,7 @@
       "@vegastack/pages-db",
       "@vegastack/pages-mcp",
       "@vegastack/pages-renderer",
+      "@vegastack/pages-services",
       "@vegastack/pages-ui",
       "@vegastack/pages-web"
     ]

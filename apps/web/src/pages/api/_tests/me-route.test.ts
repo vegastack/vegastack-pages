@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { authService, workspaceService } from "../../../lib/runtime";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { auth, users } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../lib/service-context";
 import { GET as getMe, PATCH as patchMe } from "../me/index";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-me-test-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -24,12 +33,16 @@ function jsonRequest(body: unknown, init: { method?: string } = {}) {
 }
 
 async function seedUser(displayName = "Original Name") {
-  const user = workspaceService.createUser({
+  const { ctx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+  });
+  const user = await users.upsert(ctx, {
     id: uniqueId("usr"),
     email: `me-test-${crypto.randomUUID()}@example.test`,
     displayName,
+    role: "user",
   });
-  const session = authService.createSession(user.id);
+  const session = await auth.createSession(ctx, { userId: user.id });
   return { user, sessionId: session.id };
 }
 
@@ -75,8 +88,11 @@ describe("/api/me", () => {
       expect(body.user.display_name).toBe("After The Edit");
       expect(body.changed).toBe(true);
 
-      // Service state reflects the update so subsequent requests see it.
-      const reloaded = workspaceService.getUser(user.id);
+      // Verify the new D1 row by reading directly via the users service.
+      const { ctx } = await buildServiceContext({
+        cookies: { get: () => undefined } as never,
+      });
+      const reloaded = await users.getById(ctx, user.id);
       expect(reloaded?.displayName).toBe("After The Edit");
     });
 

@@ -8,7 +8,7 @@ import AppLayout from "../../layouts/AppLayout.astro";
 export const prerender = false;
 const signupEnabled = publicSignupEnabled();
 const isDev = import.meta.env.DEV;
-const actor = getRequestActor(Astro.cookies);
+const actor = await getRequestActor(Astro.cookies);
 if (actor.user) {
   return Astro.redirect(
     loginRedirectTarget(Astro.url.searchParams.get("redirect_to")),

@@ -1,19 +1,20 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { jsonAppError } from "../../../lib/access";
+import { auth, rateLimit } from "@vegastack/pages-services";
 import { publicSignupEnabled } from "../../../lib/deployment";
 import { sendMagicLinkEmail } from "../../../lib/email";
 import { magicLinkHandoffUrl } from "../../../lib/magic-link";
 import { createSignupIntentRedirect } from "../../../lib/signup-intents";
 import {
-  authService,
-  checkRateLimit,
-  persistRuntimeState,
-} from "../../../lib/runtime";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../lib/service-context";
+import { sha256Hex } from "../../../lib/runtime";
+import { randomToken } from "../../../lib/oauth/codes";
 
 export const prerender = false;
 
-export const POST: APIRoute = async ({ request, url }) => {
+export const POST: APIRoute = async ({ cookies, request, url }) => {
   try {
     if (!publicSignupEnabled()) {
       throw new AppError(
@@ -41,22 +42,33 @@ export const POST: APIRoute = async ({ request, url }) => {
       );
     }
 
-    await checkRateLimit({
+    const { ctx } = await buildServiceContext({ cookies, request });
+    const rl = await rateLimit.check(ctx, {
       key: `signup:${email}`,
       limit: 4,
       windowMs: 30 * 60_000,
     });
+    if (!rl.ok) {
+      throw new AppError(
+        "RATE_LIMITED",
+        "Too many requests. Try again later.",
+        429,
+        { reset_at: rl.resetAt },
+      );
+    }
 
     const redirectTo = createSignupIntentRedirect({
       displayName: displayName || email,
       workspaceName,
     });
-    const magic = await authService.createMagicLink({
+    const rawToken = randomToken();
+    const tokenHash = await sha256Hex(rawToken);
+    await auth.createMagicLink(ctx, {
       email,
+      tokenHash,
       redirectTo,
     });
-    await persistRuntimeState();
-    const verifyUrl = magicLinkHandoffUrl(url.origin, magic.rawToken);
+    const verifyUrl = magicLinkHandoffUrl(url.origin, rawToken);
     const delivery = await sendMagicLinkEmail({
       to: email,
       verifyUrl,
@@ -75,6 +87,6 @@ export const POST: APIRoute = async ({ request, url }) => {
     }
     return Response.json(response);
   } catch (error) {
-    return jsonAppError(error, "Signup failed.");
+    return serviceErrorToResponse(error, "Signup failed.");
   }
 };

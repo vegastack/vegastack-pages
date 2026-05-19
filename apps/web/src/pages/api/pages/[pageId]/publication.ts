@@ -1,19 +1,30 @@
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
+import {
+  buildEnvelope,
+  jsonWithEnvelope,
+  pages as pagesService,
+} from "@vegastack/pages-services";
+import { getApiRequestActor } from "../../../../lib/access";
 import {
   deletePublication,
   getPublication,
   upsertPublication,
 } from "../../../../lib/publication-api";
-import { ensureSeedData, pageService } from "../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
-async function pageResource(pageId: string | undefined) {
-  await ensureSeedData();
-  const page = pageId ? await pageService.getPage(pageId) : null;
+async function pageResource(
+  cookies: Parameters<typeof getApiRequestActor>[0],
+  request: Request,
+  pageId: string | undefined,
+) {
+  const { ctx } = await buildServiceContext({ cookies, request });
+  const page = pageId ? await pagesService.get(ctx, pageId) : null;
   return page
     ? { type: "page" as const, page: page.page, slugId: page.page.slugId }
     : null;
@@ -21,7 +32,7 @@ async function pageResource(pageId: string | undefined) {
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    const resource = await pageResource(params.pageId);
+    const resource = await pageResource(cookies, request, params.pageId);
     if (!resource) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
@@ -30,13 +41,13 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
     }
     return Response.json(await getPublication({ cookies, request, resource }));
   } catch (error) {
-    return jsonAppError(error, "Publication lookup failed.");
+    return serviceErrorToResponse(error, "Publication lookup failed.");
   }
 };
 
 export const PUT: APIRoute = async ({ cookies, params, request }) => {
   try {
-    const resource = await pageResource(params.pageId);
+    const resource = await pageResource(cookies, request, params.pageId);
     if (!resource) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
@@ -50,9 +61,8 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       body: await request.json(),
     });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.page.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.page.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       result as Record<string, unknown>,
@@ -66,13 +76,13 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Publication update failed.");
+    return serviceErrorToResponse(error, "Publication update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request }) => {
   try {
-    const resource = await pageResource(params.pageId);
+    const resource = await pageResource(cookies, request, params.pageId);
     if (!resource) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
@@ -81,9 +91,8 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
     }
     const result = await deletePublication({ cookies, request, resource });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.page.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.page.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       result as Record<string, unknown>,
@@ -97,6 +106,6 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Publication removal failed.");
+    return serviceErrorToResponse(error, "Publication removal failed.");
   }
 };

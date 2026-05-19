@@ -1,10 +1,14 @@
 {
   "name": "vegastack-pages",
-  "version": "0.1.13",
+  "version": "0.1.14-next.0",
   "private": true,
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
   "scripts": {
     "build": "pnpm -r --if-present build",
     "changeset": "changeset",
@@ -42,5 +46,10 @@
     "vitest": "^4.1.5",
     "wrangler": "^4.90.0",
     "yaml": "^2.8.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "devalue": ">=5.8.1"
+    }
   }
 }

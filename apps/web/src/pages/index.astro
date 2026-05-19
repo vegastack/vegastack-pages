@@ -12,7 +12,7 @@ export const prerender = false;
 
 const homeMode = process.env.VPG_HOME_MODE ?? "landing";
 const forceHomepage = Astro.url.searchParams.get("force_homepage") === "1";
-const actor = getRequestActor(Astro.cookies);
+const actor = await getRequestActor(Astro.cookies);
 if (!forceHomepage && Astro.url.pathname === "/" && actor.user) {
   return Astro.redirect("/app");
 }
@@ -305,11 +305,11 @@ const startLinks = [
       </div>
       <div class="home-urls">
         <div class="home-url-row">
-          <code>vpg create --template prd --title "Search redesign"</code>
+          <code>vpg pages create --template prd --title "Search redesign"</code>
           <span>CLI</span>
         </div>
         <div class="home-url-row">
-          <code>create_page_from_template</code>
+          <code>create_page (template_id)</code>
           <span>MCP</span>
         </div>
         <div class="home-url-row">

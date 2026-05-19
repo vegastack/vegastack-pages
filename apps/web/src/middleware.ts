@@ -1,14 +1,9 @@
 import { defineMiddleware } from "astro:middleware";
-import {
-  acquireRuntimeMutationLock,
-  ensureRuntimeReady,
-  persistRuntimeState,
-  pruneExpiredVersions,
-  refreshRuntimeState,
-} from "./lib/runtime";
+import { ensureRuntimeReady } from "./lib/runtime";
 import {
   csrfCookie,
   csrfCookieName,
+  hasBearerAuth,
   randomCsrfToken,
   readCookie,
   sameOrigin,
@@ -20,18 +15,17 @@ import {
 } from "./lib/security-headers";
 import { bypassesRuntimePersistence } from "./lib/middleware-policy";
 
-const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const browserMutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const defaultSlowRequestMs = 1_000;
 
-function slowRequestThresholdMs() {
+function slowRequestThresholdMs(): number {
   const configured = Number(process.env.VPG_SLOW_REQUEST_LOG_MS ?? "");
   return Number.isFinite(configured) && configured >= 0
     ? configured
     : defaultSlowRequestMs;
 }
 
-function withServerTiming(response: Response, durationMs: number) {
+function withServerTiming(response: Response, durationMs: number): Response {
   const headers = new Headers(response.headers);
   const prior = headers.get("server-timing");
   const timing = `vpg;dur=${durationMs.toFixed(1)}`;
@@ -48,7 +42,7 @@ function logSlowRequest(input: {
   status: number;
   durationMs: number;
   bypassed?: boolean;
-}) {
+}): void {
   const thresholdMs = slowRequestThresholdMs();
   if (thresholdMs === 0 || input.durationMs < thresholdMs) return;
   const url = new URL(input.request.url);
@@ -68,19 +62,22 @@ function withSecurityHeaders(
   response: Response,
   request: Request,
   options: { setCsrfCookie?: boolean } = {},
-) {
+): Response {
   const setCsrfCookie = options.setCsrfCookie ?? true;
   const headers = new Headers(response.headers);
   headers.set("x-content-type-options", "nosniff");
+  headers.set("x-frame-options", "DENY");
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
   headers.set(
     "permissions-policy",
-    "camera=(), microphone=(), geolocation=(), payment=()",
+    "camera=(), microphone=(), geolocation=(), payment=(), interest-cohort=()",
   );
+  headers.set("cross-origin-opener-policy", "same-origin");
   const url = new URL(request.url);
   const csp = contentSecurityPolicyForResponse({
     contentType: headers.get("content-type"),
     pathname: url.pathname,
+    dev: import.meta.env.DEV,
   });
   if (csp && !headers.has("content-security-policy")) {
     headers.set("content-security-policy", csp);
@@ -89,9 +86,7 @@ function withSecurityHeaders(
     protocol: url.protocol,
     dev: import.meta.env.DEV,
   });
-  if (hsts) {
-    headers.set("strict-transport-security", hsts);
-  }
+  if (hsts) headers.set("strict-transport-security", hsts);
   if (setCsrfCookie && !readCookie(request, csrfCookieName)) {
     headers.append("set-cookie", csrfCookie(randomCsrfToken(), request));
   }
@@ -102,9 +97,19 @@ function withSecurityHeaders(
   });
 }
 
+// Astro middleware (Plan 011 §4): with D1's per-statement atomicity,
+// the legacy mutation-lock + snapshot-refresh dance is gone. The
+// middleware is now just three things:
+//   1. CSRF / same-origin gate for browser-class mutations.
+//   2. Bindings-present gate via ensureRuntimeReady().
+//   3. Security headers + Server-Timing on every response.
 export const onRequest = defineMiddleware(async (context, next) => {
   const startedAt = performance.now();
   const url = new URL(context.request.url);
+
+  // Bypass list (OAuth, MCP, SSE, .well-known). Bearer-authenticated paths
+  // don't share the cookie-CSRF mechanism, and the runtime-ready gate
+  // would add latency without value.
   if (
     bypassesRuntimePersistence({
       method: context.request.method,
@@ -125,7 +130,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   await ensureRuntimeReady();
+
+  // CSRF gates the cookie-authenticated browser. Bearer-token API clients
+  // (CLI, agents, integrations) don't share the cookie attack surface, so
+  // they're exempt — that's the same model gh / wrangler / aws-cli use.
   if (
+    !hasBearerAuth(context.request) &&
     browserMutationMethods.has(context.request.method) &&
     (!sameOrigin(context.request) || !validCsrfToken(context.request))
   ) {
@@ -143,37 +153,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
     );
   }
 
-  if (!mutatingMethods.has(context.request.method)) {
-    await refreshRuntimeState({ force: false });
-    const response = withSecurityHeaders(await next(), context.request);
-    const durationMs = performance.now() - startedAt;
-    logSlowRequest({
-      request: context.request,
-      status: response.status,
-      durationMs,
-    });
-    return withServerTiming(response, durationMs);
-  }
-
-  const lock = await acquireRuntimeMutationLock();
-  try {
-    await refreshRuntimeState({ force: true });
-    const response = await next();
-
-    if (response.status < 400) {
-      await pruneExpiredVersions();
-      await persistRuntimeState();
-    }
-
-    const secured = withSecurityHeaders(response, context.request);
-    const durationMs = performance.now() - startedAt;
-    logSlowRequest({
-      request: context.request,
-      status: secured.status,
-      durationMs,
-    });
-    return withServerTiming(secured, durationMs);
-  } finally {
-    await lock.release();
-  }
+  const response = withSecurityHeaders(await next(), context.request);
+  const durationMs = performance.now() - startedAt;
+  logSlowRequest({
+    request: context.request,
+    status: response.status,
+    durationMs,
+  });
+  return withServerTiming(response, durationMs);
 });

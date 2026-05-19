@@ -1,77 +1,132 @@
+// Workspace visibility helpers — actor-scoped queries for "what can
+// this user see in this workspace?" Plan 011 §4. All async + D1-direct
+// via @vegastack/pages-services.
+
 import { hasPermission, type UserRecord } from "@vegastack/pages-core";
+import { resolveFolderActorPermission, type RequestActor } from "./access";
+import { getDb } from "./runtime";
 import {
-  getRequestActor,
-  resolveFolderActorPermission,
-  type RequestActor,
-} from "./access";
-import { permissionService, workspaceService } from "./runtime";
+  folders as foldersService,
+  permissions as permissionsService,
+  workspaces as workspacesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
 import {
   actorCanUseWorkspace,
   buildWorkspaceNavigation,
   canReadFolderFromNavigation,
 } from "./workspace-navigation";
 
-export function resolveWorkspacePermission(
+function readOnlyCtx(user: UserRecord | null): ServiceContext {
+  return {
+    actor: {
+      userId: user?.id ?? "",
+      email: user?.email ?? null,
+      workspaceId: null,
+    },
+    async computeTreeVersion() {
+      return "";
+    },
+    waitUntil(promise) {
+      void promise.catch(() => undefined);
+    },
+    log(level, message, fields) {
+      const emit =
+        level === "error" || level === "warn" ? console.error : console.log;
+      emit(`[vpg-visibility] [${level}] ${message}`, fields ?? {});
+    },
+  };
+}
+
+export async function resolveWorkspacePermission(
   user: UserRecord | null,
   workspaceId: string,
 ) {
-  const member = user ? workspaceService.getMember(workspaceId, user.id) : null;
-  return permissionService.resolve({
-    user,
-    member,
+  const db = await getDb();
+  const ctx = readOnlyCtx(user);
+  if (db) ctx.db = db;
+  const member = user
+    ? await workspacesService.getMember(ctx, {
+        workspaceId,
+        userId: user.id,
+      })
+    : null;
+  return permissionsService.resolve(ctx, {
     workspaceId,
+    userId: user?.id ?? "",
+    scope: "workspace",
+    targetId: workspaceId,
+    memberRole: member?.role ?? null,
+    instanceRole: user?.role,
   });
 }
 
-export function listSelectableWorkspaces(user: UserRecord | null) {
+export async function listSelectableWorkspaces(user: UserRecord | null) {
   if (!user) return [];
-  return workspaceService
-    .listWorkspaces()
-    .filter((workspace) =>
-      hasPermission(resolveWorkspacePermission(user, workspace.id), "read"),
-    );
+  const db = await getDb();
+  const ctx = readOnlyCtx(user);
+  if (db) ctx.db = db;
+  const workspaces = await workspacesService.listForUser(ctx, {
+    userId: user.id,
+  });
+  const visible: typeof workspaces = [];
+  for (const workspace of workspaces) {
+    const permission = await resolveWorkspacePermission(user, workspace.id);
+    if (hasPermission(permission, "read")) visible.push(workspace);
+  }
+  return visible;
 }
 
-export function listVisiblePagesForActor(
-  actor: ReturnType<typeof getRequestActor> | RequestActor,
+export async function listVisiblePagesForActor(
+  actor: RequestActor,
   workspaceId: string,
 ) {
-  return buildWorkspaceNavigation(actor, workspaceId).visiblePages;
+  const nav = await buildWorkspaceNavigation(actor, workspaceId);
+  return nav.visiblePages;
 }
 
-export function listVisibleFoldersForActor(
-  actor: ReturnType<typeof getRequestActor> | RequestActor,
+export async function listVisibleFoldersForActor(
+  actor: RequestActor,
   workspaceId: string,
 ) {
-  return buildWorkspaceNavigation(actor, workspaceId).visibleFolders;
+  const nav = await buildWorkspaceNavigation(actor, workspaceId);
+  return nav.visibleFolders;
 }
 
-export function canReadFolderOrVisibleDescendants(
-  actor: ReturnType<typeof getRequestActor> | RequestActor,
+export async function canReadFolderOrVisibleDescendants(
+  actor: RequestActor,
   folderId: string,
 ) {
-  const folder = workspaceService.getFolder(folderId);
+  const db = await getDb();
+  const ctx = readOnlyCtx(actor.user);
+  if (db) ctx.db = db;
+  const folder = await foldersService.get(ctx, folderId);
   if (!folder) return false;
   if (!actorCanUseWorkspace(actor, folder.workspaceId)) return false;
-  if (hasPermission(resolveFolderActorPermission({ actor, folder }), "read")) {
+  if (
+    hasPermission(await resolveFolderActorPermission({ actor, folder }), "read")
+  ) {
     return true;
   }
   return canReadFolderFromNavigation(
-    buildWorkspaceNavigation(actor, folder.workspaceId),
+    await buildWorkspaceNavigation(actor, folder.workspaceId),
     folderId,
   );
 }
 
-export function canReadWorkspaceOrScopedPages(
-  actor: ReturnType<typeof getRequestActor> | RequestActor,
+export async function canReadWorkspaceOrScopedPages(
+  actor: RequestActor,
   workspaceId: string,
 ) {
   if (!actorCanUseWorkspace(actor, workspaceId)) return false;
   if (!actor.user) return false;
   if (
-    hasPermission(resolveWorkspacePermission(actor.user, workspaceId), "read")
+    hasPermission(
+      await resolveWorkspacePermission(actor.user, workspaceId),
+      "read",
+    )
   ) {
     return true;
   }
-  return listVisiblePagesForActor(actor, workspaceId).length > 0;
+  return (await listVisiblePagesForActor(actor, workspaceId)).length > 0;
 }

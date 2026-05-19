@@ -1,134 +1,181 @@
 # CLI Reference
 
-Install `@vegastack/pages` and use either binary alias:
+`vpg` is noun-first: `vpg <noun> <verb>`. Top-level slots cover auth and cross-cutting verbs: `login / logout / whoami / use / search / events / validate / deploy / doctor / update / completions`.
+
+Install `@vegastack/pages`. Both aliases work:
 
 ```sh
 vpg --help
 vegastack-pages --help
 ```
 
-Auth options:
+The CLI authenticates to the same REST API as the MCP server. MCP workspace bearer tokens work directly via `--token` or `VPG_TOKEN` (CSRF is bypassed for bearer auth).
 
-```sh
-# Browser device-code login (default — opens consent page, picks workspace):
-vpg login
+## Global flags
 
-# Self-hosted browser device-code login:
-vpg login --base-url https://pages.example.com
+| Flag                                  | Effect                                                                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent`                             | Non-interactive. Compact single-line JSON to stdout; structured error JSON to stderr; non-zero exit; no prompts/spinners/pager. Streams = NDJSON. |
+| `--json`                              | JSON output but still interactive (prompts allowed).                                                                                              |
+| `--yes` / `-y`                        | Skip confirmation. Required under `--agent` for destructive ops (`pages restore`, `publish revoke`, `comments delete`).                           |
+| `--workspace W`                       | Override active workspace.                                                                                                                        |
+| `--token T` / env `VPG_TOKEN`         | Bearer token. Accepts MCP workspace tokens.                                                                                                       |
+| `--base-url URL` / env `VPG_BASE_URL` | API base override. Defaults to stored config, then `https://pages.vegastack.com`.                                                                 |
+| `--quiet` / `-q`                      | Suppress interactive chatter. Under `--agent`, the JSON data envelope is still emitted.                                                           |
+| `--verbose` / `-v`                    | Diagnostics to stderr.                                                                                                                            |
 
-# Manual token (CI / headless / agent):
-vpg login --base-url https://pages.example.com --workspace wks_123 --token "$VPG_TOKEN"
-vpg --base-url https://pages.example.com --workspace wks_123 --token "$VPG_TOKEN" whoami
+## `--agent` output contract
+
+Success (stdout, exit 0) — single line, compact:
+
+```json
+{
+  "data": { "id": "pg_xyz789", "title": "Plan" },
+  "meta": { "request_id": "req_abc", "duration_ms": 42 }
+}
 ```
 
-Use `--json` for machine-readable output.
+Error (stderr, non-zero exit) — single line, compact:
 
-The CLI uses standalone VegaStack Pages API routes over HTTP. It does not call MCP, does not require an MCP client, and supports the same page, comment, publication, template, review-wait, workspace tree, attachment, and member workflows exposed through MCP. Pass `--workspace <workspace_id>` or run `vpg use <workspace_id>` before workspace-scoped commands; the CLI sends `workspace_id` on every API call it makes.
+```json
+{
+  "error": {
+    "code": "VPG_NOT_FOUND",
+    "message": "Page pg_x not found.",
+    "hint": "Run `vpg pages list` to see available pages.",
+    "details": {}
+  }
+}
+```
 
-## Account And Workspace
+Exit codes: `0` success, `1` generic, `2` `VPG_VALIDATION`, `3` `VPG_AUTH`, `4` `VPG_NOT_FOUND`, `5` `VPG_PERMISSION`, `6` `VPG_CONFLICT`, `7` `VPG_NETWORK` (5xx), `8` `VPG_RATE_LIMITED`.
+
+Streaming commands (`vpg events`, `vpg pages wait`, `vpg deploy`) emit NDJSON, one object per line:
+
+```
+{"type":"event","event":{"id":"evt_1","kind":"comment.created","page_id":"pg_xyz789"}}
+{"type":"done","summary":{"count":1,"status":"matched"}}
+```
+
+`status` is `"matched"` on success, `"timeout"` on timeout.
+
+## Top-level commands
 
 ```sh
-vpg login                                           # browser device-code flow
-vpg login --no-browser                              # print URL only, don't open browser
-vpg login --token "$VPG_TOKEN" --workspace wks_123  # paste a token (CI / agents)
+vpg login [--token <t>] [--no-browser]
 vpg logout
 vpg whoami
-vpg workspaces
-vpg use wks_123
+vpg use <workspace>
+
+vpg search <query> [--type page|folder|comment_thread|comment|all] [--limit N]
+vpg events [--page X] [--workspace W] [--after-id A] [--limit N]
+vpg validate [--page <id> | --file <p> | --stdin] [--type markdown|mdx|html]
+vpg deploy [--target cloudflare] [--config vegastack-pages.yaml] [--dry-run] [--managed] [--apply-migrations | --skip-migrations]
 vpg doctor
+vpg update [--check] [--channel latest|next]
+vpg completions <bash|zsh|fish|powershell>
 ```
 
-`vpg login` (no `--token`) starts an RFC 8628 device-code flow against the configured `--base-url`, opens the verification URL in your default browser, and writes the workspace returned by the server. With `--token`, it stores a workspace-scoped manual bearer. Either flow persists the token in the OS keychain where available, otherwise in an owner-only local token file. `vpg use` sets the default workspace. Set `VPG_NO_OPEN=1` to disable the automatic browser launch globally.
+`vpg login` (no `--token`) runs an RFC 8628 device-code flow against `--base-url`, opens the verification URL, and stores the issued workspace token (OS keychain when available, otherwise an owner-only token file). `VPG_NO_OPEN=1` disables the browser launch.
 
-## Page Editing
+`vpg deploy` is for repository maintainers operating self-hosted Cloudflare Workers — do not run unless asked.
+
+## `vpg pages`
 
 ```sh
-vpg create --file plan.md --title "Plan" --type markdown --folder-path guides
-vpg create --stdin --title "Pasted Plan"
-vpg create --template tpl_123 --title "Templated Plan" --set owner=platform
-vpg pages get pg_123
-vpg pages rendered pg_123
-vpg pages versions pg_123
-vpg pages snapshot pg_123 --label "before review edits"
-vpg pages restore-version pg_123 ver_123
-vpg pages prepare-edit pg_123
-vpg pages validate --page pg_123
-vpg pages update-source pg_123 --base-version-id ver_123 --base-content-hash hash_123 --file page.md
-vpg pages update-source pg_123 --base-version-id ver_123 --source "# Title" --checkpoint --checkpoint-label "reviewed"
-vpg pages patch pg_123 --base-version-id ver_123 --base-content-hash hash_123 --find "old" --replace "new" --expected-replacements 1
-vpg pages move pg_123 --title "New title" --folder-path guides/setup
+vpg pages create [--title T] [--file P | --stdin] [--type markdown|mdx|html] [--folder-path P] [--template tpl_X] [--set k=v]...
+vpg pages get <page-or-slug> [--include source,rendered,versions,comments,publication,edit_tokens]
+vpg pages update <page> --base-version-id ID [--base-content-hash H] \
+                        [--file P | --stdin | --source S] \
+                        [--find F --replace R [--replace-all] [--expected-replacements N]] \
+                        [--checkpoint [--checkpoint-label L]] [--allow-noop]
+vpg pages move <page> [--title T] [--folder-path P]
+vpg pages restore <page> <version-id>
+vpg pages versions <page>
+vpg pages wait <page> [--until first-response|new-comment|all-threads-resolved|timeout] [--timeout S] [--poll S] [--after-id A]
 ```
 
-## Review
+`vpg pages get` accepts page slugs as well as `pg_…` ids (cycle 5). The slug is resolved server-side.
+
+`vpg pages update` has three modes (mutually exclusive, mirrors MCP):
+
+- **Full replace**: `--file` / `--stdin` / `--source`.
+- **Find/replace** (preferred): `--find` + `--replace` with optional `--replace-all` and `--expected-replacements N`.
+- **Checkpoint**: `--checkpoint [--checkpoint-label L]` to save a labeled version.
+
+Examples:
 
 ```sh
-vpg wait pg_123 --until first-response --timeout-seconds 600 --after-id evt_42
-vpg comments pg_123 --status all
-vpg comment pg_123 --body "Please clarify this." --selected-text "unclear phrase" --source-start 40 --source-end 54
-vpg comment pg_html --body "Move this CTA." --anchor-file html-pin.json
-vpg reply cmt_123 --body "Thanks, fixed."
-vpg resolve cmt_123
-vpg unresolve cmt_123
-vpg update-anchor cmt_123 --anchor-file html-pin.json
-vpg complete-thread cmt_123 --body "Fixed and verified." --resolve --agent-name Codex
-vpg delete-thread cmt_123
-vpg events --page pg_123 --limit 50
+vpg --agent pages create --file plan.md --title "Plan" --type markdown --folder-path guides
+vpg --agent pages create --template tpl_review --title "Templated Plan" --set owner=platform
+vpg --agent pages get q3-plan --include source,rendered,edit_tokens
+vpg --agent pages update pg_xyz789 --base-version-id ver_42 --find "old" --replace "new" --expected-replacements 1
+vpg --agent pages update pg_xyz789 --base-version-id ver_42 --file page.md --checkpoint --checkpoint-label "reviewed"
+vpg --agent pages restore pg_xyz789 ver_old --yes
+vpg --agent pages wait pg_xyz789 --until first-response --timeout 600
 ```
 
-`vpg wait` defaults to 600 seconds and clamps larger values to 600 seconds so review waits do not block an agent indefinitely. The matched return uses `status: "matched"`; timeout returns `status: "timeout"`. Use `--after-id <event_id>` to resume from a known cursor.
-
-`vpg reply` posts as the authenticated user. For agent-attributed replies (sets `agent_name`/`agent_model`/`agent_session_id` server-side, with optional `--resolve`), use `vpg complete-thread`.
-
-For Markdown/MDX comments, prefer `--selected-text` plus source offsets and prefix/suffix. For HTML pages, use `--anchor-json` or `--anchor-file` with a point selector; see `references/comments.md`.
-
-## Pages, Files, Publishing
+## `vpg comments`
 
 ```sh
-vpg attachments upload pg_123 --filename chart.png --content-type image/png --base64-file chart.b64
-vpg attachments upload pg_123 --filename data.json --content-type application/json --base64-body eyJvayI6dHJ1ZX0=
-vpg publish-page pg_123 --permission comment
-vpg publish-folder fld_123 --permission view
-vpg update-publication pub_123 --clear-expires-at --clear-password
-vpg revoke-publication pub_123
-vpg tree --workspace wks_123
-vpg search "deployment"
-vpg search "review comment" --type comment
-vpg search "guides" --type folder
-vpg export wks_123
+vpg comments list <page> [--status open|resolved|all]            # default: open
+vpg comments create <page> --body B [--anchor-json J | --anchor-file P | --selected-text S [--source-start N --source-end N]] \
+                                    [--anchor-kind text|point] [--surface prose|html] [--confidence active|fuzzy|manual|reanchored|stale]
+vpg comments reply <thread> --body B [--agent-name N] [--agent-model M] [--agent-session S]
+vpg comments resolve <thread>
+vpg comments reopen <thread>
+vpg comments delete <thread>
+vpg comments complete <thread> --body B [--resolve] [--agent-name N] [--agent-model M] [--agent-session-id S]
+vpg comments move-anchor <thread> [--anchor-json J | --anchor-file P | --selected-text S ...]
 ```
 
-`vpg search` searches pages, folders, and comment threads in the selected workspace. Use `--type page|folder|comment|all` to narrow results. Non-JSON output is a compact table; use global `--json` for the full result contract with snippets, ids, urls, updated timestamps, icons, and matched fields.
+`vpg comments reply` posts as the authenticated user. `vpg comments complete` carries agent attribution and optional `--resolve` in one call.
 
-## Templates
+## `vpg publish`
 
 ```sh
-vpg templates list
-vpg templates show tpl_123
-vpg templates render tpl_123 --title "Q3 Plan" --set owner=platform
-vpg templates create --args-file template.json
-vpg templates update tpl_123 --args-file template-update.json
+vpg publish page   <page>     [--permission view|comment|edit] [--expires-at TS] [--password P] [--indexing-enabled]
+vpg publish folder <folder>   [--permission view|comment|edit] [--expires-at TS] [--password P] [--indexing-enabled]
+vpg publish update <publication> [--permission ...] [--expires-at TS | --clear-expires-at] [--password P | --clear-password] [--indexing-enabled]
+vpg publish revoke <publication>
 ```
 
-## Members And Admin Helpers
+## `vpg templates`
 
 ```sh
-vpg members invite --email teammate@example.com --display-name "Teammate" --role editor
-vpg deploy --target cloudflare --dry-run
-vpg update
-vpg update --check
-vpg update --channel next
+vpg templates list [--category C]
+vpg templates get <template>
+vpg templates create [--args J | --args-file P | --set k=v]...
+vpg templates update <template> [--args J | --args-file P | --set k=v]...
+vpg templates render <template> --title T [--set k=v]...
 ```
 
-`vpg deploy` is a source-checkout helper for repository maintainers. It shells out to the repository deploy script and must not be used unless the user explicitly asks for deployment. `vpg update` queries the npm registry, then shells out to the package manager that installed vpg (npm, pnpm, bun, or yarn) to upgrade `@vegastack/pages`. Pass `--check` to look up the latest version without installing.
-
-## Skills
+## `vpg workspaces`
 
 ```sh
-vpg skills path
+vpg workspaces list
+vpg workspaces tree    [--workspace W]
+vpg workspaces export  [--workspace W] [--out <path>]
+vpg workspaces members
+vpg workspaces invite  --email E [--display-name N] [--role reader|commenter|editor|admin] [--workspace W]
+```
+
+`vpg workspaces members` calls `GET /api/workspaces/<id>/members` (also reachable via MCP `fetch include: ["members"]`).
+
+## `vpg attachments`
+
+```sh
+vpg attachments upload <page> --filename F --content-type CT [--base64-body B64 | --base64-file P]
+```
+
+## `vpg skills`
+
+```sh
+vpg skills install [--agent all|claude|cursor|gemini] [--scope user|project] [--dir D] [--force] [--dry-run]
+vpg skills update  [--agent ...] [--scope ...] [--dry-run]
 vpg skills print
+vpg skills path
 vpg skills doctor
-vpg skills install --agent all --scope user
-vpg skills update --agent all --scope user
 ```
 
-The CLI is the global installer for local agent skill files. MCP can expose the same guidance as resources and prompts, but a remote MCP server cannot safely write into every local agent's global config directory.
+The CLI is the global installer for local agent skill files — a Remote MCP server cannot safely write into every local agent's config directory.

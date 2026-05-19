@@ -2,9 +2,12 @@ import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
   comments as commentsService,
-  isServiceError,
+  pages as pagesService,
+  publications as publicationsService,
+  rateLimit,
+  reviewEvents,
 } from "@vegastack/pages-services";
-import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
+import { resolvePageAccess } from "../../../../lib/access";
 import { clientRateLimitKey } from "../../../../lib/client-address";
 import { coerceCommentAnchor } from "../../../../lib/comment-anchor-api";
 import { enrichThread, enrichThreads } from "../../../../lib/comments-enrich";
@@ -14,16 +17,11 @@ import {
   numericEnv,
   readJsonBody,
 } from "../../../../lib/request-body";
+import { scheduleIndexCommentThread } from "../../../../lib/runtime";
 import {
-  checkRateLimit,
-  commentService,
-  ensureSeedData,
-  scheduleIndexCommentThread,
-  pageService,
-  publicationService,
-  reviewEventService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 const defaultMaxPublicCommentBodyBytes = 10_000;
@@ -38,9 +36,9 @@ function maxPublicCommentBodyBytes() {
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       return Response.json(
@@ -57,23 +55,23 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
     });
     const status = url.searchParams.get("status");
     return Response.json({
-      threads: enrichThreads(
-        commentService.listForPage(
-          page.page.id,
-          status === "resolved" || status === "all" ? status : "open",
-        ),
+      threads: await enrichThreads(
+        await commentsService.listForPage(ctx, {
+          pageId: page.page.id,
+          status: status === "resolved" || status === "all" ? status : "open",
+        }),
       ),
     });
   } catch (error) {
-    return jsonAppError(error, "Comment listing failed.");
+    return serviceErrorToResponse(error, "Comment listing failed.");
   }
 };
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       return Response.json(
@@ -97,7 +95,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     let guestSession = null;
     if (!access.actor.user) {
       const publication = access.publicationId
-        ? publicationService.get(access.publicationId)
+        ? await publicationsService.get(ctx, access.publicationId)
         : null;
       if (!publication) {
         throw new AppError(
@@ -112,11 +110,19 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         publication,
         requestedName: body.guest_name ? String(body.guest_name) : null,
       });
-      await checkRateLimit({
+      const rl = await rateLimit.check(ctx, {
         key: `guest-comment:${access.publicationId}:${guestSession.id ?? clientRateLimitKey(request, "guest-comment")}`,
         limit: 20,
         windowMs: 60 * 60_000,
       });
+      if (!rl.ok) {
+        throw new AppError(
+          "RATE_LIMITED",
+          "Too many requests. Try again later.",
+          429,
+          { reset_at: rl.resetAt },
+        );
+      }
     }
     const commentBody = String(body.body ?? "");
     assertUtf8ByteLimit({
@@ -148,11 +154,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         };
       }
     }
-    const { ctx } = await buildServiceContext({
-      cookies,
-      request,
-      workspaceId: page.page.workspaceId,
-    });
     const result = await commentsService.createThread(ctx, {
       pageId: page.page.id,
       workspaceId: page.page.workspaceId,
@@ -164,7 +165,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       anchor,
     });
     const created = result.data;
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
       type: "comment.created",
@@ -173,17 +174,11 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     });
     scheduleIndexCommentThread(created.thread.id);
     return Response.json({
-      ...enrichThread(created),
+      ...(await enrichThread(created)),
       envelope: result.envelope,
     });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Comment creation failed.");
+    return serviceErrorToResponse(error, "Comment creation failed.");
   }
 };
 

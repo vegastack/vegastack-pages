@@ -1,22 +1,17 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import {
-  pages as pagesService,
-  isServiceError,
-} from "@vegastack/pages-services";
-import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
+import { pages as pagesService, reviewEvents } from "@vegastack/pages-services";
+import { resolvePageAccess } from "../../../../lib/access";
 import {
   assertUtf8ByteLimit,
   numericEnv,
   readJsonBody,
 } from "../../../../lib/request-body";
+import { scheduleIndexPage } from "../../../../lib/runtime";
 import {
-  ensureSeedData,
-  scheduleIndexPage,
-  pageService,
-  reviewEventService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 const defaultMaxPageSourceBytes = 1_048_576;
@@ -69,14 +64,14 @@ function patchSource(source: string, body: Record<string, unknown>) {
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const maxSourceBytes = maxPageSourceBytes();
     const body = await readJsonBody<Record<string, unknown>>(request, {
       maxBytes: maxSourceBytes + jsonOverheadBytes,
       label: "Page source patch",
     });
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
@@ -122,11 +117,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       label: "Page source",
       detailKey: "max_page_source_bytes",
     });
-    const { ctx } = await buildServiceContext({
-      cookies,
-      request,
-      workspaceId: page.page.workspaceId,
-    });
     const result = await pagesService.updateSource(ctx, {
       pageId: page.page.id,
       source: patched.source,
@@ -138,7 +128,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     });
     const updated = result.data;
     scheduleIndexPage(updated.page.id);
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: updated.page.workspaceId,
       pageId: updated.page.id,
       type: updated.checkpointCreated ? "page.version_created" : "page.updated",
@@ -162,12 +152,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       envelope: result.envelope,
     });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Page patch failed.");
+    return serviceErrorToResponse(error, "Page patch failed.");
   }
 };

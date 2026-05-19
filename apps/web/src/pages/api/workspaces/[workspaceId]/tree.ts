@@ -1,7 +1,11 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { workspaces as workspacesService } from "@vegastack/pages-services";
 import { getApiRequestActor } from "../../../../lib/access";
-import { ensureSeedData, workspaceService } from "../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { canReadWorkspaceOrScopedPages } from "../../../../lib/workspace-visibility";
 import {
   buildWorkspaceNavigation,
@@ -12,14 +16,13 @@ export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const requestUrl = url ?? new URL(request.url);
     const workspaceId = params.workspaceId ?? "";
     const actor = await getApiRequestActor(cookies, request);
-    if (!canReadWorkspaceOrScopedPages(actor, workspaceId)) {
+    if (!(await canReadWorkspaceOrScopedPages(actor, workspaceId))) {
       throw new AppError("PERMISSION_DENIED", "Permission denied.", 403);
     }
-    const nav = buildWorkspaceNavigation(actor, workspaceId);
+    const nav = await buildWorkspaceNavigation(actor, workspaceId);
     const requestedVersion = requestUrl.searchParams.get("version");
     if (requestedVersion && requestedVersion === nav.treeVersion) {
       return Response.json({
@@ -44,21 +47,29 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
     }
     const filteredPages = filtered.pages;
     const filteredFolders = filtered.folders;
-    const visiblePageIds = new Set(filteredPages.map((page) => page.id));
-    const tree = workspaceService.tree({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
       workspaceId,
-      visiblePageIds,
-      pages: filteredPages.map((page) => ({
+    });
+    const workspace = await workspacesService.get(ctx, { workspaceId });
+    const treePages = filteredPages
+      .map((page) => ({
         id: page.id,
         folderPath: page.folderPath,
         title: page.title,
         slugId: page.slugId,
-      })),
-    });
+      }))
+      .sort(
+        (left, right) =>
+          left.folderPath.localeCompare(right.folderPath) ||
+          left.title.localeCompare(right.title),
+      );
     return Response.json(
       {
-        ...tree,
+        workspace,
         folders: filteredFolders,
+        pages: treePages,
         tree_version: nav.treeVersion,
         page_count: nav.visiblePages.length,
         folder_count: nav.visibleFolders.length,
@@ -74,12 +85,7 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       { headers: { "Cache-Control": "private, no-store" } },
     );
   } catch (error) {
-    if (error instanceof AppError)
-      return Response.json(error.toJSON(), { status: error.status });
-    return Response.json(
-      { error: { code: "INTERNAL_ERROR", message: "Workspace tree failed." } },
-      { status: 500 },
-    );
+    return serviceErrorToResponse(error, "Workspace tree failed.");
   }
 };
 

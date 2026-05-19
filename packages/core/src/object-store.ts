@@ -5,11 +5,19 @@ export type StoredObject = {
   updatedAt: string;
 };
 
+// Bodies the store can accept on `put`. Text remains the common case;
+// binary (ArrayBuffer / Uint8Array) is for image and other binary
+// attachments where round-tripping through UTF-8 would corrupt bytes.
+// Reads continue to surface `body: string` for text callers — binary
+// downloads bypass this facade entirely and use the platform R2
+// binding directly (see /img/[...key] route).
+export type ObjectStorePutBody = string | ArrayBuffer | Uint8Array;
+
 export interface ObjectStore {
   get(key: string): Promise<StoredObject | null>;
   put(
     key: string,
-    body: string,
+    body: ObjectStorePutBody,
     options?: { contentType?: string },
   ): Promise<StoredObject>;
   delete(key: string): Promise<void>;
@@ -24,7 +32,7 @@ export type R2LikeBucket = {
   } | null>;
   put(
     key: string,
-    value: string,
+    value: ObjectStorePutBody,
     options?: { httpMetadata?: { contentType?: string } },
   ): Promise<{ uploaded?: Date } | null>;
   delete(key: string): Promise<void>;
@@ -53,7 +61,7 @@ export class R2ObjectStore implements ObjectStore {
 
   async put(
     key: string,
-    body: string,
+    body: ObjectStorePutBody,
     options: { contentType?: string } = {},
   ): Promise<StoredObject> {
     const written = await this.bucket.put(key, body, {
@@ -61,7 +69,10 @@ export class R2ObjectStore implements ObjectStore {
     });
     return {
       key,
-      body,
+      // Read-back returns the empty string for binary uploads through
+      // this facade; callers that need raw bytes go through the R2
+      // binding directly. Text uploads round-trip unchanged.
+      body: typeof body === "string" ? body : "",
       contentType: options.contentType,
       updatedAt: written?.uploaded?.toISOString() ?? new Date().toISOString(),
     };
@@ -99,12 +110,15 @@ export class InMemoryObjectStore implements ObjectStore {
 
   async put(
     key: string,
-    body: string,
+    body: ObjectStorePutBody,
     options: { contentType?: string } = {},
   ): Promise<StoredObject> {
     const object = {
       key,
-      body,
+      // Stash a string representation; binary bytes round-trip through
+      // utf-8 lossily, which is acceptable for the in-memory tests
+      // (they only round-trip text). Production uses R2ObjectStore.
+      body: typeof body === "string" ? body : new TextDecoder().decode(body),
       contentType: options.contentType,
       updatedAt: new Date().toISOString(),
     };

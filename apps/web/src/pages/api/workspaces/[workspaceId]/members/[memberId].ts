@@ -1,19 +1,28 @@
 import { AppError, type WorkspaceRole } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../../lib/access";
 import {
-  auditService,
-  ensureSeedData,
-  listMcpSessions,
-  permissionService,
-  revokeMcpSession,
-  workspaceService,
-} from "../../../../../lib/runtime";
+  audit,
+  buildEnvelope,
+  jsonWithEnvelope,
+  permissions,
+  users,
+  workspaces as workspacesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+import { getApiRequestActor } from "../../../../../lib/access";
+import { listMcpSessions, revokeMcpSession } from "../../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../../lib/workspace-navigation";
 
 export const prerender = false;
 const workspaceRoles = ["reader", "commenter", "editor", "admin"] as const;
+
+type Member = NonNullable<
+  Awaited<ReturnType<typeof workspacesService.getMemberById>>
+>;
 
 async function assertWorkspaceAdmin(
   cookies: Parameters<typeof getApiRequestActor>[0],
@@ -21,24 +30,40 @@ async function assertWorkspaceAdmin(
   workspaceId: string,
 ) {
   const actor = await getApiRequestActor(cookies, request);
-  const workspace = workspaceService.getWorkspace(workspaceId);
+  const { ctx } = await buildServiceContext({
+    cookies,
+    request,
+    workspaceId,
+  });
+  let workspace;
+  try {
+    workspace = await workspacesService.get(ctx, { workspaceId });
+  } catch {
+    workspace = null;
+  }
   if (!workspace)
     throw new AppError("WORKSPACE_NOT_FOUND", "Workspace was not found.", 404, {
       parameter: "workspaceId",
       location: "path",
     });
   const member = actor.user
-    ? workspaceService.getMember(workspaceId, actor.user.id)
+    ? await workspacesService.getMember(ctx, {
+        workspaceId,
+        userId: actor.user.id,
+      })
     : null;
   const permission =
     actor.workspaceId && actor.workspaceId !== workspaceId
       ? "none"
-      : permissionService.resolve({
-          user: actor.user,
-          member,
+      : await permissions.resolve(ctx, {
           workspaceId,
+          userId: actor.user?.id ?? "",
+          scope: "workspace",
+          targetId: workspaceId,
+          memberRole: member?.role ?? null,
+          instanceRole: actor.user?.role,
         });
-  permissionService.assert({ actual: permission, required: "admin" });
+  permissions.assertLevel({ actual: permission, required: "admin" });
   return actor;
 }
 
@@ -51,23 +76,24 @@ function coerceRole(value: unknown): WorkspaceRole {
   });
 }
 
-function serializeMember(
-  member: ReturnType<typeof workspaceService.getMemberById>,
+async function serializeMember(
+  ctx: ServiceContext,
+  member: Member | null | undefined,
 ) {
   if (!member) return null;
-  return { ...member, user: workspaceService.getUser(member.userId) };
+  return { ...member, user: await users.getById(ctx, member.userId) };
 }
 
-function adminCount(workspaceId: string) {
-  return workspaceService
-    .listMembers(workspaceId)
-    .filter((member) => member.role === "admin").length;
+async function adminCount(ctx: ServiceContext, workspaceId: string) {
+  const members = await workspacesService.listMembers(ctx, { workspaceId });
+  return members.filter((member) => member.role === "admin").length;
 }
 
-function assertCanChangeMember(input: {
+async function assertCanChangeMember(input: {
+  ctx: ServiceContext;
   actorUserId: string | null | undefined;
   workspaceId: string;
-  target: NonNullable<ReturnType<typeof workspaceService.getMemberById>>;
+  target: Member;
   nextRole?: WorkspaceRole;
   action: "update" | "remove";
 }) {
@@ -92,7 +118,7 @@ function assertCanChangeMember(input: {
   const removesAdmin =
     input.target.role === "admin" &&
     (input.action === "remove" || input.nextRole !== "admin");
-  if (removesAdmin && adminCount(input.workspaceId) <= 1) {
+  if (removesAdmin && (await adminCount(input.ctx, input.workspaceId)) <= 1) {
     throw new AppError(
       "VALIDATION_ERROR",
       "A workspace must keep at least one admin.",
@@ -105,11 +131,21 @@ async function resolveActorForUpdate(
   cookies: Parameters<typeof getApiRequestActor>[0],
   request: Request,
   workspaceId: string,
-  target: NonNullable<ReturnType<typeof workspaceService.getMemberById>>,
+  target: Member,
   nextRole: WorkspaceRole,
 ) {
   const actor = await getApiRequestActor(cookies, request);
-  const workspace = workspaceService.getWorkspace(workspaceId);
+  const { ctx } = await buildServiceContext({
+    cookies,
+    request,
+    workspaceId,
+  });
+  let workspace;
+  try {
+    workspace = await workspacesService.get(ctx, { workspaceId });
+  } catch {
+    workspace = null;
+  }
   if (!workspace)
     throw new AppError("WORKSPACE_NOT_FOUND", "Workspace was not found.", 404, {
       parameter: "workspaceId",
@@ -122,25 +158,38 @@ async function resolveActorForUpdate(
   if (isSelfNameOnly) return actor;
 
   const member = actor.user
-    ? workspaceService.getMember(workspaceId, actor.user.id)
+    ? await workspacesService.getMember(ctx, {
+        workspaceId,
+        userId: actor.user.id,
+      })
     : null;
   const permission =
     actor.workspaceId && actor.workspaceId !== workspaceId
       ? "none"
-      : permissionService.resolve({
-          user: actor.user,
-          member,
+      : await permissions.resolve(ctx, {
           workspaceId,
+          userId: actor.user?.id ?? "",
+          scope: "workspace",
+          targetId: workspaceId,
+          memberRole: member?.role ?? null,
+          instanceRole: actor.user?.role,
         });
-  permissionService.assert({ actual: permission, required: "admin" });
+  permissions.assertLevel({ actual: permission, required: "admin" });
   return actor;
 }
 
 export const PATCH: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    const target = workspaceService.getMemberById(params.memberId ?? "");
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    const target = await workspacesService.getMemberById(
+      ctx,
+      params.memberId ?? "",
+    );
     if (!target || target.workspaceId !== workspaceId) {
       throw new AppError(
         "AUTH_REQUIRED",
@@ -157,7 +206,8 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
       target,
       role,
     );
-    assertCanChangeMember({
+    await assertCanChangeMember({
+      ctx,
       actorUserId: actor.user?.id,
       workspaceId,
       target,
@@ -166,16 +216,17 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
     });
     const updatedUser =
       body.display_name === undefined
-        ? workspaceService.getUser(target.userId)
-        : workspaceService.updateUser({
+        ? await users.getById(ctx, target.userId)
+        : await users.setDisplayName(ctx, {
             userId: target.userId,
             displayName: String(body.display_name ?? ""),
           });
-    const member = workspaceService.updateMemberRole({
+    const updated = await workspacesService.updateMemberRole(ctx, {
       memberId: target.id,
       role,
     });
-    auditService.record({
+    const member = updated.data;
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "workspace.member_role_updated",
@@ -187,12 +238,10 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
         display_name: updatedUser?.displayName ?? null,
       },
     });
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
-      { member: serializeMember(member) },
+      { member: await serializeMember(ctx, member) },
       buildEnvelope({
         treeVersion,
         navigationInvalidated: true,
@@ -200,16 +249,23 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Workspace member update failed.");
+    return serviceErrorToResponse(error, "Workspace member update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
     const actor = await assertWorkspaceAdmin(cookies, request, workspaceId);
-    const target = workspaceService.getMemberById(params.memberId ?? "");
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    const target = await workspacesService.getMemberById(
+      ctx,
+      params.memberId ?? "",
+    );
     if (!target || target.workspaceId !== workspaceId) {
       throw new AppError(
         "AUTH_REQUIRED",
@@ -217,13 +273,14 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
         404,
       );
     }
-    assertCanChangeMember({
+    await assertCanChangeMember({
+      ctx,
       actorUserId: actor.user?.id,
       workspaceId,
       target,
       action: "remove",
     });
-    const removedGrants = permissionService.deleteGrantsForSubject({
+    const removedGrants = await permissions.deleteGrantsForSubject(ctx, {
       workspaceId,
       subjectId: target.userId,
     });
@@ -234,8 +291,11 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
     for (const session of mcpSessions) {
       await revokeMcpSession({ workspaceId, sessionId: session.id });
     }
-    const member = workspaceService.removeMember(target.id);
-    auditService.record({
+    const removed = await workspacesService.removeMember(ctx, {
+      memberId: target.id,
+    });
+    const member = removed.data;
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "workspace.member_removed",
@@ -244,18 +304,16 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       metadata: {
         user_id: member.userId,
         role: member.role,
-        removed_grants: removedGrants.length,
+        removed_grants: removedGrants.removed,
         revoked_mcp_sessions: mcpSessions.length,
       },
     });
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
       {
-        member: serializeMember(member),
-        removed_grants: removedGrants.length,
+        member: await serializeMember(ctx, member),
+        removed_grants: removedGrants.removed,
         revoked_mcp_sessions: mcpSessions.length,
       },
       buildEnvelope({
@@ -265,6 +323,6 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Workspace member removal failed.");
+    return serviceErrorToResponse(error, "Workspace member removal failed.");
   }
 };

@@ -89,25 +89,36 @@ Read [install/docker/README.md](install/docker/README.md) for persistence and ba
 
 ## CLI
 
-The npm package is `@vegastack/pages` and exposes both `vpg` and `vegastack-pages` binaries:
+The npm package is `@vegastack/pages` and exposes both `vpg` and `vegastack-pages` binaries. The CLI is noun-first (`vpg <noun> <verb>`) with an `--agent` mode for non-interactive JSON output.
 
 ```sh
 npm install -g @vegastack/pages
 vpg --help
 ```
 
-Use a workspace-scoped token from **Settings → My Connections** or another bearer token accepted by your deployment:
+Interactive workflow:
 
 ```sh
-# Browser login (opens the consent page in your default browser):
+# Browser device-code login (default):
 vpg login
 # Or paste a workspace-scoped token for headless / CI use:
-vpg login --base-url https://pages.vegastack.com --workspace wks_123 --token "$VPG_TOKEN"
-vpg create --template prd --title "Search redesign" --set owner=platform
-vpg wait pg_123 --until first-response --after-id evt_42
-vpg pages patch pg_123 --base-version-id ver_123 --find "old" --replace "new"
+vpg login --base-url https://pages.vegastack.com --token "$VPG_TOKEN"
+
+vpg use wks_123
+vpg pages create --template prd --title "Search redesign" --set owner=platform
+vpg pages get pg_123 --include source,edit_tokens
+vpg pages update pg_123 --base-version-id ver_123 --find "old" --replace "new"
+vpg pages wait pg_123 --until first-response --after-id evt_42
 vpg whoami
-vpg workspaces
+vpg workspaces list
+```
+
+Same commands in `--agent` mode emit single-line JSON to stdout (or NDJSON for `events` / `pages wait`), structured error JSON to stderr, exit codes 1–8:
+
+```sh
+vpg --agent pages get pg_123 --include source,edit_tokens
+vpg --agent pages update pg_123 --base-version-id ver_123 --source "$(cat plan.md)"
+vpg --agent --yes pages restore pg_123 ver_old
 ```
 
 For source builds:
@@ -133,9 +144,9 @@ Managed endpoint:
 https://pages.vegastack.com/mcp
 ```
 
-Every tool call includes `workspace_id`. The token is workspace-scoped server-side; the explicit id is a guard against cross-workspace mistakes — call `list_workspaces` once to discover available ids.
+Every tool call includes `workspace_id`. The token is workspace-scoped server-side; the explicit id is a guard against cross-workspace mistakes — call `fetch` once with `resource_id: "me"` and `include: ["workspaces"]` to discover available ids.
 
-Core tools cover sessions (`list_workspaces`, `whoami`), page creation, templates, source reads, validation, patching, attachments, comments, wait conditions, review events, publishing, workspace search, tree reads, page moves, and member invites. See [MCP and CLI docs](apps/web/src/content/docs/mcp-and-cli.md).
+The MCP surface is 19 tools, Notion-style: one mega-`fetch` (prefix-routes on `pg_/fld_/tpl_/thr_/pub_/wks_/me`, sub-data via `include[]`) plus verb-noun writes — `create_page`, `update_page` (full source / find-replace / checkpoint), `restore_page_version`, `move_page`, `create_comment`, `update_thread`, `delete_thread`, `apply_publication`, `delete_publication`, `create_template`, `update_template`, `render_template`, `upload_attachment`, `invite_workspace_member`, `validate_page_source`, plus `search`, `wait_for_review`, `whoami`. See [MCP and CLI docs](apps/web/src/content/docs/mcp-and-cli.md).
 
 ## Repository Layout
 

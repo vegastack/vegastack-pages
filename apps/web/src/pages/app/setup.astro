@@ -1,13 +1,18 @@
 ---
+import { pages, setup } from "@vegastack/pages-services";
 import AppLayout from "../../layouts/AppLayout.astro";
-import { pageService, setupService } from "../../lib/runtime";
+import { buildServiceContext } from "../../lib/service-context";
 import { readInitialTheme } from "../../lib/theme";
 
 export const prerender = false;
 
-const status = setupService.status();
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+});
+const status = await setup.status(ctx);
 const setupWorkspacePages = status.firstWorkspaceId
-  ? pageService.listPages(status.firstWorkspaceId)
+  ? await pages.list(ctx, status.firstWorkspaceId)
   : [];
 const setupRedirect = setupWorkspacePages[0]
   ? `/p/${setupWorkspacePages[0].slugId}`
@@ -36,7 +41,12 @@ const initialTheme = readInitialTheme(Astro.cookies);
             </a>
           </div>
         ) : (
-          <form class="setup-form" method="post" action="/api/setup/complete">
+          <form
+            class="setup-form"
+            method="post"
+            action="/api/setup/complete"
+            data-setup-form
+          >
             <label>
               Setup token
               <input
@@ -67,6 +77,13 @@ const initialTheme = readInitialTheme(Astro.cookies);
             <button class="toolbar-button primary" type="submit">
               Complete setup
             </button>
+            <div
+              class="auth-status"
+              data-setup-result
+              hidden
+              role="status"
+              aria-live="polite"
+            />
           </form>
         )
       }
@@ -102,4 +119,78 @@ const initialTheme = readInitialTheme(Astro.cookies);
       </p>
     </aside>
   </main>
+
+  <script>
+    // Progressive enhancement: the form's <form method="post"> action
+    // still works without JS (the server returns a 303 redirect). When
+    // JS is available we intercept to show inline loading + error UX
+    // and avoid the full-page reload on success.
+    const form = document.querySelector("[data-setup-form]");
+    const result = document.querySelector("[data-setup-result]");
+
+    function renderStatus(state: string, title: string, message: string) {
+      if (!(result instanceof HTMLElement)) return;
+      result.hidden = false;
+      result.dataset.state = state;
+      const titleEl = document.createElement("strong");
+      titleEl.className = "auth-status-title";
+      titleEl.textContent = title;
+      const messageEl = document.createElement("span");
+      messageEl.className = "auth-status-body";
+      messageEl.textContent = message;
+      result.replaceChildren(titleEl, messageEl);
+    }
+
+    form?.addEventListener("submit", async (event) => {
+      if (!(form instanceof HTMLFormElement)) return;
+      event.preventDefault();
+      const button = form.querySelector("button[type='submit']");
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = true;
+        button.textContent = "Creating workspace...";
+      }
+      renderStatus(
+        "loading",
+        "Setting up",
+        "Creating the first admin and workspace.",
+      );
+      const data = new FormData(form);
+      try {
+        const response = await fetch("/api/setup/complete", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            setup_token: data.get("setup_token"),
+            admin_email: data.get("admin_email"),
+            admin_name: data.get("admin_name"),
+            workspace_name: data.get("workspace_name"),
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          redirect_to?: string;
+          error?: { message?: string };
+        };
+        if (!response.ok) {
+          throw new Error(payload?.error?.message || "Setup failed.");
+        }
+        renderStatus(
+          "success",
+          "Setup complete",
+          "Redirecting to your new workspace…",
+        );
+        window.location.assign(payload.redirect_to ?? "/app");
+      } catch (error) {
+        renderStatus(
+          "error",
+          "Setup failed",
+          error instanceof Error ? error.message : "Setup failed.",
+        );
+      } finally {
+        if (button instanceof HTMLButtonElement) {
+          button.disabled = false;
+          button.textContent = "Complete setup";
+        }
+      }
+    });
+  </script>
 </AppLayout>

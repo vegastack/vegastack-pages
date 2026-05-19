@@ -18,7 +18,6 @@ import {
   resolveFolderActorPermission,
   type PageAccess,
 } from "../../lib/access";
-import { publicSignupEnabled } from "../../lib/deployment";
 import {
   canReadFolderOrVisibleDescendants,
   listVisibleFoldersForActor,
@@ -26,21 +25,68 @@ import {
 import { buildWorkspaceNavigation } from "../../lib/workspace-navigation";
 import { readInitialTheme } from "../../lib/theme";
 import {
-  commentService,
-  ensureSeedData,
-  favoriteService,
-  pageService,
-  workspaceService,
-} from "../../lib/runtime";
+  comments as commentsService,
+  favorites as favoritesService,
+  folders as foldersService,
+  pages as pagesService,
+  workspaces as workspacesService,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../lib/service-context";
 import AppLayout from "../../layouts/AppLayout.astro";
 import "../../styles/docs.css";
 
 export const prerender = false;
 
 const { slugId } = Astro.params;
-if (!publicSignupEnabled()) await ensureSeedData();
-const folder = slugId ? workspaceService.getFolderBySlugId(slugId) : null;
+const earlyCtxResult = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+});
+const folder = slugId
+  ? await foldersService.getBySlugId(earlyCtxResult.ctx, slugId)
+  : null;
 if (!folder) return new Response("Folder not found", { status: 404 });
+
+// Phase G fast path: anonymous + baked folder-publication artifact in
+// R2 → serve from Cache API. Members fall through to the SSR sidebar
+// view below.
+{
+  const {
+    isAnonymousPublicRequest,
+    servePublishedArtifact,
+    verifyPasswordCookie,
+  } = await import("../../lib/publication-cache");
+  if (isAnonymousPublicRequest(Astro.cookies)) {
+    const { publications: publicationsService } =
+      await import("@vegastack/pages-services");
+    const { buildServiceContext } = await import("../../lib/service-context");
+    const { ctx } = await buildServiceContext({
+      cookies: Astro.cookies,
+      request: Astro.request,
+      workspaceId: folder.workspaceId,
+    });
+    const publication = await publicationsService.findForResource(ctx, {
+      workspaceId: folder.workspaceId,
+      resourceType: "folder",
+      resourceId: folder.id,
+    });
+    if (
+      publication &&
+      !publication.revokedAt &&
+      publication.latestArtifactKey
+    ) {
+      const passwordOk = await verifyPasswordCookie(Astro.cookies, publication);
+      if (passwordOk) {
+        const served = await servePublishedArtifact({
+          ctx,
+          publication,
+          request: Astro.request,
+        });
+        if (served) return served.response;
+      }
+    }
+  }
+}
 
 let access: PageAccess | null = null;
 let passwordPrompt: { publicationId: string } | null = null;
@@ -66,15 +112,13 @@ try {
     return new Response("Permission denied", { status: 403 });
 }
 
-const folderAccess =
-  access ??
-  ({
-    actor: getRequestActor(Astro.cookies),
-    permission: "none",
-    publicationId: null,
-    publication: null,
-    guestNameRequired: false,
-  } as PageAccess);
+const folderAccess: PageAccess = access ?? {
+  actor: await getRequestActor(Astro.cookies),
+  permission: "none",
+  publicationId: null,
+  publication: null,
+  guestNameRequired: false,
+};
 const actor = folderAccess.actor;
 const isPublicPublication = Boolean(
   passwordPrompt || (folderAccess.publicationId && !actor.user),
@@ -82,7 +126,7 @@ const isPublicPublication = Boolean(
 const currentFolderId = folder.id;
 if (
   !isPublicPublication &&
-  !canReadFolderOrVisibleDescendants(actor, currentFolderId)
+  !(await canReadFolderOrVisibleDescendants(actor, currentFolderId))
 ) {
   return new Response("Permission denied", { status: 403 });
 }
@@ -136,7 +180,19 @@ const sidebarUser = actor.user ?? {
   email: "guest@local",
   displayName: "Guest",
 };
-const workspaceRecord = workspaceService.getWorkspace(folder.workspaceId);
+const { ctx: folderCtx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+  workspaceId: folder.workspaceId,
+});
+let workspaceRecord;
+try {
+  workspaceRecord = await workspacesService.get(folderCtx, {
+    workspaceId: folder.workspaceId,
+  });
+} catch {
+  workspaceRecord = null;
+}
 const sidebarWorkspace = workspaceRecord ?? {
   id: folder.workspaceId,
   name: "Workspace",
@@ -147,14 +203,20 @@ const sidebarWorkspace = workspaceRecord ?? {
 };
 const sidebarWorkspaces =
   !isPublicPublication && actor.user
-    ? workspaceService.listWorkspacesForUser(actor.user.id)
+    ? await workspacesService.listForUser(folderCtx, { userId: actor.user.id })
     : [];
 
-const workspaceFolders = workspaceService.listFolders(folder.workspaceId);
-const ancestorFolders = workspaceService.folderAncestors(folder.id);
+const workspaceFolders = await foldersService.listAll(folderCtx, {
+  workspaceId: folder.workspaceId,
+});
+const ancestorIds = await foldersService.ancestorPath(folderCtx, folder.id);
+const foldersById = new Map(workspaceFolders.map((node) => [node.id, node]));
+const ancestorFolders = ancestorIds
+  .map((id) => foldersById.get(id))
+  .filter((node): node is (typeof workspaceFolders)[number] => Boolean(node));
 const publicRootFolder =
   folderAccess.publication?.resourceType === "folder"
-    ? workspaceService.getFolder(folderAccess.publication.resourceId)
+    ? await foldersService.get(folderCtx, folderAccess.publication.resourceId)
     : isPublicPublication
       ? folder
       : null;
@@ -169,9 +231,27 @@ const visibleFolders = isPublicPublication
           node.path.startsWith(publicFolderPrefix!),
       )
     : [folder]
-  : listVisibleFoldersForActor(actor, folder.workspaceId);
-const workspacePages = pageService
-  .listPages(folder.workspaceId)
+  : await listVisibleFoldersForActor(actor, folder.workspaceId);
+// Pre-resolve per-page permissions so the synchronous filter callback
+// stays simple. `Promise.all` keeps the resolves parallel.
+const allFolderPages = await pagesService.list(folderCtx, folder.workspaceId);
+const pagePermissions = isPublicPublication
+  ? new Map<string, boolean>()
+  : new Map(
+      await Promise.all(
+        allFolderPages.map(
+          async (page) =>
+            [
+              page.id,
+              hasPermission(
+                await resolveActorPermission({ actor, page }),
+                "read",
+              ),
+            ] as const,
+        ),
+      ),
+    );
+const workspacePages = allFolderPages
   .filter((page) =>
     isPublicPublication
       ? Boolean(
@@ -179,7 +259,7 @@ const workspacePages = pageService
           (page.folderPath === publicRootFolder?.path ||
             page.folderPath.startsWith(publicFolderPrefix ?? "")),
         )
-      : hasPermission(resolveActorPermission({ actor, page }), "read"),
+      : pagePermissions.get(page.id) === true,
   )
   .sort(
     (left, right) =>
@@ -195,7 +275,11 @@ const childPages = workspacePages.filter(
 );
 const threadCounts = new Map<string, number>();
 for (const page of childPages) {
-  threadCounts.set(page.id, commentService.listForPage(page.id, "open").length);
+  const threads = await commentsService.listForPage(folderCtx, {
+    pageId: page.id,
+    status: "open",
+  });
+  threadCounts.set(page.id, threads.length);
 }
 const listRows = [
   ...childFolders.map((node) => ({
@@ -298,8 +382,11 @@ const sidebarPages = workspacePages.map((page) => ({
 const sidebarPageIds = new Set(sidebarPages.map((page) => page.id));
 const initialFavoriteIds =
   actor.user && !isPublicPublication
-    ? favoriteService
-        .listForWorkspace(actor.user.id, sidebarWorkspace.id)
+    ? (
+        await favoritesService.listForWorkspace(folderCtx, {
+          workspaceId: sidebarWorkspace.id,
+        })
+      )
         .map((favorite) => favorite.pageId)
         .filter((pageId) => sidebarPageIds.has(pageId))
     : [];
@@ -312,14 +399,11 @@ const sidebarFoldersForTree = visibleFolders.map((node) => ({
 }));
 const sidebarTreeVersion = isPublicPublication
   ? null
-  : buildWorkspaceNavigation(actor, sidebarWorkspace.id).treeVersion;
+  : (await buildWorkspaceNavigation(actor, sidebarWorkspace.id)).treeVersion;
 
-// buildFolderDocumentPayload (apps/web/src/lib/document-payload.ts) is
-// the canonical builder used by the folder partial endpoint. SSR does
-// not call it today — see /p/[slugId].astro for the rationale.
 const canWrite =
   !isPublicPublication &&
-  hasPermission(resolveFolderActorPermission({ actor, folder }), "write");
+  hasPermission(await resolveFolderActorPermission({ actor, folder }), "write");
 const canManageAccess = hasPermission(folderAccess.permission, "admin");
 const publicIndexable = Boolean(
   folderAccess.publication?.indexingEnabled &&
@@ -349,6 +433,7 @@ const publicIndexable = Boolean(
       >
         {!isPublicPublication && (
           <Sidebar
+            transition:persist="vpg-sidebar"
             workspace={{
               id: sidebarWorkspace.id,
               name: sidebarWorkspace.name,
@@ -379,6 +464,7 @@ const publicIndexable = Boolean(
 
         <div class="vpg-shell-right">
           <PageHeader
+            transition:persist="vpg-page-header"
             workspaceId={sidebarWorkspace.id}
             workspaceName={sidebarWorkspace.name}
             workspaceHref={workspaceHref}
@@ -422,11 +508,16 @@ const publicIndexable = Boolean(
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette client:idle workspaceId={sidebarWorkspace.id} />
+          <CommandPalette
+            client:idle
+            transition:persist="vpg-command-palette"
+            workspaceId={sidebarWorkspace.id}
+          />
         )}
 
         {!isPublicPublication && (
           <MobileTabBar
+            transition:persist="vpg-mobile-tabbar"
             pageId={undefined}
             showComments={false}
             commentsBadge={0}

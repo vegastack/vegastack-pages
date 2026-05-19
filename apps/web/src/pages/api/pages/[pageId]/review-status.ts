@@ -1,20 +1,21 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  comments as commentsService,
+  pages as pagesService,
+  reviewEvents,
+  type ServiceContext,
+} from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import { enrichThreads } from "../../../../lib/comments-enrich";
-import {
-  commentService,
-  ensureSeedData,
-  pageService,
-  reviewEventService,
-} from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
-    const page = params.pageId ? await getPageByRef(params.pageId) : null;
+    const { ctx } = await buildServiceContext({ cookies, request });
+    const page = params.pageId ? await getPageByRef(ctx, params.pageId) : null;
     if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
     await resolvePageAccess({
       cookies,
@@ -23,16 +24,20 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       page: page.page,
       required: "read",
     });
-    const afterId = url.searchParams.get("after_id");
+    const afterId = url.searchParams.get("after_id") ?? undefined;
     const limit = clamp(Number(url.searchParams.get("limit") ?? "50"), 1, 100);
     const until = url.searchParams.get("until") ?? "first_response";
     const includeThreads = url.searchParams.get("include_threads") ?? "matches";
-    const events = reviewEventService.list({
+    const events = await reviewEvents.list(ctx, {
+      workspaceId: page.page.workspaceId,
       pageId: page.page.id,
       afterId,
       limit,
     });
-    const threadRecords = commentService.listForPage(page.page.id, "all");
+    const threadRecords = await commentsService.listForPage(ctx, {
+      pageId: page.page.id,
+      status: "all",
+    });
     const openThreadRecords = threadRecords.filter(
       (thread) => thread.thread.status === "open",
     );
@@ -64,7 +69,7 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
                   thread.thread.status === "open" ||
                   eventThreadIds.has(thread.thread.id),
               );
-    const threads = enrichThreads(selectedThreads.slice(0, limit));
+    const threads = await enrichThreads(selectedThreads.slice(0, limit));
     return Response.json(
       {
         page_id: page.page.id,
@@ -84,9 +89,9 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   }
 };
 
-async function getPageByRef(ref: string) {
-  if (ref.startsWith("pg_")) return pageService.getPage(ref);
-  return pageService.getPageBySlugId(ref);
+async function getPageByRef(ctx: ServiceContext, ref: string) {
+  if (ref.startsWith("pg_")) return pagesService.get(ctx, ref);
+  return pagesService.getBySlugId(ctx, ref);
 }
 
 function clamp(value: number, min: number, max: number) {

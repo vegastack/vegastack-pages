@@ -1,12 +1,7 @@
 import type { APIRoute } from "astro";
-import {
-  auditService,
-  d1Run,
-  findMcpSessionByRefreshToken,
-  getMcpSession,
-  revokeMcpSession,
-  sha256Hex,
-} from "../../lib/runtime";
+import { audit, mcpSessions } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../lib/service-context";
+import { d1Run, sha256Hex } from "../../lib/runtime";
 
 export const prerender = false;
 
@@ -51,11 +46,19 @@ export const POST: APIRoute = async ({ request }) => {
   if (!token) {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
+  const { ctx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+    request,
+  });
   let sessionId: string | null = null;
   let userId: string | null = null;
   let workspaceId: string | null = null;
   if (hint === "refresh_token" || !hint) {
-    const refreshSession = await findMcpSessionByRefreshToken(token);
+    const refreshHash = await sha256Hex(token);
+    const refreshSession = await mcpSessions.findByRefreshToken(
+      ctx,
+      `mcp_${refreshHash}`,
+    );
     if (refreshSession) {
       sessionId = refreshSession.id;
       userId = refreshSession.userId;
@@ -63,34 +66,22 @@ export const POST: APIRoute = async ({ request }) => {
     }
   }
   if (!sessionId && (hint === "access_token" || !hint)) {
-    const accessSession = await getMcpSession(token);
+    const bearerSessionId = `mcp_${await sha256Hex(token)}`;
+    const accessSession = await mcpSessions.findByBearerToken(
+      ctx,
+      bearerSessionId,
+    );
     if (accessSession) {
       sessionId = accessSession.id;
       userId = accessSession.userId;
       workspaceId = accessSession.workspaceId;
     }
   }
-  if (sessionId && workspaceId) {
-    await revokeMcpSession({ workspaceId, sessionId });
+  if (sessionId) {
+    await mcpSessions.revoke(ctx, sessionId);
     await d1Run("DELETE FROM agent_sessions WHERE id = ?", sessionId);
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId,
-      actorUserId: userId,
-      action: "oauth.session_revoked",
-      targetType: "mcp_session",
-      targetId: sessionId,
-      metadata: { reason: "user" },
-    });
-  } else if (sessionId) {
-    const fallbackHash = await sha256Hex(token);
-    await d1Run("DELETE FROM mcp_sessions WHERE id = ?", sessionId);
-    await d1Run(
-      "DELETE FROM mcp_sessions WHERE refresh_token_hash = ?",
-      `mcp_${fallbackHash}`,
-    );
-    await d1Run("DELETE FROM agent_sessions WHERE id = ?", sessionId);
-    auditService.record({
-      workspaceId: null,
       actorUserId: userId,
       action: "oauth.session_revoked",
       targetType: "mcp_session",

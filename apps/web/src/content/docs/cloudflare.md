@@ -3,7 +3,7 @@ title: Self-host on Cloudflare
 description: Deploy VegaStack Pages on Cloudflare Workers with D1, KV, R2, Wrangler, AWS SES or Cloudflare Email Service, and Backup to Git.
 category: Self-host
 order: 10
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 Cloudflare Workers is the primary deployment target. The source installer creates or reuses D1, KV, and R2 resources, writes `apps/web/wrangler.jsonc`, runs the Astro build, applies migrations, and deploys the Worker.

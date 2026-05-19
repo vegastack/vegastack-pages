@@ -1,8 +1,8 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { audit, permissions } from "@vegastack/pages-services";
 import {
   getApiRequestActor,
-  jsonAppError,
   resolveWorkspaceActorPermission,
 } from "../../../../lib/access";
 import {
@@ -10,11 +10,9 @@ import {
   verifyGitHubInstallationForUser,
 } from "../../../../lib/github-backup";
 import {
-  auditService,
-  ensureSeedData,
-  permissionService,
-  persistRuntimeState,
-} from "../../../../lib/runtime";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -27,7 +25,6 @@ function redirectGeneral(url: URL, status: string) {
 
 export const GET: APIRoute = async ({ cookies, request, url }) => {
   try {
-    await ensureSeedData();
     const rawState = cookies.get("vpg_github_install_state")?.value ?? "";
     cookies.delete("vpg_github_install_state", { path: "/" });
     const parsed = rawState
@@ -55,16 +52,21 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       redirectUri: `${url.origin}/api/integrations/github/callback`,
     });
     const actor = await getApiRequestActor(cookies, request);
-    permissionService.assert({
-      actual: resolveWorkspaceActorPermission(actor, parsed.workspaceId),
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: parsed.workspaceId,
+    });
+    permissions.assertLevel({
+      actual: await resolveWorkspaceActorPermission(actor, parsed.workspaceId),
       required: "admin",
     });
-    await upsertPendingGitHubConnection({
+    await upsertPendingGitHubConnection(ctx, {
       workspaceId: parsed.workspaceId,
       installationId,
       actorUserId: actor.user?.id ?? null,
     });
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: parsed.workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "github_backup.connected",
@@ -72,12 +74,11 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       targetId: parsed.workspaceId,
       metadata: { installation_id: installationId },
     });
-    await persistRuntimeState();
     return redirectGeneral(url, "connected");
   } catch (error) {
     if (error instanceof AppError) {
       return redirectGeneral(url, "error");
     }
-    return jsonAppError(error, "GitHub backup callback failed.");
+    return serviceErrorToResponse(error, "GitHub backup callback failed.");
   }
 };

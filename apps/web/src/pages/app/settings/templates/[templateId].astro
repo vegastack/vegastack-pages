@@ -1,8 +1,9 @@
 ---
 import { templateBuilderFromMarkdown } from "@vegastack/pages-core";
+import { templates as templatesService } from "@vegastack/pages-services";
 import SettingsLayout from "../../../../layouts/SettingsLayout.astro";
 import { loadSettings } from "../../../../lib/settings-data";
-import { templateService } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { WorkspaceTemplateEditor } from "../../../../components/settings/WorkspaceTemplateEditor";
 
 export const prerender = false;
@@ -11,13 +12,18 @@ const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
 const { workspace } = result.context;
 const templateId = Astro.params.templateId ?? "";
-const withSource = await templateService.getTemplateWithSource(templateId);
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+  workspaceId: workspace.id,
+});
+const withSource = await templatesService.getWithSource(ctx, templateId);
 
-if (!withSource || withSource.template.workspaceId !== workspace.id) {
+if (!withSource || withSource.workspaceId !== workspace.id) {
   return new Response("Template not found", { status: 404 });
 }
 
-const { template, source } = withSource;
+const { source, ...template } = withSource;
 ---
 
 <SettingsLayout

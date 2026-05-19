@@ -3,7 +3,7 @@ title: Quickstart
 description: Sign up or self-host, create a page from source or template, and share it for review.
 category: Getting started
 order: 20
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 This page gets you to a shared review page. Pick managed hosting or self-hosting first.
@@ -62,10 +62,10 @@ await mcp.call("create_page", {
 });
 ```
 
-Or create from a template:
+Or create from a template — `create_page` takes an optional `template_id`:
 
 ```js
-await mcp.call("create_page_from_template", {
+await mcp.call("create_page", {
   workspace_id: "wks_123",
   template_id: "prd",
   title: "Search redesign",
@@ -74,6 +74,16 @@ await mcp.call("create_page_from_template", {
     status: "review",
   },
 });
+```
+
+From the CLI:
+
+```sh
+vpg pages create --title "Plan" --file ./plan.md
+vpg pages create --template prd --title "Search redesign" --set owner=platform --set status=review
+
+# Same calls, --agent mode (single-line JSON to stdout, exit code 0–8):
+vpg --agent pages create --template prd --title "Search redesign" --set owner=platform
 ```
 
 ## Share it
@@ -91,4 +101,11 @@ await mcp.call("wait_for_review", {
 });
 ```
 
-When the reviewer comments, the agent can read the thread, patch source with a current version token, reply, and wait again.
+Or from a shell / agent harness:
+
+```sh
+vpg pages wait pg_123 --until first-response --timeout 600
+vpg --agent pages wait pg_123 --until first-response --timeout 600
+```
+
+When the reviewer comments, the agent can read the thread via `fetch` with `include=["comments","edit_tokens"]`, write a `update_page` find/replace with a current `base_version_id`, reply through `update_thread`, and wait again. See [MCP and CLI](mcp-and-cli.md) for the full reference.

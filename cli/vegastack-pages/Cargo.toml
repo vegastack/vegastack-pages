@@ -1,6 +1,6 @@
 [package]
 name = "vegastack-pages"
-version = "0.1.13"
+version = "0.1.14-next.0"
 edition = "2021"
 license = "MIT"
 
@@ -9,7 +9,24 @@ name = "vpg"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive", "env"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli", "http2", "stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "io-util", "io-std", "signal", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+comfy-table = "7"
+indicatif = "0.17"
+inquire = { version = "0.7", default-features = false, features = ["crossterm"] }
+is-terminal = "0.4"
+owo-colors = { version = "4", features = ["supports-colors"] }
+thiserror = "2"
+futures = "0.3"
+url = "2"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+opt-level = "z"

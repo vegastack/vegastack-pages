@@ -1,6 +1,6 @@
 {
   "name": "@vegastack/pages-db",
-  "version": "0.1.13",
+  "version": "0.1.14-next.0",
   "private": true,
   "type": "module",
   "exports": {

@@ -1,7 +1,10 @@
+import { AppError } from "./errors";
+
 export const idPrefixes = {
   user: "usr",
   authIdentity: "aid",
   workspace: "wks",
+  workspaceMember: "wmb",
   folder: "fld",
   page: "pg",
   version: "ver",
@@ -10,6 +13,7 @@ export const idPrefixes = {
   reply: "rpl",
   publication: "pub",
   agentSession: "agt",
+  mcpSession: "mcs",
   session: "ses",
   job: "job",
   auditLog: "aud",
@@ -57,7 +61,11 @@ export function parsePageSlugId(slugId: string): {
 } {
   const lastDash = slugId.lastIndexOf("-");
   if (lastDash <= 0 || lastDash === slugId.length - 1) {
-    throw new Error(`Invalid page slug id: ${slugId}`);
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `Invalid page slug id: ${slugId}`,
+      400,
+    );
   }
   return {
     titleSlug: slugId.slice(0, lastDash),

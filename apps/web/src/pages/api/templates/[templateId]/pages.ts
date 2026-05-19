@@ -1,47 +1,48 @@
-import { AppError } from "@vegastack/pages-core";
+import { AppError, hasPermission } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import {
+  audit,
+  buildEnvelope,
+  isServiceError,
+  jsonWithEnvelope,
+  pages as pagesService,
+  reviewEvents,
+  templates as templatesService,
+} from "@vegastack/pages-services";
 import {
   assertApiWorkspaceId,
   getApiRequestActor,
   jsonAppError,
+  resolveWorkspaceActorPermission,
 } from "../../../../lib/access";
-import {
-  auditService,
-  ensureSeedData,
-  scheduleIndexPage,
-  pageService,
-  permissionService,
-  reviewEventService,
-  templateService,
-  workspaceService,
-} from "../../../../lib/runtime";
+import { scheduleIndexPage } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const templateId = params.templateId ?? "";
-    const template = templateService.getTemplate(templateId);
+    // First pass: bootstrap without workspaceId so we can resolve the
+    // template's workspace, then build the per-workspace ctx.
+    const bootstrap = await buildServiceContext({ cookies, request });
+    const template = await templatesService.get(bootstrap.ctx, templateId);
     if (!template) {
       throw new AppError("PAGE_NOT_FOUND", "Template was not found.", 404);
     }
     assertApiWorkspaceId({ url, workspaceId: template.workspaceId });
     const actor = await getApiRequestActor(cookies, request);
-    const member = actor.user
-      ? workspaceService.getMember(template.workspaceId, actor.user.id)
-      : null;
-    const permission =
-      actor.workspaceId && actor.workspaceId !== template.workspaceId
-        ? "none"
-        : permissionService.resolve({
-            user: actor.user,
-            member,
-            workspaceId: template.workspaceId,
-          });
-    permissionService.assert({ actual: permission, required: "write" });
+    const permission = await resolveWorkspaceActorPermission(
+      actor,
+      template.workspaceId,
+    );
+    if (!hasPermission(permission, "write")) {
+      throw new AppError("PERMISSION_DENIED", "Insufficient permission.", 403, {
+        required: "write",
+        actual: permission,
+      });
+    }
 
     const body = await request.json();
     const title = String(body.title ?? "").trim();
@@ -55,20 +56,25 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         ? (body.properties as Record<string, unknown>)
         : {};
 
-    const rendered = await templateService.render({
-      templateId: template.id,
-      title,
-      properties,
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId: template.workspaceId,
     });
-    const created = await pageService.createPage({
+    const rendered = await templatesService.render(ctx, {
+      templateId: template.id,
+      values: { title, ...properties },
+    });
+    const createResult = await pagesService.create(ctx, {
       workspaceId: template.workspaceId,
       folderPath,
-      title,
-      sourceType: rendered.template.sourceType === "mdx" ? "mdx" : "markdown",
-      source: rendered.source,
+      title: rendered.title,
+      sourceType: rendered.sourceType === "mdx" ? "mdx" : "markdown",
+      source: rendered.body,
     });
+    const created = createResult.data;
     scheduleIndexPage(created.page.id);
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: created.page.workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "page.created_from_template",
@@ -81,7 +87,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         folder_path: created.page.folderPath,
       },
     });
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: created.page.workspaceId,
       pageId: created.page.id,
       type: "page.created",
@@ -92,9 +98,8 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         template_slug: template.slug,
       },
     });
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      created.page.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, created.page.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       {
@@ -113,6 +118,12 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       }),
     );
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Page creation from template failed.");
   }
 };

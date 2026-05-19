@@ -1,13 +1,40 @@
 import type { APIRoute } from "astro";
-import { getRequestActor } from "../../../lib/access";
+import {
+  getApiRequestActor,
+  resolveWorkspaceActorPermission,
+} from "../../../lib/access";
+import { sameOrigin } from "../../../lib/csrf";
 import {
   clientRedirectUriIsRegistered,
   getOAuthClient,
 } from "../../../lib/oauth/clients";
 import { persistAuthCode, randomToken } from "../../../lib/oauth/codes";
-import { permissionService, workspaceService } from "../../../lib/runtime";
 
 export const prerender = false;
+
+// The consent POST sits inside the middleware's CSRF-bypass allowlist
+// (Bearer-authenticated endpoints don't pay the CSRF tax). This route is
+// the exception — it IS a cookie-authenticated browser mutation. Enforce
+// origin in-handler so a cross-site auto-submit form can't trick a
+// logged-in user into approving an OAuth grant for an attacker-controlled
+// (DCR-registered) client.
+function originIsTrustedForConsent(request: Request): boolean {
+  // Sec-Fetch-Site=same-origin is the strongest signal modern browsers
+  // emit; same-origin Origin header is the fallback for older agents.
+  const fetchSite = request.headers.get("sec-fetch-site");
+  // Sec-Fetch-Dest tells us what kind of request initiated this. We
+  // want only top-level document submissions ("document") — anything
+  // initiated from an iframe (`iframe`), object/embed, or sub-fetch
+  // (`empty` from script) is rejected. Defense-in-depth against an
+  // attacker that loads the consent page in an iframe and auto-clicks
+  // the approve button. Browsers without Sec-Fetch-Dest (very old)
+  // fall through to the same-origin checks below.
+  const fetchDest = request.headers.get("sec-fetch-dest");
+  if (fetchDest && fetchDest !== "document") return false;
+  if (fetchSite === "same-origin") return true;
+  if (fetchSite && fetchSite !== "same-origin") return false;
+  return sameOrigin(request);
+}
 
 function redirectWith(
   redirectUri: string,
@@ -34,7 +61,10 @@ function htmlError(message: string, status = 400): Response {
 }
 
 export const POST: APIRoute = async ({ request, cookies }) => {
-  const actor = getRequestActor(cookies);
+  if (!originIsTrustedForConsent(request)) {
+    return htmlError("Cross-site consent submissions are not allowed.", 403);
+  }
+  const actor = await getApiRequestActor(cookies, request);
   if (!actor.user) {
     return htmlError(
       "Sign-in required. Sign in and retry the connector flow.",
@@ -69,12 +99,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     });
   }
 
-  const member = workspaceService.getMember(workspaceId, actor.user.id);
-  const permission = permissionService.resolve({
-    user: actor.user,
-    member,
-    workspaceId,
-  });
+  const permission = await resolveWorkspaceActorPermission(actor, workspaceId);
   if (permission === "none") {
     return htmlError("You do not have access to the selected workspace.", 403);
   }

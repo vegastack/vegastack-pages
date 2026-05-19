@@ -7,4 +7,5 @@
 //
 // We serve the same JSON the root-path variant returns so the broker can
 // continue past PRM discovery without falling back.
+export const prerender = false;
 export { OPTIONS, GET } from "../oauth-protected-resource.ts";

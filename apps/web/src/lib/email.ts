@@ -324,7 +324,14 @@ async function sendWithAwsSes(
     ),
   );
 
-  const response = await fetch(endpoint, {
+  // Retry transient 5xx responses with jittered backoff. SES has
+  // documented 95th-percentile latency for SendRawEmail under 500ms;
+  // two retries with ~250ms jitter add at most ~1s total before
+  // surfacing the failure. 4xx responses (auth errors, validation
+  // failures, throttling-by-suppression-list) are NOT retryable —
+  // they fail fast and let the caller fall back to the Cloudflare
+  // binding if available.
+  const requestInit: RequestInit = {
     method: "POST",
     headers: {
       "content-type": headers["content-type"],
@@ -340,16 +347,82 @@ async function sendWithAwsSes(
       ].join(", "),
     },
     body: payload,
-  });
-  if (!response.ok) {
+  };
+
+  const maxAttempts = 3;
+  let lastError: { status: number; body: string } | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(endpoint, requestInit);
+    } catch (networkError) {
+      // fetch threw (DNS, TLS, abort, etc). Treat as retryable.
+      lastError = {
+        status: 0,
+        body:
+          networkError instanceof Error
+            ? networkError.message
+            : String(networkError),
+      };
+      if (attempt < maxAttempts) {
+        await sleep(250 + Math.floor(Math.random() * 250));
+        continue;
+      }
+      break;
+    }
+    if (response.ok) return;
     const body = await response.text();
-    throw new AppError("EMAIL_DELIVERY_FAILED", sesErrorMessage(body), 502, {
-      provider: "ses",
-      status: response.status,
-    });
+    lastError = { status: response.status, body };
+    // 5xx + 429 retry; 4xx other than 429 fails fast.
+    const retryable = response.status >= 500 || response.status === 429;
+    if (!retryable || attempt === maxAttempts) break;
+    await sleep(250 + Math.floor(Math.random() * 250));
   }
+  throw new AppError(
+    "EMAIL_DELIVERY_FAILED",
+    sesErrorMessage(lastError?.body ?? ""),
+    502,
+    {
+      provider: "ses",
+      status: lastError?.status ?? 0,
+      attempts: maxAttempts,
+    },
+  );
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Canonical outbound mail path for VegaStack Pages.
+//
+// Provider model (per plan 010 §1.12):
+//
+//   • `aws_ses`   — AWS SES via signed HTTPS (SendRawEmail). Primary
+//                   production path: best-in-class transactional
+//                   deliverability, dedicated-IP-eligible, works
+//                   identically on Cloudflare Workers and self-host Node.
+//
+//   • `cloudflare`— Cloudflare Email Sending via the `send_email`
+//                   binding (`env.EMAIL.send`). Useful as a secondary
+//                   path inside Email Routing's `email()` inbound
+//                   handler (sending a reply from the same Worker that
+//                   received the message) and as a no-AWS fallback for
+//                   small self-hosters who haven't provisioned SES.
+//
+//   • `console`   — Dev/log-only. Magic link is printed (with the token
+//                   redacted) to stdout. Useful for local development.
+//
+//   • `auto`      — Pick SES if AWS_* secrets are present; else the
+//                   Cloudflare binding if EMAIL is bound; else
+//                   `console` in dev, error otherwise. This is the
+//                   recommended VPG_EMAIL_PROVIDER value in production.
+//
+// Cloudflare Email Routing (inbound) is configured at the zone level
+// in the Cloudflare dashboard; the optional `email()` handler in
+// `apps/web/src/worker.ts` can intercept and reply via `env.EMAIL.send`.
+// See https://developers.cloudflare.com/email-routing/ and
+// https://developers.cloudflare.com/email-service/.
 export async function sendMagicLinkEmail(
   input: MagicLinkEmailInput,
 ): Promise<EmailDeliveryResult> {
@@ -357,10 +430,54 @@ export async function sendMagicLinkEmail(
   const provider = emailProvider(bindings);
   const from = sender(bindings);
 
+  const sesConfig = awsSesConfig(bindings);
+  const sesConfigured = Boolean(
+    sesConfig.region && sesConfig.accessKeyId && sesConfig.secretAccessKey,
+  );
+  const cloudflareConfigured = Boolean(bindings?.EMAIL);
+
+  // SES path (explicit or auto-selected when AWS credentials are set).
   if (
-    (provider === "auto" && bindings?.EMAIL) ||
+    provider === "ses" ||
+    provider === "aws_ses" ||
+    provider === "amazon_ses" ||
+    (provider === "auto" && sesConfigured)
+  ) {
+    try {
+      await sendWithAwsSes(input, from, sesConfig);
+      return { provider: "ses", sent: true };
+    } catch (sesError) {
+      // When SES fails AND a Cloudflare binding is configured, fall
+      // back to the Cloudflare path so a degraded SES (sandbox cap,
+      // throttling, 5xx) doesn't take the login flow down. The
+      // failure is logged for ops visibility. Strictly SES-only
+      // deployments (provider === "ses") still bubble the error.
+      const sesOnly =
+        provider === "ses" ||
+        provider === "aws_ses" ||
+        provider === "amazon_ses";
+      if (sesOnly || !cloudflareConfigured || !bindings?.EMAIL || !from.email) {
+        throw sesError;
+      }
+      console.log(
+        JSON.stringify({
+          event: "vpg.email.ses.failed_falling_back",
+          level: "warn",
+          to: input.to,
+          error:
+            sesError instanceof Error ? sesError.message : String(sesError),
+        }),
+      );
+      await sendWithCloudflareBinding(input, from);
+      return { provider: "cloudflare", sent: true };
+    }
+  }
+
+  // Cloudflare send_email binding (explicit or auto-fallback).
+  if (
     provider === "cloudflare" ||
-    provider === "cloudflare_email_service"
+    provider === "cloudflare_email_service" ||
+    (provider === "auto" && cloudflareConfigured)
   ) {
     if (!bindings?.EMAIL) {
       throw new AppError(
@@ -380,15 +497,7 @@ export async function sendMagicLinkEmail(
     return { provider: "cloudflare", sent: true };
   }
 
-  if (
-    provider === "ses" ||
-    provider === "aws_ses" ||
-    provider === "amazon_ses"
-  ) {
-    await sendWithAwsSes(input, from, awsSesConfig(bindings));
-    return { provider: "ses", sent: true };
-  }
-
+  // Dev / log-only fallback. Production should never reach this branch.
   if (import.meta.env.DEV || provider === "console") {
     console.info(
       `[VegaStack Pages] Magic link for ${input.to}: ${redactMagicLinkUrl(input.verifyUrl)}`,
@@ -398,7 +507,7 @@ export async function sendMagicLinkEmail(
 
   throw new AppError(
     "EMAIL_NOT_CONFIGURED",
-    "Email delivery is not configured for this instance.",
+    "Email delivery is not configured for this instance. Set VPG_EMAIL_PROVIDER plus the corresponding credentials (AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for SES, or the EMAIL binding for Cloudflare).",
     503,
   );
 }

@@ -1,14 +1,15 @@
 import type { APIRoute } from "astro";
+import { pages as pagesService } from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
-import { ensureSeedData, pageService } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.slugId
-      ? await pageService.getPageBySlugId(params.slugId)
+      ? await pagesService.getBySlugId(ctx, params.slugId)
       : null;
     if (!page) {
       return Response.json(

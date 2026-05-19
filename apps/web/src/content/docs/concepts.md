@@ -3,7 +3,7 @@ title: Concepts
 description: Workspaces, pages, templates, comments, publications, and Backup to Git.
 category: Getting started
 order: 30
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 A small vocabulary covers most of the product surface.

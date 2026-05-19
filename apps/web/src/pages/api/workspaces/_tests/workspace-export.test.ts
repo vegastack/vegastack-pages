@@ -1,11 +1,21 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
-  auditService,
-  authService,
-  pageService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  audit,
+  auth,
+  pages as pagesService,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { GET } from "../[workspaceId]/export";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-export-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -20,23 +30,33 @@ function sessionCookies(sessionId: string) {
 }
 
 async function createAdminWorkspace(name = "Export Workspace") {
-  const workspace = workspaceService.createWorkspace({
-    id: uniqueId("wks"),
-    name: `${name} ${crypto.randomUUID()}`,
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
   });
-  const admin = workspaceService.createUser({
+  const admin = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `export-${crypto.randomUUID()}@example.test`,
     displayName: "Export Admin",
+    role: "user",
   });
-  workspaceService.addMember({
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name: `${name} ${crypto.randomUUID()}`,
+    slug: uniqueId("slug"),
+    firstAdminUserId: admin.id,
+  });
+  const session = await auth.createSession(seedCtx, { userId: admin.id });
+  const { ctx: actorCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
     workspaceId: workspace.id,
-    userId: admin.id,
-    role: "admin",
   });
+  actorCtx.actor.userId = admin.id;
+  actorCtx.actor.email = admin.email;
   return {
     workspace,
-    cookies: sessionCookies(authService.createSession(admin.id).id),
+    admin,
+    actorCtx,
+    cookies: sessionCookies(session.id),
   };
 }
 
@@ -47,8 +67,9 @@ afterEach(() => {
 describe("workspace export API", () => {
   it("refuses exports that exceed the configured uncompressed size cap", async () => {
     process.env.VPG_WORKSPACE_EXPORT_MAX_BYTES = "512";
-    const { workspace, cookies } = await createAdminWorkspace("Export Cap");
-    await pageService.createPage({
+    const { workspace, cookies, actorCtx } =
+      await createAdminWorkspace("Export Cap");
+    await pagesService.create(actorCtx, {
       id: uniqueId("pg"),
       workspaceId: workspace.id,
       folderPath: "",
@@ -71,8 +92,9 @@ describe("workspace export API", () => {
   });
 
   it("streams successful exports, rate-limits repeat exports, and records audit logs", async () => {
-    const { workspace, cookies } = await createAdminWorkspace("Export Stream");
-    await pageService.createPage({
+    const { workspace, cookies, actorCtx } =
+      await createAdminWorkspace("Export Stream");
+    await pagesService.create(actorCtx, {
       id: uniqueId("pg"),
       workspaceId: workspace.id,
       folderPath: "",
@@ -97,10 +119,9 @@ describe("workspace export API", () => {
       params: { workspaceId: workspace.id },
     } as never);
     expect(limited.status).toBe(429);
+    const logs = await audit.list(actorCtx, { workspaceId: workspace.id });
     expect(
-      auditService
-        .list({ workspaceId: workspace.id })
-        .filter((log) => log.action === "workspace.exported"),
+      logs.filter((log) => log.action === "workspace.exported"),
     ).toHaveLength(3);
   });
 });

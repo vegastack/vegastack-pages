@@ -125,17 +125,20 @@ curl -i -X POST http://127.0.0.1:4322/mcp \
 
 ## Agent Edit Flow
 
-Use this sequence for reliable edits:
+Use this sequence for reliable edits against the consolidated MCP surface:
 
-1. `prepare_page_edit`
-2. Modify the returned live `source`
-3. `patch_page` for focused replacements, or `update_page` with `base_version_id` and `base_content_hash`
-4. `validate_page_source`
-5. `list_comments` with `status: "all"` when verifying review state
-6. `update_thread` with `body`, agent metadata, and optional `resolve`
+1. `fetch` with `resource_id: "pg_…"` and `include: ["source", "edit_tokens"]` — one call returns the live source, `base_version_id`, and `base_content_hash`.
+2. Modify the returned `source`.
+3. `update_page` — three mutually-exclusive modes:
+   - Full source: pass `source` with `base_version_id` (+ optional `base_content_hash`).
+   - Find / replace: pass `find` + `replace` (+ `replace_all`, `expected_replacements`).
+   - Checkpoint only: pass `checkpoint: true` with no `source`/`find`.
+4. `validate_page_source` is read-only and accepts an in-memory `source` for pre-flight checks.
+5. To verify review state, call `fetch` with `include: ["comments", "review_events"]` and an optional `status` filter (`open` | `resolved` | `all`).
+6. `update_thread` with `body`, optional `resolve`/`status`/`anchor`/`complete`, and the agent attribution fields (`agent_name`, `agent_model`, `agent_session_id`).
 
 Every content change advances `version_id`, even when no checkpoint record is created.
 
-For structured new pages, prefer `create_page_from_template` so the agent starts from the workspace's expected format.
+For structured new pages, call `create_page` with an optional `template_id` so the agent starts from the workspace's expected format.
 
-`update_thread` posts replies, resolves, reopens, and records agent attribution when `agent_name`/`agent_model`/`agent_session_id` are supplied. CLI review flows should use `vpg wait` plus the comment-thread commands.
+CLI review flows use `vpg pages wait` plus the `vpg comments *` group. Add `--agent` for non-interactive JSON / NDJSON output.

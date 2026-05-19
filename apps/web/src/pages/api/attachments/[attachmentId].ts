@@ -1,10 +1,10 @@
 import type { APIRoute } from "astro";
-import { jsonAppError, resolvePageAccess } from "../../../lib/access";
 import {
-  attachmentService,
-  ensureSeedData,
-  pageService,
-} from "../../../lib/runtime";
+  attachments as attachmentsService,
+  pages as pagesService,
+} from "@vegastack/pages-services";
+import { jsonAppError, resolvePageAccess } from "../../../lib/access";
+import { buildServiceContext } from "../../../lib/service-context";
 
 export const prerender = false;
 
@@ -29,9 +29,9 @@ function contentDisposition(input: { contentType: string; filename: string }) {
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const attachment = params.attachmentId
-      ? await attachmentService.get(params.attachmentId)
+      ? await attachmentsService.get(ctx, params.attachmentId)
       : null;
     if (!attachment) {
       return Response.json(
@@ -44,7 +44,7 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
         { status: 404 },
       );
     }
-    const page = await pageService.getPage(attachment.attachment.pageId);
+    const page = await pagesService.get(ctx, attachment.pageId);
     if (!page) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
@@ -58,15 +58,27 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       page: page.page,
       required: "read",
     });
-    const bytes = decodeBase64(attachment.base64Body);
+    const stored = await ctx.objectStore?.get(attachment.objectKey);
+    if (!stored) {
+      return Response.json(
+        {
+          error: {
+            code: "PAGE_NOT_FOUND",
+            message: "Attachment body was not found.",
+          },
+        },
+        { status: 404 },
+      );
+    }
+    const bytes = decodeBase64(stored.body);
     const copy: Uint8Array<ArrayBuffer> = new Uint8Array(bytes.byteLength);
     copy.set(bytes);
     return new Response(copy.buffer, {
       headers: {
-        "Content-Type": attachment.attachment.contentType,
+        "Content-Type": attachment.contentType,
         "Content-Disposition": contentDisposition({
-          contentType: attachment.attachment.contentType,
-          filename: attachment.attachment.filename,
+          contentType: attachment.contentType,
+          filename: attachment.filename,
         }),
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cache-Control": "private, max-age=60",

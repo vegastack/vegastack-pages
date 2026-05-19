@@ -52,17 +52,26 @@ export function WorkspaceTemplatesManager({
   }, [templates]);
 
   async function deleteTemplate(template: TemplateSummary) {
-    const confirmed =
-      (await window.settingsHelpers?.confirmAction?.({
-        title: "Delete template",
-        description:
-          "New pages created from this template before now are unaffected. The template itself cannot be recovered.",
-        confirmLabel: "Delete template",
-        tone: "danger",
-      })) ??
-      window.confirm(
-        `Delete the template "${template.name}"? This cannot be undone.`,
-      );
+    // `settingsHelpers.confirmAction` is registered synchronously by
+    // SettingsLayout.astro before any React island hydrates, so the
+    // modal is always present on /app/settings/* — we use it as the
+    // single confirm UX. If the helper is ever missing (because the
+    // component renders outside SettingsLayout, or the inline script
+    // failed), surface a Sonner toast rather than reaching for the
+    // browser-native `window.confirm`, which is blocking and out of
+    // place in the Sonner-driven UX.
+    const helper = window.settingsHelpers?.confirmAction;
+    if (!helper) {
+      toast.error("Delete dialog is unavailable. Reload the page and retry.");
+      return;
+    }
+    const confirmed = await helper({
+      title: "Delete template",
+      description:
+        "New pages created from this template before now are unaffected. The template itself cannot be recovered.",
+      confirmLabel: "Delete template",
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     setBusyDeleteId(template.id);

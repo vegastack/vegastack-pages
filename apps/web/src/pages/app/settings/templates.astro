@@ -1,7 +1,8 @@
 ---
+import { templates as templatesService } from "@vegastack/pages-services";
 import SettingsLayout from "../../../layouts/SettingsLayout.astro";
 import { loadSettings } from "../../../lib/settings-data";
-import { templateService } from "../../../lib/runtime";
+import { buildServiceContext } from "../../../lib/service-context";
 import { WorkspaceTemplatesManager } from "../../../components/settings/WorkspaceTemplatesManager";
 
 export const prerender = false;
@@ -9,21 +10,26 @@ export const prerender = false;
 const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
 const { workspace } = result.context;
-const templates = templateService
-  .listTemplates(workspace.id)
-  .map((template) => ({
-    id: template.id,
-    slug: template.slug,
-    name: template.name,
-    description: template.description,
-    category: template.category,
-    source_type: template.sourceType,
-    version_id: template.versionId,
-    properties: template.properties,
-    is_builtin: template.isBuiltin,
-    created_at: template.createdAt,
-    updated_at: template.updatedAt,
-  }));
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+  workspaceId: workspace.id,
+});
+const templates = (
+  await templatesService.listForWorkspace(ctx, { workspaceId: workspace.id })
+).map((template) => ({
+  id: template.id,
+  slug: template.slug,
+  name: template.name,
+  description: template.description,
+  category: template.category,
+  source_type: template.sourceType,
+  version_id: template.versionId,
+  properties: template.properties,
+  is_builtin: template.isBuiltin,
+  created_at: template.createdAt,
+  updated_at: template.updatedAt,
+}));
 ---
 
 <SettingsLayout

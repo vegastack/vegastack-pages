@@ -2,7 +2,6 @@ export * from "./ids";
 export * from "./permissions";
 export * from "./errors";
 export * from "./anchors";
-export * from "./events";
 export * from "./object-store";
 export * from "./page-service";
 export * from "./setup";

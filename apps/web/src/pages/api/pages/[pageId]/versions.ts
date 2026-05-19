@@ -1,25 +1,23 @@
 import type { APIRoute } from "astro";
 import {
+  audit,
   pages as pagesService,
-  isServiceError,
+  reviewEvents,
 } from "@vegastack/pages-services";
-import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
+import { resolvePageAccess } from "../../../../lib/access";
+import { scheduleIndexPage } from "../../../../lib/runtime";
 import {
-  auditService,
-  ensureSeedData,
-  scheduleIndexPage,
-  pageService,
-  reviewEventService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       return Response.json(
@@ -34,19 +32,20 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       page: page.page,
       required: "read",
     });
-    return Response.json({
-      versions: pageService.listVersions(page.page.id),
+    const versions = await pagesService.listVersions(ctx, {
+      pageId: page.page.id,
     });
+    return Response.json({ versions });
   } catch (error) {
-    return jsonAppError(error, "Version listing failed.");
+    return serviceErrorToResponse(error, "Version listing failed.");
   }
 };
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       return Response.json(
@@ -63,18 +62,13 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     });
     const body = await request.json();
     const versionId = String(body.version_id ?? "");
-    const { ctx } = await buildServiceContext({
-      cookies,
-      request,
-      workspaceId: page.page.workspaceId,
-    });
     const result = await pagesService.restoreVersion(ctx, {
       pageId: page.page.id,
       versionId,
     });
     const restored = result.data;
     scheduleIndexPage(page.page.id);
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: page.page.workspaceId,
       actorUserId: access.actor.user?.id ?? null,
       action: "page.version_restored",
@@ -85,7 +79,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         restored_version_id: restored.page.versionId,
       },
     });
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
       type: "page.version_created",
@@ -97,12 +91,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     });
     return Response.json({ page: restored.page, envelope: result.envelope });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Version restore failed.");
+    return serviceErrorToResponse(error, "Version restore failed.");
   }
 };

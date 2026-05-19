@@ -2,30 +2,41 @@ import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
   comments as commentsService,
+  pages as pagesService,
   isServiceError,
+  requireDb,
 } from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
-import {
-  commentService,
-  ensureSeedData,
-  pageService,
-  removeSearchResource,
-} from "../../../../lib/runtime";
+import { removeSearchResource } from "../../../../lib/runtime";
 import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
+async function lookupThreadPageId(
+  ctx: Awaited<ReturnType<typeof buildServiceContext>>["ctx"],
+  threadId: string,
+): Promise<string | null> {
+  const db = requireDb(ctx);
+  const row = await db
+    .prepare("SELECT page_id FROM comment_threads WHERE id = ?1")
+    .bind(threadId)
+    .first<{ page_id: string }>();
+  return row?.page_id ?? null;
+}
+
 export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
-    const thread = commentService.getThread(params.threadId ?? "");
-    if (!thread)
+    const threadId = params.threadId ?? "";
+    const bootstrap = await buildServiceContext({ cookies, request });
+    const pageId = await lookupThreadPageId(bootstrap.ctx, threadId);
+    if (!pageId) {
       throw new AppError(
         "THREAD_NOT_FOUND",
         "Comment thread was not found.",
         404,
       );
-    const page = await pageService.getPage(thread.thread.pageId);
+    }
+    const page = await pagesService.get(bootstrap.ctx, pageId);
     if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
     // Authorization side-effect: throws on insufficient access.
     await resolvePageAccess({
@@ -41,7 +52,7 @@ export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
       workspaceId: page.page.workspaceId,
     });
     const result = await commentsService.deleteThread(ctx, {
-      threadId: params.threadId ?? "",
+      threadId,
       pageId: page.page.id,
       workspaceId: page.page.workspaceId,
     });

@@ -17,7 +17,14 @@ export const GET: APIRoute = () => {
 
   return Response.json({
     ok: true,
-    runtime: process.env.VPG_RUNTIME ?? null,
+    // `adapter` is part of the local-setup script's safety contract
+    // (see scripts/local-env.mjs#assertLocalNodeBackend) — it ensures
+    // the script can't accidentally point at a production deployment.
+    // Hardcoded to "node" here because this endpoint only exists in
+    // dev (the `import.meta.env.DEV` guard above blocks production
+    // bundles from registering it).
+    adapter: "node",
+    runtime: process.env.VPG_RUNTIME ?? "node",
     prod_data_dev: process.env.VPG_PROD_DATA_DEV === "true",
     sqlite_path: process.env.VPG_SQLITE_PATH ?? null,
     object_store_dir: process.env.VPG_OBJECT_STORE_DIR ?? null,

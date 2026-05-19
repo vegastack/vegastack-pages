@@ -2,9 +2,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { workspaceService } from "../../../../lib/runtime";
+import { users, workspaces } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { POST as verifyMagicLink } from "../magic-link/verify";
 import { POST as signup } from "../signup";
+
+async function getCtx() {
+  const { ctx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+  });
+  return ctx;
+}
 
 const tempDirs: string[] = [];
 
@@ -52,12 +60,18 @@ describe("public signup", () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.debug_verify_url).toContain("/auth/magic-link#token=");
-    expect(workspaceService.getUserByEmail(email)).toBeNull();
-    expect(
-      workspaceService
-        .listWorkspaces()
-        .some((workspace) => workspace.name === workspaceName),
-    ).toBe(false);
+    const preCtx = await getCtx();
+    expect(await users.getByEmail(preCtx, email)).toBeNull();
+    // No user exists yet, so no workspace can be associated. Verify directly
+    // against D1 to be sure the workspace wasn't created either.
+    const preWorkspaceRows = await preCtx.db
+      ?.prepare("SELECT name FROM workspaces WHERE name = ?1")
+      .bind(workspaceName)
+      .all<{ name: string }>();
+    const preRows = Array.isArray(preWorkspaceRows)
+      ? preWorkspaceRows
+      : (preWorkspaceRows?.results ?? []);
+    expect(preRows).toEqual([]);
 
     const setCookie = vi.fn();
     const verifyUrl = new URL(
@@ -79,7 +93,8 @@ describe("public signup", () => {
     const verifyBody = (await verifyResponse.json()) as {
       redirect_to?: string;
     };
-    const user = workspaceService.getUserByEmail(email);
+    const postCtx = await getCtx();
+    const user = await users.getByEmail(postCtx, email);
 
     expect(verifyResponse.status).toBe(200);
     expect(verifyBody.redirect_to).toMatch(/^\/p\//);
@@ -89,12 +104,11 @@ describe("public signup", () => {
       expect.objectContaining({ httpOnly: true, path: "/" }),
     );
     expect(user?.email).toBe(email);
+    const userWorkspaces = user
+      ? await workspaces.listForUser(postCtx, { userId: user.id })
+      : [];
     expect(
-      user
-        ? workspaceService
-            .listWorkspacesForUser(user.id)
-            .some((workspace) => workspace.name === workspaceName)
-        : false,
+      userWorkspaces.some((workspace) => workspace.name === workspaceName),
     ).toBe(true);
   });
 });

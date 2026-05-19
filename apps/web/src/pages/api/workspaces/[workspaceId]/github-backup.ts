@@ -1,9 +1,14 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute, AstroCookies } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import {
+  audit,
+  buildEnvelope,
+  jsonWithEnvelope,
+  permissions,
+  type ServiceContext,
+} from "@vegastack/pages-services";
 import {
   getApiRequestActor,
-  jsonAppError,
   resolveWorkspaceActorPermission,
 } from "../../../../lib/access";
 import {
@@ -21,11 +26,9 @@ import {
   type GitHubBranch,
 } from "../../../../lib/github-backup";
 import {
-  auditService,
-  ensureSeedData,
-  permissionService,
-  persistRuntimeState,
-} from "../../../../lib/runtime";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
@@ -34,18 +37,26 @@ async function assertAdmin(
   cookies: AstroCookies,
   request: Request,
   workspaceId: string,
-) {
+): Promise<{
+  actor: Awaited<ReturnType<typeof getApiRequestActor>>;
+  ctx: ServiceContext;
+}> {
   const actor = await getApiRequestActor(cookies, request);
-  permissionService.assert({
-    actual: resolveWorkspaceActorPermission(actor, workspaceId),
+  const { ctx } = await buildServiceContext({ cookies, request, workspaceId });
+  permissions.assertLevel({
+    actual: await resolveWorkspaceActorPermission(actor, workspaceId),
     required: "admin",
   });
-  return actor;
+  return { actor, ctx };
 }
 
-async function statusPayload(workspaceId: string, repoId?: number | null) {
-  const connection = await getGitHubBackupConnection(workspaceId);
-  const latestRun = await getLatestGitHubBackupRun(workspaceId);
+async function statusPayload(
+  ctx: ServiceContext,
+  workspaceId: string,
+  repoId?: number | null,
+) {
+  const connection = await getGitHubBackupConnection(ctx, workspaceId);
+  const latestRun = await getLatestGitHubBackupRun(ctx, workspaceId);
   let repositories: GitHubRepository[] = [];
   let branches: GitHubBranch[] = [];
   if (githubAppConfigured() && connection) {
@@ -82,24 +93,26 @@ async function statusPayload(workspaceId: string, repoId?: number | null) {
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    await assertAdmin(cookies, request, workspaceId);
+    const { ctx } = await assertAdmin(cookies, request, workspaceId);
     const repoId = Number(url.searchParams.get("repo_id") ?? "");
     return Response.json(
-      await statusPayload(workspaceId, Number.isFinite(repoId) ? repoId : null),
+      await statusPayload(
+        ctx,
+        workspaceId,
+        Number.isFinite(repoId) ? repoId : null,
+      ),
     );
   } catch (error) {
-    return jsonAppError(error, "GitHub backup status failed.");
+    return serviceErrorToResponse(error, "GitHub backup status failed.");
   }
 };
 
 export const PUT: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    const actor = await assertAdmin(cookies, request, workspaceId);
-    const connection = await getGitHubBackupConnection(workspaceId);
+    const { actor, ctx } = await assertAdmin(cookies, request, workspaceId);
+    const connection = await getGitHubBackupConnection(ctx, workspaceId);
     if (!connection) {
       throw new AppError(
         "VALIDATION_ERROR",
@@ -133,7 +146,7 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
         400,
       );
     }
-    const saved = await saveGitHubBackupConnection({
+    const saved = await saveGitHubBackupConnection(ctx, {
       workspaceId,
       repoOwner: repository.owner.login,
       repoName: repository.name,
@@ -142,7 +155,7 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       rootPath: normalizeRootPath(body.root_path),
       includeAssets: Boolean(body.include_assets),
     });
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "github_backup.updated",
@@ -154,11 +167,8 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
         include_assets: Boolean(body.include_assets),
       },
     });
-    await persistRuntimeState();
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
       { connection: saved },
       buildEnvelope({
@@ -168,17 +178,16 @@ export const PUT: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "GitHub backup update failed.");
+    return serviceErrorToResponse(error, "GitHub backup update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    const actor = await assertAdmin(cookies, request, workspaceId);
-    await deleteGitHubBackupConnection(workspaceId);
-    auditService.record({
+    const { actor, ctx } = await assertAdmin(cookies, request, workspaceId);
+    await deleteGitHubBackupConnection(ctx, workspaceId);
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "github_backup.disconnected",
@@ -186,11 +195,8 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       targetId: workspaceId,
       metadata: {},
     });
-    await persistRuntimeState();
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
       { ok: true },
       buildEnvelope({
@@ -200,6 +206,6 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "GitHub backup disconnect failed.");
+    return serviceErrorToResponse(error, "GitHub backup disconnect failed.");
   }
 };

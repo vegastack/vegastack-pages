@@ -1,0 +1,16 @@
+{
+  "mode": "pre",
+  "tag": "next",
+  "initialVersions": {
+    "@vegastack/pages-web": "0.1.13",
+    "@vegastack/pages": "0.1.13",
+    "@vegastack/pages-config": "0.1.13",
+    "@vegastack/pages-core": "0.1.13",
+    "@vegastack/pages-db": "0.1.13",
+    "@vegastack/pages-mcp": "0.1.13",
+    "@vegastack/pages-renderer": "0.1.13",
+    "@vegastack/pages-services": "0.1.13",
+    "@vegastack/pages-ui": "0.1.13"
+  },
+  "changesets": ["clean-slate-rebuild"]
+}

@@ -1,37 +1,40 @@
 export { mcpInstructions, mcpInstructionsMaxBytes } from "./instructions";
 
+/**
+ * VegaStack Pages MCP — verb_noun surface, Notion-style.
+ *
+ * One mega-`fetch` for all reads (prefix-routed by resource_id) and distinct
+ * verb_noun tools for every write. Industry convention per Notion / Slack /
+ * Gmail MCPs and AWS prescriptive guidance: high-intent workflows, not
+ * resource-CRUD discriminators.
+ */
 export const mcpToolNames = [
+  // Reads — one mega-fetch + 3 specialized
+  "fetch",
+  "search",
+  "wait_for_review",
+  "whoami",
+  // Page writes
   "create_page",
   "update_page",
-  "prepare_page_edit",
-  "patch_page",
-  "get_page",
-  "list_page_versions",
-  "create_page_snapshot",
   "restore_page_version",
-  "upload_attachment",
-  "validate_page_source",
-  "wait_for_review",
-  "list_comments",
+  "move_page",
+  // Comments
   "create_comment",
   "update_thread",
-  "update_comment_anchor",
   "delete_thread",
-  "list_review_events",
-  "publication_apply",
-  "publication_delete",
-  "search_workspace",
-  "list_workspace",
-  "move_page",
-  "invite_workspace_member",
-  "list_templates",
-  "get_template",
+  // Publications
+  "apply_publication",
+  "delete_publication",
+  // Templates
   "create_template",
   "update_template",
   "render_template",
-  "create_page_from_template",
-  "list_workspaces",
-  "whoami",
+  // Attachments
+  "upload_attachment",
+  // Workspace
+  "invite_workspace_member",
+  "validate_page_source",
 ] as const;
 
 export type McpToolName = (typeof mcpToolNames)[number];
@@ -51,90 +54,23 @@ export type McpToolSpec = {
 };
 
 export const mcpToolSpecs = [
+  // -------------------------------------------------------------------------
+  // Reads
+  // -------------------------------------------------------------------------
   {
-    name: "create_page",
+    name: "fetch",
     description:
-      "Create a Markdown, MDX, or HTML page in the selected workspace.",
+      "Fetch any VegaStack Pages resource (page, folder, template, comment thread, publication, workspace, or self) by its ID, optionally with sub-data via `include[]`. Routes on the resource_id prefix: pg_ → page, fld_ → folder, tpl_ → template, thr_ → comment thread, pub_ → publication, wks_ → workspace, 'me' → authenticated identity. Pass `resource_id: 'me'` to mirror the previous whoami response. Pass no resource_id with include=['workspaces'] to list workspaces.",
     inputSchema: {
       type: "object",
-      required: ["workspace_id", "title", "source"],
+      required: ["workspace_id"],
       properties: {
         workspace_id: { type: "string" },
-        title: { type: "string" },
-        source: { type: "string" },
-        source_type: { type: "string", enum: ["markdown", "mdx", "html"] },
-        folder_path: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "update_page",
-    description: "Update page source with optimistic concurrency.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id", "source", "base_version_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        source: { type: "string" },
-        base_version_id: { type: "string" },
-        base_content_hash: { type: "string" },
-        checkpoint: { type: "boolean" },
-        checkpoint_label: { type: "string" },
-        allow_noop: { type: "boolean" },
-      },
-    },
-  },
-  {
-    name: "prepare_page_edit",
-    description:
-      "Fetch the live page source and edit tokens agents must use before updating.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "patch_page",
-    description:
-      "Safely replace text in the current page source and save only when the base version still matches.",
-    inputSchema: {
-      type: "object",
-      required: [
-        "workspace_id",
-        "page_id",
-        "base_version_id",
-        "find",
-        "replace",
-      ],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        base_version_id: { type: "string" },
-        base_content_hash: { type: "string" },
-        find: { type: "string" },
-        replace: { type: "string" },
-        replace_all: { type: "boolean" },
-        expected_replacements: { type: "number" },
-        checkpoint: { type: "boolean" },
-        checkpoint_label: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "get_page",
-    description:
-      "Read page metadata with optional source, rendered output, versions, comments, and publication state.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
+        resource_id: {
+          type: "string",
+          description:
+            "Resource identifier with a type prefix. Use 'me' for the authenticated user, or omit and pass include=['workspaces'] to list workspaces accessible to the session.",
+        },
         include: {
           type: "array",
           items: {
@@ -146,157 +82,53 @@ export const mcpToolSpecs = [
               "versions",
               "comments",
               "publication",
+              "edit_tokens",
+              "members",
+              "properties",
+              "history",
+              "review_events",
+              "workspaces",
+              "templates",
+              "tree",
             ],
           },
+          description:
+            "Sub-data to include. The valid keys depend on resource type. For pages: source, rendered, versions, comments, publication, edit_tokens, history, review_events. For templates: properties. For workspaces: members, templates, tree. For 'me': workspaces.",
+        },
+        status: {
+          type: "string",
+          enum: ["open", "resolved", "all"],
+          description:
+            "Status filter when include contains 'comments'. Defaults to 'all'.",
+        },
+        depth: {
+          type: "number",
+          description: "Tree depth when include contains 'tree'.",
         },
       },
     },
   },
   {
-    name: "update_thread",
-    description:
-      "Reply to, resolve, reopen, or complete a comment thread in one call.",
+    name: "search",
+    description: "Search pages, folders, and comment threads in a workspace.",
     inputSchema: {
       type: "object",
-      required: ["workspace_id", "thread_id"],
+      required: ["workspace_id", "query"],
       properties: {
         workspace_id: { type: "string" },
-        thread_id: { type: "string" },
-        body: { type: "string" },
-        status: { type: "string", enum: ["resolved", "open"] },
-        resolve: { type: "boolean" },
-        agent_name: { type: "string" },
-        agent_model: { type: "string" },
-        agent_session_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "publication_apply",
-    description: "Create or update a page/folder publication.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "resource_type", "resource_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        resource_type: { type: "string", enum: ["page", "folder"] },
-        resource_id: { type: "string" },
-        publication_id: { type: "string" },
-        permission: { type: "string", enum: ["view", "comment", "edit"] },
-        expires_at: { type: "string" },
-        clear_expires_at: { type: "boolean" },
-        password: { type: "string" },
-        clear_password: { type: "boolean" },
-        indexing_enabled: { type: "boolean" },
-      },
-    },
-  },
-  {
-    name: "publication_delete",
-    description: "Revoke a page or folder publication.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "publication_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        publication_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "list_workspace",
-    description:
-      "List visible workspace pages/folders with optional depth, folder, counts, and updated-after filters.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        depth: { type: "number" },
-        folder_id: { type: "string" },
-        include_counts: { type: "boolean" },
-        updated_after: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "list_page_versions",
-    description: "List saved versions for a page.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "create_page_snapshot",
-    description:
-      "Create a manual snapshot of the current page source before risky edits.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        label: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "restore_page_version",
-    description: "Restore a page from an existing saved version.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id", "version_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        version_id: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "upload_attachment",
-    description: "Upload a base64 encoded attachment for a page.",
-    inputSchema: {
-      type: "object",
-      required: [
-        "workspace_id",
-        "page_id",
-        "filename",
-        "content_type",
-        "base64_body",
-      ],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        filename: { type: "string" },
-        content_type: { type: "string" },
-        base64_body: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "validate_page_source",
-    description:
-      "Validate Markdown/MDX/HTML source for agent-editable issues, including common Mermaid 11 syntax traps.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        source: { type: "string" },
-        source_type: { type: "string", enum: ["markdown", "mdx", "html"] },
+        query: { type: "string" },
+        limit: { type: "number" },
+        type: {
+          type: "string",
+          enum: ["all", "page", "folder", "comment_thread", "comment"],
+        },
       },
     },
   },
   {
     name: "wait_for_review",
-    description: "Long-poll review events or comment state for a page.",
+    description:
+      "Long-poll review events or comment state for a page. Returns the matched event when `until` fires, or times out cleanly.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "page_id"],
@@ -319,18 +151,98 @@ export const mcpToolSpecs = [
     },
   },
   {
-    name: "list_comments",
-    description: "List page comment threads.",
+    name: "whoami",
+    description:
+      "Return the authenticated MCP session: user id, email, accessible workspaces, session kind (manual | cli | oauth), and client name.",
+    inputSchema: { type: "object", properties: {} },
+  },
+
+  // -------------------------------------------------------------------------
+  // Page writes
+  // -------------------------------------------------------------------------
+  {
+    name: "create_page",
+    description:
+      "Create a Markdown, MDX, or HTML page in the selected workspace. Pass `template_id` to render from a template; required template properties are supplied via `properties`.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id", "title"],
+      properties: {
+        workspace_id: { type: "string" },
+        title: { type: "string" },
+        source: { type: "string" },
+        source_type: { type: "string", enum: ["markdown", "mdx", "html"] },
+        folder_path: { type: "string" },
+        template_id: {
+          type: "string",
+          description:
+            "Template id (tpl_…) or slug. When provided, source is rendered from the template using `properties` for frontmatter fields.",
+        },
+        properties: {
+          type: "object",
+          description: "Frontmatter properties when using template_id.",
+        },
+      },
+    },
+  },
+  {
+    name: "update_page",
+    description:
+      "Update page source. Three modes (mutually exclusive): full source replace (provide `source`), find/replace patch (provide `find` and `replace`), or checkpoint-only snapshot (provide `checkpoint: true` with no source/find). All require `base_version_id` for optimistic concurrency; pages MUST be re-fetched via `fetch` with include=['edit_tokens'] when the version doesn't match.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id", "page_id", "base_version_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        page_id: { type: "string" },
+        base_version_id: { type: "string" },
+        base_content_hash: { type: "string" },
+        // full-replace mode
+        source: { type: "string" },
+        // patch mode
+        find: { type: "string" },
+        replace: { type: "string" },
+        replace_all: { type: "boolean" },
+        expected_replacements: { type: "number" },
+        // checkpoint mode
+        checkpoint: { type: "boolean" },
+        checkpoint_label: { type: "string" },
+        // misc
+        allow_noop: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "restore_page_version",
+    description: "Restore a page from an existing saved version.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id", "page_id", "version_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        page_id: { type: "string" },
+        version_id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "move_page",
+    description: "Rename and/or move a page to a new folder path.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "page_id"],
       properties: {
         workspace_id: { type: "string" },
         page_id: { type: "string" },
-        status: { type: "string", enum: ["open", "resolved", "all"] },
+        title: { type: "string" },
+        folder_path: { type: "string" },
       },
     },
   },
+
+  // -------------------------------------------------------------------------
+  // Comments
+  // -------------------------------------------------------------------------
   {
     name: "create_comment",
     description:
@@ -367,27 +279,38 @@ export const mcpToolSpecs = [
     },
   },
   {
-    name: "update_comment_anchor",
+    name: "update_thread",
     description:
-      "Update a thread anchor after moving a fuzzy or stale HTML pin/comment marker.",
+      "Mutate a comment thread in one call. Pass `body` to reply; `status` ('resolved' | 'open') or `resolve` (boolean) to change resolution; `anchor` to move the anchor; `complete: true` with `body` to write a closing reply and optionally resolve the thread in the same call. Multiple ops can be combined; the server applies them in this order: anchor → reply → resolve.",
     inputSchema: {
       type: "object",
-      required: ["workspace_id", "thread_id", "anchor"],
+      required: ["workspace_id", "thread_id"],
       properties: {
         workspace_id: { type: "string" },
         thread_id: { type: "string" },
+        body: { type: "string" },
+        status: { type: "string", enum: ["resolved", "open"] },
+        resolve: { type: "boolean" },
+        complete: {
+          type: "boolean",
+          description:
+            "True to write `body` as a completion reply (with agent attribution) before resolving.",
+        },
         anchor: {
           type: "object",
           description:
             "Same anchor object shape as create_comment. Point anchors require selector.point coordinates clamped to 0..1.",
         },
+        agent_name: { type: "string" },
+        agent_model: { type: "string" },
+        agent_session_id: { type: "string" },
       },
     },
   },
   {
     name: "delete_thread",
     description:
-      "Delete a full comment thread. Requires admin permission; prefer resolving unless deletion is explicitly requested.",
+      "Delete a full comment thread. Requires admin permission; prefer resolving via update_thread unless deletion is explicitly requested.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "thread_id"],
@@ -397,81 +320,47 @@ export const mcpToolSpecs = [
       },
     },
   },
+
+  // -------------------------------------------------------------------------
+  // Publications
+  // -------------------------------------------------------------------------
   {
-    name: "list_review_events",
+    name: "apply_publication",
     description:
-      "List review events for a page or workspace after an optional cursor.",
+      "Create or update a page or folder publication. Handles both `resource_type: page` and `resource_type: folder`. Pass `publication_id` to update an existing publication; omit to create one.",
     inputSchema: {
       type: "object",
-      required: ["workspace_id"],
+      required: ["workspace_id", "resource_type", "resource_id"],
       properties: {
-        page_id: { type: "string" },
         workspace_id: { type: "string" },
-        after_id: { type: "string" },
-        limit: { type: "number" },
+        resource_type: { type: "string", enum: ["page", "folder"] },
+        resource_id: { type: "string" },
+        publication_id: { type: "string" },
+        permission: { type: "string", enum: ["view", "comment", "edit"] },
+        expires_at: { type: "string" },
+        clear_expires_at: { type: "boolean" },
+        password: { type: "string" },
+        clear_password: { type: "boolean" },
+        indexing_enabled: { type: "boolean" },
       },
     },
   },
   {
-    name: "search_workspace",
-    description: "Search pages, folders, and comment threads in a workspace.",
+    name: "delete_publication",
+    description: "Revoke a page or folder publication.",
     inputSchema: {
       type: "object",
-      required: ["workspace_id", "query"],
+      required: ["workspace_id", "publication_id"],
       properties: {
         workspace_id: { type: "string" },
-        query: { type: "string" },
-        limit: { type: "number" },
-        type: {
-          type: "string",
-          enum: ["all", "page", "folder", "comment_thread", "comment"],
-        },
+        publication_id: { type: "string" },
       },
     },
   },
-  {
-    name: "move_page",
-    description: "Rename and/or move a page to a new folder path.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "page_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        page_id: { type: "string" },
-        title: { type: "string" },
-        folder_path: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "list_templates",
-    description:
-      "List workspace templates with their properties so the agent knows which scaffolds are available and what fields each one expects.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id"],
-      properties: {
-        workspace_id: { type: "string" },
-        category: { type: "string" },
-      },
-    },
-  },
-  {
-    name: "get_template",
-    description:
-      "Fetch a template's source, structured builder, and property spec. The source preserves <!-- guidance: ... --> comments so the agent knows what each section is for.",
-    inputSchema: {
-      type: "object",
-      required: ["workspace_id", "template"],
-      properties: {
-        template: {
-          type: "string",
-          description: "Template id (tpl_…) or slug.",
-        },
-        workspace_id: { type: "string" },
-      },
-    },
-  },
+
+  // -------------------------------------------------------------------------
+  // Templates
+  // -------------------------------------------------------------------------
   {
     name: "create_template",
     description:
@@ -486,179 +375,78 @@ export const mcpToolSpecs = [
         description: { type: "string" },
         category: { type: "string" },
         source_type: { type: "string", enum: ["markdown", "mdx"] },
-        builder: {
-          type: "object",
-          required: ["title", "sections"],
-          properties: {
-            title: {
-              type: "string",
-              description:
-                'Usually "{{ title }}" so rendered pages use the page title.',
-            },
-            intro: { type: "string" },
-            sections: {
-              type: "array",
-              items: {
-                type: "object",
-                required: ["level", "heading"],
-                properties: {
-                  level: { type: "number", enum: [2, 3, 4] },
-                  heading: { type: "string" },
-                  help_text: {
-                    type: "string",
-                    description:
-                      "Visible helper copy rendered below the heading.",
-                  },
-                  guidance: {
-                    type: "string",
-                    description:
-                      "Agent-only guidance stored as a Markdown HTML comment.",
-                  },
-                  body: {
-                    type: "string",
-                    description: "Optional starter Markdown for the section.",
-                  },
-                },
-              },
-            },
-          },
-        },
-        properties: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["key", "label", "type"],
-            properties: {
-              key: { type: "string" },
-              label: { type: "string" },
-              type: {
-                type: "string",
-                enum: [
-                  "text",
-                  "longtext",
-                  "number",
-                  "date",
-                  "datetime",
-                  "boolean",
-                  "select",
-                  "tags",
-                ],
-              },
-              required: { type: "boolean" },
-              default: {},
-              options: {
-                type: "array",
-                items: { type: "string" },
-                description: "Required when type is select.",
-              },
-              help: { type: "string" },
-            },
-          },
-        },
+        builder: { type: "object" },
+        properties: { type: "array", items: { type: "object" } },
       },
     },
   },
   {
     name: "update_template",
     description:
-      "Edit an existing workspace template by id or slug. Provide builder to update the structured H2/H3/H4 body and properties to replace the frontmatter field spec.",
+      "Edit an existing workspace template by id or slug. Provide builder to update the structured body and properties to replace the frontmatter field spec.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "template"],
       properties: {
+        workspace_id: { type: "string" },
         template: {
           type: "string",
           description: "Template id (tpl_…) or slug.",
         },
-        workspace_id: { type: "string" },
         name: { type: "string" },
         slug: { type: "string" },
         description: { type: "string" },
         category: { type: "string" },
         source_type: { type: "string", enum: ["markdown", "mdx"] },
-        builder: {
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            intro: { type: "string" },
-            sections: {
-              type: "array",
-              items: {
-                type: "object",
-                required: ["level", "heading"],
-                properties: {
-                  level: { type: "number", enum: [2, 3, 4] },
-                  heading: { type: "string" },
-                  help_text: { type: "string" },
-                  guidance: { type: "string" },
-                  body: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        properties: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["key", "label", "type"],
-            properties: {
-              key: { type: "string" },
-              label: { type: "string" },
-              type: {
-                type: "string",
-                enum: [
-                  "text",
-                  "longtext",
-                  "number",
-                  "date",
-                  "datetime",
-                  "boolean",
-                  "select",
-                  "tags",
-                ],
-              },
-              required: { type: "boolean" },
-              default: {},
-              options: { type: "array", items: { type: "string" } },
-              help: { type: "string" },
-            },
-          },
-        },
+        builder: { type: "object" },
+        properties: { type: "array", items: { type: "object" } },
       },
     },
   },
   {
     name: "render_template",
     description:
-      "Render a template into resolved markdown source without creating a page. Useful for drafting before committing.",
+      "Render a template into resolved Markdown without creating a page. Useful for drafting before committing.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "template", "title"],
       properties: {
-        template: { type: "string" },
         workspace_id: { type: "string" },
+        template: { type: "string" },
         title: { type: "string" },
         properties: { type: "object" },
       },
     },
   },
+
+  // -------------------------------------------------------------------------
+  // Attachments
+  // -------------------------------------------------------------------------
   {
-    name: "create_page_from_template",
-    description:
-      "Create a new page in the workspace from a template. Frontmatter is built from the provided properties; required properties must be supplied.",
+    name: "upload_attachment",
+    description: "Upload a base64-encoded asset to a page.",
     inputSchema: {
       type: "object",
-      required: ["workspace_id", "template", "title"],
+      required: [
+        "workspace_id",
+        "page_id",
+        "filename",
+        "content_type",
+        "base64_body",
+      ],
       properties: {
-        template: { type: "string" },
         workspace_id: { type: "string" },
-        title: { type: "string" },
-        folder_path: { type: "string" },
-        properties: { type: "object" },
+        page_id: { type: "string" },
+        filename: { type: "string" },
+        content_type: { type: "string" },
+        base64_body: { type: "string" },
       },
     },
   },
+
+  // -------------------------------------------------------------------------
+  // Workspace
+  // -------------------------------------------------------------------------
   {
     name: "invite_workspace_member",
     description:
@@ -678,16 +466,19 @@ export const mcpToolSpecs = [
     },
   },
   {
-    name: "list_workspaces",
+    name: "validate_page_source",
     description:
-      "List workspaces the authenticated session can access. Returns id, name, slug, and the user's role for each.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "whoami",
-    description:
-      "Return the authenticated MCP session: user id, email, accessible workspaces, session kind (manual | cli | oauth), and client name.",
-    inputSchema: { type: "object", properties: {} },
+      "Validate Markdown/MDX/HTML source for agent-editable issues, including common Mermaid 11 syntax traps. Read-only — never writes.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        page_id: { type: "string" },
+        source: { type: "string" },
+        source_type: { type: "string", enum: ["markdown", "mdx", "html"] },
+      },
+    },
   },
 ] satisfies McpToolSpec[];
 

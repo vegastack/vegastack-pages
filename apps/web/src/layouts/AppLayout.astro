@@ -5,21 +5,12 @@ import "../styles/global.css";
 import "../styles/shell.css";
 import { SonnerHost } from "../components/SonnerHost";
 
-// ClientRouter status: KEPT for v1. The workspace shell controller in
-// apps/web/src/scripts/shell is built and tested, and the
-// /api/workspaces/:wid/documents/* partial endpoints serve it — but
-// activating the shell (bootShell() call from a workspace route) is
-// deferred until the React islands that live outside #vpg-document
-// (CommentsRail in particular) are made shell-aware: they currently
-// receive page-scoped props at mount time and would render stale
-// state after a shell-driven swap. ClientRouter re-renders the entire
-// island tree on view transition, so today's behaviour is correct
-// even though shell-driven nav would be faster. The shell + payload
-// infrastructure remains in place for the follow-up that wires the
-// islands to a shell-swap event.
-//
-// Plan: docs/plans/007-instant-workspace-architecture.md §16.5
-// (Implementation progress log — shell activation pending).
+// Navigation model: Astro 6 <ClientRouter /> is the canonical
+// "instant-feel" mechanism. Sidebar, PageHeader, CommandPalette,
+// CommentsRail, MobileTabBar, and this layout's SonnerHost all carry
+// `transition:persist` so they keep their DOM and island state across
+// in-app navigation. Only the main <article> body (`#vpg-document`) is
+// swapped per navigation. Plan: docs/plans/010-clean-slate-rebuild.md §1.7.
 
 interface Props {
   title?: string;
@@ -225,7 +216,7 @@ const canonicalUrl = canonicalPath
   </head>
   <body>
     <slot />
-    <SonnerHost client:load />
+    <SonnerHost client:load transition:persist="vpg-sonner" />
 
     {
       /* Workspace document initializers. These were previously emitted by

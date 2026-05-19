@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   DELETE as deleteFolderAccess,
   GET as getFolderAccess,
@@ -8,17 +11,25 @@ import { GET as searchWorkspaces } from "../../search";
 import { POST as setPageAccess } from "../../pages/[pageId]/access";
 import { GET as getTree } from "../[workspaceId]/tree";
 import {
-  authService,
-  pageService,
-  permissionService,
-  searchService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  auth,
+  folders as foldersService,
+  pages as pagesService,
+  permissions as permissionsService,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
+import { indexPage } from "../../../../lib/runtime";
 import {
   canReadFolderOrVisibleDescendants,
   listVisibleFoldersForActor,
 } from "../../../../lib/workspace-visibility";
 import { getRequestActor } from "../../../../lib/access";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-grants-test-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -72,10 +83,14 @@ describe("resource member access", () => {
       level: "comment",
     });
 
-    const outsider = workspaceService.createUser({
+    const { ctx: outsiderCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+    });
+    const outsider = await users.upsert(outsiderCtx, {
       id: uniqueId("usr"),
       email: `resource-outsider-${crypto.randomUUID()}@example.com`,
       displayName: "Resource Outsider",
+      role: "user",
     });
     const rejected = await grantPageAccess(ownerCookies, page.page.id, {
       subject_id: outsider.id,
@@ -83,13 +98,16 @@ describe("resource member access", () => {
     });
     expect(rejected.status).toBe(400);
 
-    expect(
-      permissionService.listGrants({
+    const { ctx: listCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+    });
+    const pageGrants = (
+      await permissionsService.listGrants(listCtx, {
         workspaceId: workspace.id,
-        scope: "page",
         targetId: page.page.id,
-      }),
-    ).toHaveLength(1);
+      })
+    ).filter((grant) => grant.scope === "page");
+    expect(pageGrants).toHaveLength(1);
   });
 
   it("applies folder no-access grants to tree, search, and folder visibility", async () => {
@@ -100,20 +118,11 @@ describe("resource member access", () => {
       subject_id: target.id,
       level: "none",
     });
-    searchService.index({
-      id: page.page.id,
-      type: "page",
-      pageId: page.page.id,
-      workspaceId: workspace.id,
-      title: page.page.title,
-      path: page.page.folderPath,
-      headingsText: "Private scoped heading",
-      frontmatterText: "",
-      bodyText: "needle private content",
-      tags: "",
-      url: `/p/${page.page.slugId}`,
-      updatedAt: page.page.updatedAt,
-    });
+    // Re-index the page from D1 so the FTS table has the "needle" body
+    // text the assertions below search for. The fixture already created
+    // the page with body content containing "needle"; this just ensures
+    // the search index is up to date before the access-grant changes.
+    await indexPage(page.page.id);
 
     const treeResponse = await getTree({
       cookies: targetCookies,
@@ -145,11 +154,15 @@ describe("resource member access", () => {
       page.page.id,
     );
 
-    const actor = getRequestActor(targetCookies);
-    expect(canReadFolderOrVisibleDescendants(actor, folder.id)).toBe(false);
-    expect(
-      listVisibleFoldersForActor(actor, workspace.id).map((item) => item.id),
-    ).not.toContain(folder.id);
+    const actor = await getRequestActor(targetCookies);
+    expect(await canReadFolderOrVisibleDescendants(actor, folder.id)).toBe(
+      false,
+    );
+    const visibleFolders = await listVisibleFoldersForActor(
+      actor,
+      workspace.id,
+    );
+    expect(visibleFolders.map((item) => item.id)).not.toContain(folder.id);
   });
 
   it("lets a page grant re-expose one child page inside a denied folder", async () => {
@@ -181,8 +194,10 @@ describe("resource member access", () => {
     expect(tree.pages?.map((item) => item.id)).toContain(page.page.id);
     expect(tree.folders?.map((item) => item.id)).toContain(folder.id);
 
-    const actor = getRequestActor(targetCookies);
-    expect(canReadFolderOrVisibleDescendants(actor, folder.id)).toBe(true);
+    const actor = await getRequestActor(targetCookies);
+    expect(await canReadFolderOrVisibleDescendants(actor, folder.id)).toBe(
+      true,
+    );
   });
 
   it("lists and removes folder access rules through the folder resource API", async () => {
@@ -224,13 +239,16 @@ describe("resource member access", () => {
     } as never);
 
     expect(remove.status).toBe(200);
-    expect(
-      permissionService.listGrants({
+    const { ctx: listCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+    });
+    const folderGrants = (
+      await permissionsService.listGrants(listCtx, {
         workspaceId: folder.workspaceId,
-        scope: "folder",
         targetId: folder.id,
-      }),
-    ).toHaveLength(0);
+      })
+    ).filter((grant) => grant.scope === "folder");
+    expect(folderGrants).toHaveLength(0);
   });
 
   it("rejects self access changes from the share dialog API", async () => {
@@ -246,42 +264,56 @@ describe("resource member access", () => {
 });
 
 async function createWorkspaceFixture() {
-  const workspace = workspaceService.createWorkspace({
-    id: uniqueId("wks"),
-    name: `Resource Access Workspace ${crypto.randomUUID()}`,
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
   });
-  const owner = workspaceService.createUser({
+  const owner = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `resource-owner-${crypto.randomUUID()}@example.com`,
     displayName: "Resource Owner",
+    role: "user",
   });
-  workspaceService.addMember({
-    workspaceId: workspace.id,
-    userId: owner.id,
-    role: "admin",
-  });
-  const target = workspaceService.createUser({
+  const target = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `resource-target-${crypto.randomUUID()}@example.com`,
     displayName: "Resource Target",
+    role: "user",
   });
-  workspaceService.addMember({
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name: `Resource Access Workspace ${crypto.randomUUID()}`,
+    slug: uniqueId("slug"),
+    firstAdminUserId: owner.id,
+  });
+  await workspaces.addMember(seedCtx, {
     workspaceId: workspace.id,
     userId: target.id,
     role: "editor",
   });
-  const folder = workspaceService.createFolder({
-    id: uniqueId("fld"),
+  // Folder + page creation flow through the D1-direct services using a
+  // workspace-scoped ctx so they're persisted to D1 immediately.
+  const { ctx: ownerCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
     workspaceId: workspace.id,
+  });
+  ownerCtx.actor.userId = owner.id;
+  ownerCtx.actor.email = owner.email;
+  const folder = await foldersService.create(ownerCtx, {
+    workspaceId: workspace.id,
+    parentFolderId: null,
     name: "Private Guides",
   });
-  const page = await pageService.createPage({
-    id: uniqueId("pg"),
+  const created = await pagesService.create(ownerCtx, {
     workspaceId: workspace.id,
     folderPath: folder.path,
     title: "Scoped Grant Page",
     sourceType: "markdown",
     source: "# Private scoped heading\n\nneedle private content",
+  });
+  const page = created.data;
+  const ownerSession = await auth.createSession(seedCtx, { userId: owner.id });
+  const targetSession = await auth.createSession(seedCtx, {
+    userId: target.id,
   });
 
   return {
@@ -290,8 +322,8 @@ async function createWorkspaceFixture() {
     target,
     folder,
     page,
-    ownerCookies: sessionCookies(authService.createSession(owner.id).id),
-    targetCookies: sessionCookies(authService.createSession(target.id).id),
+    ownerCookies: sessionCookies(ownerSession.id),
+    targetCookies: sessionCookies(targetSession.id),
   };
 }
 
@@ -300,7 +332,10 @@ async function grantPageAccess(
   pageId: string,
   body: Record<string, unknown>,
 ) {
-  const page = await pageService.getPage(pageId);
+  const { ctx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+  });
+  const page = await pagesService.get(ctx, pageId);
   if (!page) {
     throw new Error(`Missing test page ${pageId}`);
   }
@@ -318,12 +353,15 @@ async function grantPageAccess(
   } as never);
 }
 
-function grantFolderAccess(
+async function grantFolderAccess(
   cookies: ReturnType<typeof sessionCookies>,
   folderId: string,
   body: Record<string, unknown>,
 ) {
-  const folder = workspaceService.getFolder(folderId);
+  const { ctx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+  });
+  const folder = await foldersService.get(ctx, folderId);
   if (!folder) {
     throw new Error(`Missing test folder ${folderId}`);
   }

@@ -3,7 +3,7 @@ title: Self-host on Docker
 description: Run VegaStack Pages on Docker or Node with SQLite, filesystem object storage, and the same MCP endpoint.
 category: Self-host
 order: 20
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 Docker runs the same Astro app through the Node adapter. D1 becomes SQLite and R2 becomes filesystem object storage under `/data`.

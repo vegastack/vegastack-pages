@@ -1,17 +1,25 @@
+// Publication API helpers — admin-only resource publication management.
+// Plan 011 §7. Routes for /api/{pages,folders}/[id]/publication go
+// through these helpers; the heavy R2 fan-out lives in
+// `publications.service.publishFanOut`.
+
 import {
   AppError,
   type FolderRecord,
   type PageRecord,
 } from "@vegastack/pages-core";
 import type { AstroCookies } from "astro";
+import {
+  audit,
+  folders as foldersService,
+  publications as publicationsService,
+  reviewEvents,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "./service-context";
 import { assertResourceAccessAdmin } from "./access";
 import { assertPublicationPasswordPolicy } from "./share-password-policy";
-import {
-  auditService,
-  publicationService,
-  reviewEventService,
-  workspaceService,
-} from "./runtime";
+import { invalidatePublicationCache } from "./publication-cache";
 
 type PublicationResource =
   | { type: "page"; page: PageRecord; slugId: string }
@@ -35,11 +43,15 @@ export function publicPublicationUrl(resource: PublicationResource) {
   return `/${resource.type === "page" ? "p" : "f"}/${resourceSlugId(resource)}`;
 }
 
-export function serializePublication(resource: PublicationResource) {
-  const publication = publicationService.findForResource(
-    resource.type,
-    resourceId(resource),
-  );
+export async function serializePublication(
+  ctx: ServiceContext,
+  resource: PublicationResource,
+) {
+  const publication = await publicationsService.findForResource(ctx, {
+    workspaceId: resourceWorkspaceId(resource),
+    resourceType: resource.type,
+    resourceId: resourceId(resource),
+  });
   return {
     publication: publication
       ? {
@@ -73,7 +85,12 @@ export async function getPublication(input: {
         ? { scope: "page", page: input.resource.page }
         : { scope: "folder", folder: input.resource.folder },
   });
-  return serializePublication(input.resource);
+  const { ctx } = await buildServiceContext({
+    cookies: input.cookies,
+    request: input.request,
+    workspaceId: resourceWorkspaceId(input.resource),
+  });
+  return serializePublication(ctx, input.resource);
 }
 
 export async function upsertPublication(input: {
@@ -102,7 +119,12 @@ export async function upsertPublication(input: {
         ? String(body.password)
         : null;
   if (password !== undefined) assertPublicationPasswordPolicy(password);
-  const publication = await publicationService.upsert({
+  const { ctx } = await buildServiceContext({
+    cookies: input.cookies,
+    request: input.request,
+    workspaceId: resourceWorkspaceId(input.resource),
+  });
+  const publication = await publicationsService.upsert(ctx, {
     workspaceId: resourceWorkspaceId(input.resource),
     resourceType: input.resource.type,
     resourceId: resourceId(input.resource),
@@ -119,7 +141,7 @@ export async function upsertPublication(input: {
         ? undefined
         : Boolean(body.indexing_enabled),
   });
-  auditService.record({
+  await audit.record(ctx, {
     workspaceId: publication.workspaceId,
     actorUserId: access.actor.user?.id ?? null,
     action: "publication.upserted",
@@ -127,7 +149,7 @@ export async function upsertPublication(input: {
     targetId: publication.resourceId,
     metadata: { permission: publication.permission },
   });
-  reviewEventService.emit({
+  await reviewEvents.emit(ctx, {
     workspaceId: publication.workspaceId,
     pageId: input.resource.type === "page" ? input.resource.page.id : null,
     type: "publication.updated",
@@ -138,7 +160,18 @@ export async function upsertPublication(input: {
       resource_id: publication.resourceId,
     },
   });
-  return serializePublication(input.resource);
+  // Toggling password or indexing settings changes the publication's
+  // cacheability and ETag. Drop the edge cache entry so anonymous viewers
+  // re-fetch with the new policy on the next hit.
+  const origin = new URL(input.request.url).origin;
+  ctx.waitUntil(
+    invalidatePublicationCache({
+      publication,
+      slug: resourceSlugId(input.resource),
+      publicOrigin: origin,
+    }),
+  );
+  return serializePublication(ctx, input.resource);
 }
 
 export async function deletePublication(input: {
@@ -154,10 +187,16 @@ export async function deletePublication(input: {
         ? { scope: "page", page: input.resource.page }
         : { scope: "folder", folder: input.resource.folder },
   });
-  const publication = publicationService.findForResource(
-    input.resource.type,
-    resourceId(input.resource),
-  );
+  const { ctx } = await buildServiceContext({
+    cookies: input.cookies,
+    request: input.request,
+    workspaceId: resourceWorkspaceId(input.resource),
+  });
+  const publication = await publicationsService.findForResource(ctx, {
+    workspaceId: resourceWorkspaceId(input.resource),
+    resourceType: input.resource.type,
+    resourceId: resourceId(input.resource),
+  });
   if (!publication) {
     throw new AppError(
       "PUBLICATION_NOT_FOUND",
@@ -165,8 +204,8 @@ export async function deletePublication(input: {
       404,
     );
   }
-  const revoked = publicationService.revoke(publication.id);
-  auditService.record({
+  const revoked = await publicationsService.revoke(ctx, publication.id);
+  await audit.record(ctx, {
     workspaceId: revoked.workspaceId,
     actorUserId: access.actor.user?.id ?? null,
     action: "publication.revoked",
@@ -174,26 +213,44 @@ export async function deletePublication(input: {
     targetId: revoked.resourceId,
     metadata: { publication_id: revoked.id },
   });
-  return serializePublication(input.resource);
+  // Revoke must immediately stop serving the public artifact. Drop the
+  // edge cache so subsequent anonymous reads fall through to SSR and
+  // return 404 on the revoked publication.
+  const origin = new URL(input.request.url).origin;
+  ctx.waitUntil(
+    invalidatePublicationCache({
+      publication: revoked,
+      slug: resourceSlugId(input.resource),
+      publicOrigin: origin,
+    }),
+  );
+  return serializePublication(ctx, input.resource);
 }
 
-export function folderSubtreePageIds(folder: FolderRecord) {
+// folderSubtreePageIds builds a predicate that returns true for pages
+// inside a folder's subtree. Async because it queries D1 for the
+// workspace's folder set.
+export async function folderSubtreePageIds(
+  ctx: ServiceContext,
+  folder: FolderRecord,
+) {
   const prefix = `${folder.path}/`;
+  const allFolders = await foldersService.listAll(ctx, {
+    workspaceId: folder.workspaceId,
+  });
   const folderIds = new Set(
-    workspaceService
-      .listFolders(folder.workspaceId)
+    allFolders
       .filter(
         (candidate) =>
           candidate.id === folder.id || candidate.path.startsWith(prefix),
       )
       .map((candidate) => candidate.id),
   );
+  const folderByPath = new Map(allFolders.map((f) => [f.path, f]));
   return (page: PageRecord) => {
     if (page.workspaceId !== folder.workspaceId) return false;
     if (!page.folderPath) return false;
-    const pageFolder = workspaceService
-      .listFolders(folder.workspaceId)
-      .find((candidate) => candidate.path === page.folderPath);
+    const pageFolder = folderByPath.get(page.folderPath);
     return Boolean(pageFolder && folderIds.has(pageFolder.id));
   };
 }

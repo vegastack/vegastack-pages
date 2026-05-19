@@ -1,16 +1,15 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { pages as pagesService, reviewEvents } from "@vegastack/pages-services";
 import {
   assertWorkspaceActorPermission,
   getApiRequestActor,
-  jsonAppError,
   resolvePageAccess,
 } from "../../lib/access";
 import {
-  ensureSeedData,
-  pageService,
-  reviewEventService,
-} from "../../lib/runtime";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../lib/service-context";
 
 export const prerender = false;
 
@@ -21,7 +20,6 @@ function clampLimit(value: string | null) {
 
 export const GET: APIRoute = async ({ cookies, request, url }) => {
   try {
-    await ensureSeedData();
     const actor = await getApiRequestActor(cookies, request);
     const workspaceId = url.searchParams.get("workspace_id")?.trim() || "";
     const pageId = url.searchParams.get("page_id")?.trim() || "";
@@ -42,8 +40,13 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       workspaceId,
       required: "read",
     });
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
     if (pageId) {
-      const page = await pageService.getPage(pageId);
+      const page = await pagesService.get(ctx, pageId);
       if (!page) {
         throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
       }
@@ -67,15 +70,13 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
         required: "read",
       });
     }
-    return Response.json({
-      events: reviewEventService.list({
-        workspaceId,
-        pageId: pageId || undefined,
-        afterId: url.searchParams.get("after_id"),
-        limit: clampLimit(url.searchParams.get("limit")),
-      }),
+    const events = await reviewEvents.list(ctx, {
+      workspaceId,
+      pageId: pageId || undefined,
+      limit: clampLimit(url.searchParams.get("limit")),
     });
+    return Response.json({ events });
   } catch (error) {
-    return jsonAppError(error, "Event listing failed.");
+    return serviceErrorToResponse(error, "Event listing failed.");
   }
 };

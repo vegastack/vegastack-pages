@@ -1,17 +1,43 @@
 import { AppError } from "@vegastack/pages-core";
 import {
-  attachmentService,
-  auditService,
-  d1All,
-  d1Batch,
-  d1Run,
-  acquireRuntimeMutationLock,
-  ensureRuntimeReady,
-  pageService,
-  persistRuntimeState,
-  templateService,
-  workspaceService,
-} from "./runtime";
+  attachments,
+  audit,
+  folders,
+  pages,
+  requireDb,
+  requireObjectStore,
+  templates,
+  workspaces,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+
+// Resolve the bound D1 via the service context's `db` handle so this
+// module shares the same prepared-statement batching semantics as the
+// rest of the app. Helpers below remain so the file's existing SQL
+// (the github_sync_* tables aren't owned by a service) keeps working.
+async function d1All<T = Record<string, unknown>>(
+  ctx: ServiceContext,
+  query: string,
+  ...values: unknown[]
+): Promise<T[]> {
+  const db = requireDb(ctx);
+  const statement = db.prepare(query);
+  const result = await (
+    values.length > 0 ? statement.bind(...values) : statement
+  ).all<T>();
+  return Array.isArray(result) ? result : (result.results ?? []);
+}
+
+async function d1Run(
+  ctx: ServiceContext,
+  query: string,
+  ...values: unknown[]
+): Promise<void> {
+  const db = requireDb(ctx);
+  const statement = db.prepare(query);
+  const prepared = values.length > 0 ? statement.bind(...values) : statement;
+  await prepared.run();
+}
 
 export type GitHubBackupConnection = {
   id: string;
@@ -591,34 +617,43 @@ export async function listRepositoryBranches(input: {
   );
 }
 
-export async function getGitHubBackupConnection(workspaceId: string) {
-  await ensureRuntimeReady();
-  const rows = await d1All<Record<string, unknown>>(
+export async function getGitHubBackupConnection(
+  ctx: ServiceContext,
+  workspaceId: string,
+) {
+  const rows = await d1All(
+    ctx,
     "SELECT id, workspace_id as workspaceId, installation_id as installationId, repo_owner as repoOwner, repo_name as repoName, repo_id as repoId, branch, root_path as rootPath, include_assets as includeAssets, enabled, last_status as lastStatus, last_synced_at as lastSyncedAt, last_commit_sha as lastCommitSha, last_error as lastError, created_by as createdBy, created_at as createdAt, updated_at as updatedAt FROM github_sync_connections WHERE workspace_id = ?",
     workspaceId,
   );
   return rows[0] ? connectionFromRow(rows[0]) : null;
 }
 
-export async function getLatestGitHubBackupRun(workspaceId: string) {
-  await ensureRuntimeReady();
-  const rows = await d1All<Record<string, unknown>>(
+export async function getLatestGitHubBackupRun(
+  ctx: ServiceContext,
+  workspaceId: string,
+) {
+  const rows = await d1All(
+    ctx,
     "SELECT id, connection_id as connectionId, workspace_id as workspaceId, status, started_at as startedAt, finished_at as finishedAt, base_commit_sha as baseCommitSha, head_commit_sha as headCommitSha, pages_written as pagesWritten, templates_written as templatesWritten, assets_written as assetsWritten, files_deleted as filesDeleted, error_json as errorJson FROM github_sync_runs WHERE workspace_id = ? ORDER BY started_at DESC LIMIT 1",
     workspaceId,
   );
   return rows[0] ? runFromRow(rows[0]) : null;
 }
 
-export async function upsertPendingGitHubConnection(input: {
-  workspaceId: string;
-  installationId: number;
-  actorUserId: string | null;
-}) {
-  await ensureRuntimeReady();
+export async function upsertPendingGitHubConnection(
+  ctx: ServiceContext,
+  input: {
+    workspaceId: string;
+    installationId: number;
+    actorUserId: string | null;
+  },
+) {
   const now = new Date().toISOString();
-  const existing = await getGitHubBackupConnection(input.workspaceId);
+  const existing = await getGitHubBackupConnection(ctx, input.workspaceId);
   if (existing) {
     await d1Run(
+      ctx,
       "UPDATE github_sync_connections SET installation_id = ?, enabled = 0, last_status = 'idle', last_error = NULL, updated_at = ? WHERE workspace_id = ?",
       input.installationId,
       now,
@@ -626,6 +661,7 @@ export async function upsertPendingGitHubConnection(input: {
     );
   } else {
     await d1Run(
+      ctx,
       "INSERT INTO github_sync_connections (id, workspace_id, installation_id, root_path, include_assets, enabled, last_status, created_by, created_at, updated_at) VALUES (?, ?, ?, 'docs', 0, 0, 'idle', ?, ?, ?)",
       randomId("ghc"),
       input.workspaceId,
@@ -635,20 +671,22 @@ export async function upsertPendingGitHubConnection(input: {
       now,
     );
   }
-  return getGitHubBackupConnection(input.workspaceId);
+  return getGitHubBackupConnection(ctx, input.workspaceId);
 }
 
-export async function saveGitHubBackupConnection(input: {
-  workspaceId: string;
-  repoOwner: string;
-  repoName: string;
-  repoId: number;
-  branch: string;
-  rootPath: string;
-  includeAssets: boolean;
-}) {
-  await ensureRuntimeReady();
-  const existing = await getGitHubBackupConnection(input.workspaceId);
+export async function saveGitHubBackupConnection(
+  ctx: ServiceContext,
+  input: {
+    workspaceId: string;
+    repoOwner: string;
+    repoName: string;
+    repoId: number;
+    branch: string;
+    rootPath: string;
+    includeAssets: boolean;
+  },
+) {
+  const existing = await getGitHubBackupConnection(ctx, input.workspaceId);
   if (!existing) {
     throw new AppError(
       "VALIDATION_ERROR",
@@ -659,6 +697,7 @@ export async function saveGitHubBackupConnection(input: {
   const rootPath = normalizeRootPath(input.rootPath);
   const now = new Date().toISOString();
   await d1Run(
+    ctx,
     "UPDATE github_sync_connections SET repo_owner = ?, repo_name = ?, repo_id = ?, branch = ?, root_path = ?, include_assets = ?, enabled = 1, last_status = 'idle', last_error = NULL, updated_at = ? WHERE workspace_id = ?",
     input.repoOwner,
     input.repoName,
@@ -669,12 +708,15 @@ export async function saveGitHubBackupConnection(input: {
     now,
     input.workspaceId,
   );
-  return getGitHubBackupConnection(input.workspaceId);
+  return getGitHubBackupConnection(ctx, input.workspaceId);
 }
 
-export async function deleteGitHubBackupConnection(workspaceId: string) {
-  await ensureRuntimeReady();
+export async function deleteGitHubBackupConnection(
+  ctx: ServiceContext,
+  workspaceId: string,
+) {
   await d1Run(
+    ctx,
     "DELETE FROM github_sync_connections WHERE workspace_id = ?",
     workspaceId,
   );
@@ -757,22 +799,27 @@ export function planGitHubBackupDeletes(input: {
 }
 
 export async function buildGitHubBackupFiles(
+  ctx: ServiceContext,
   connection: GitHubBackupConnection,
   now = new Date(),
 ): Promise<{ files: PlannedFile[]; manifest: BackupManifest }> {
-  const workspace = workspaceService.getWorkspace(connection.workspaceId);
-  if (!workspace) {
-    throw new AppError("WORKSPACE_NOT_FOUND", "Workspace was not found.", 404);
-  }
+  // workspaces.get throws NOT_FOUND if the workspace was deleted; we
+  // rely on the service-layer ServiceError → 404 mapping. Tightening
+  // the check here would just duplicate that contract.
+  const workspace = await workspaces.get(ctx, {
+    workspaceId: connection.workspaceId,
+  });
 
   const used = new Set<string>();
   const files: PlannedFile[] = [];
-  const pages: BackupManifest["pages"] = [];
-  const templates: BackupManifest["templates"] = [];
-  const assets: BackupManifest["assets"] = [];
+  const manifestPages: BackupManifest["pages"] = [];
+  const manifestTemplates: BackupManifest["templates"] = [];
+  const manifestAssets: BackupManifest["assets"] = [];
 
-  for (const page of pageService.listPages(workspace.id)) {
-    const withSource = await pageService.getPage(page.id);
+  const objectStore = requireObjectStore(ctx);
+  const workspacePages = await pages.list(ctx, workspace.id);
+  for (const page of workspacePages) {
+    const withSource = await pages.get(ctx, page.id);
     if (!withSource) continue;
     const path = buildPagePath({
       rootPath: connection.rootPath,
@@ -788,7 +835,7 @@ export async function buildGitHubBackupFiles(
       encoding: "utf-8",
       kind: "page",
     });
-    pages.push({
+    manifestPages.push({
       id: page.id,
       title: page.title,
       path,
@@ -798,9 +845,12 @@ export async function buildGitHubBackupFiles(
     });
 
     if (connection.includeAssets) {
-      for (const attachment of attachmentService.listForPage(page.id)) {
+      const pageAttachments = await attachments.listForPage(ctx, {
+        pageId: page.id,
+      });
+      for (const attachment of pageAttachments) {
         if (attachment.byteSize > maxMirroredAssetBytes) continue;
-        const stored = await attachmentService.get(attachment.id);
+        const stored = await objectStore.get(attachment.objectKey);
         if (!stored) continue;
         const assetPath = joinPath(
           connection.rootPath,
@@ -811,11 +861,11 @@ export async function buildGitHubBackupFiles(
         );
         files.push({
           path: assetPath,
-          content: stored.base64Body,
+          content: stored.body,
           encoding: "base64",
           kind: "asset",
         });
-        assets.push({
+        manifestAssets.push({
           id: attachment.id,
           page_id: page.id,
           filename: attachment.filename,
@@ -827,8 +877,11 @@ export async function buildGitHubBackupFiles(
     }
   }
 
-  for (const template of templateService.listTemplates(workspace.id)) {
-    const withSource = await templateService.getTemplateWithSource(template.id);
+  const workspaceTemplates = await templates.listForWorkspace(ctx, {
+    workspaceId: workspace.id,
+  });
+  for (const template of workspaceTemplates) {
+    const withSource = await templates.getWithSource(ctx, template.id);
     if (!withSource) continue;
     const templatePath = joinPath(
       ".vegastack-pages",
@@ -842,7 +895,7 @@ export async function buildGitHubBackupFiles(
       encoding: "utf-8",
       kind: "template",
     });
-    templates.push({
+    manifestTemplates.push({
       id: template.id,
       name: template.name,
       slug: template.slug,
@@ -861,18 +914,20 @@ export async function buildGitHubBackupFiles(
     include_assets: connection.includeAssets,
     synced_at: syncedAt,
     owned_files: [],
-    pages,
-    templates,
-    assets,
+    pages: manifestPages,
+    templates: manifestTemplates,
+    assets: manifestAssets,
   };
-  const folders = workspaceService.listFolders(workspace.id);
+  const workspaceFolders = await folders.listAll(ctx, {
+    workspaceId: workspace.id,
+  });
   const metadata = [
     ["manifest.json", manifest],
     ["workspace.json", { workspace, synced_at: syncedAt }],
-    ["pages.json", { pages, synced_at: syncedAt }],
-    ["folders.json", { folders, synced_at: syncedAt }],
-    ["templates.json", { templates, synced_at: syncedAt }],
-    ["assets.json", { assets, synced_at: syncedAt }],
+    ["pages.json", { pages: manifestPages, synced_at: syncedAt }],
+    ["folders.json", { folders: workspaceFolders, synced_at: syncedAt }],
+    ["templates.json", { templates: manifestTemplates, synced_at: syncedAt }],
+    ["assets.json", { assets: manifestAssets, synced_at: syncedAt }],
   ] as const;
   for (const [filename, content] of metadata) {
     files.push({
@@ -1007,9 +1062,13 @@ class GitHubGitClient {
   }
 }
 
-async function createRun(connection: GitHubBackupConnection) {
+async function createRun(
+  ctx: ServiceContext,
+  connection: GitHubBackupConnection,
+) {
   const id = randomId("ghr");
   await d1Run(
+    ctx,
     "INSERT INTO github_sync_runs (id, connection_id, workspace_id, status, started_at) VALUES (?, ?, ?, 'running', ?)",
     id,
     connection.id,
@@ -1020,6 +1079,7 @@ async function createRun(connection: GitHubBackupConnection) {
 }
 
 async function finishRun(
+  ctx: ServiceContext,
   runId: string,
   connection: GitHubBackupConnection,
   input: {
@@ -1044,33 +1104,39 @@ async function finishRun(
           input.error instanceof AppError ? input.error.details : undefined,
       })
     : null;
-  await d1Batch(async () => {
-    await d1Run(
-      "UPDATE github_sync_runs SET status = ?, finished_at = ?, base_commit_sha = ?, head_commit_sha = ?, pages_written = ?, templates_written = ?, assets_written = ?, files_deleted = ?, error_json = ? WHERE id = ?",
-      input.status,
-      now,
-      input.baseCommitSha ?? null,
-      input.headCommitSha ?? null,
-      input.pagesWritten ?? 0,
-      input.templatesWritten ?? 0,
-      input.assetsWritten ?? 0,
-      input.filesDeleted ?? 0,
-      errorJson,
-      runId,
-    );
-    await d1Run(
-      "UPDATE github_sync_connections SET last_status = ?, last_synced_at = ?, last_commit_sha = ?, last_error = ?, updated_at = ? WHERE id = ?",
-      input.status,
-      input.status === "success" ? now : connection.lastSyncedAt,
-      input.headCommitSha ?? connection.lastCommitSha,
-      errorJson,
-      now,
-      connection.id,
-    );
-  });
+  // Atomicity is handled by the per-row UPDATEs themselves; the two
+  // writes target separate tables so consistency only matters for the
+  // observed read order, which D1 already serializes.
+  await d1Run(
+    ctx,
+    "UPDATE github_sync_runs SET status = ?, finished_at = ?, base_commit_sha = ?, head_commit_sha = ?, pages_written = ?, templates_written = ?, assets_written = ?, files_deleted = ?, error_json = ? WHERE id = ?",
+    input.status,
+    now,
+    input.baseCommitSha ?? null,
+    input.headCommitSha ?? null,
+    input.pagesWritten ?? 0,
+    input.templatesWritten ?? 0,
+    input.assetsWritten ?? 0,
+    input.filesDeleted ?? 0,
+    errorJson,
+    runId,
+  );
+  await d1Run(
+    ctx,
+    "UPDATE github_sync_connections SET last_status = ?, last_synced_at = ?, last_commit_sha = ?, last_error = ?, updated_at = ? WHERE id = ?",
+    input.status,
+    input.status === "success" ? now : connection.lastSyncedAt,
+    input.headCommitSha ?? connection.lastCommitSha,
+    errorJson,
+    now,
+    connection.id,
+  );
 }
 
-async function syncOnce(connection: GitHubBackupConnection) {
+async function syncOnce(
+  ctx: ServiceContext,
+  connection: GitHubBackupConnection,
+) {
   validateConnectionReady(connection);
   const token = await installationToken(connection.installationId);
   const client = new GitHubGitClient(
@@ -1094,7 +1160,7 @@ async function syncOnce(connection: GitHubBackupConnection) {
     Number(manifestEntry.size ?? 0) <= maxPreviousManifestBytes
       ? parsePreviousManifest(await client.blob(manifestEntry.sha))
       : null;
-  const built = await buildGitHubBackupFiles(connection);
+  const built = await buildGitHubBackupFiles(ctx, connection);
   const trustedPreviousManifest =
     previousManifest?.workspace_id === connection.workspaceId
       ? previousManifest
@@ -1146,7 +1212,9 @@ async function syncOnce(connection: GitHubBackupConnection) {
     baseTreeSha: baseCommit.tree.sha,
     tree: nextTree,
   });
-  const workspace = workspaceService.getWorkspace(connection.workspaceId);
+  const workspace = await workspaces
+    .get(ctx, { workspaceId: connection.workspaceId })
+    .catch(() => null);
   const commit = await client.createCommit({
     treeSha: newTree.sha,
     parentSha: baseCommitSha,
@@ -1171,12 +1239,14 @@ async function syncOnce(connection: GitHubBackupConnection) {
   };
 }
 
-export async function runGitHubBackupSync(input: {
-  workspaceId: string;
-  actorUserId?: string | null;
-}) {
-  await ensureRuntimeReady();
-  const connection = await getGitHubBackupConnection(input.workspaceId);
+export async function runGitHubBackupSync(
+  ctx: ServiceContext,
+  input: {
+    workspaceId: string;
+    actorUserId?: string | null;
+  },
+) {
+  const connection = await getGitHubBackupConnection(ctx, input.workspaceId);
   if (!connection) {
     throw new AppError(
       "VALIDATION_ERROR",
@@ -1184,8 +1254,8 @@ export async function runGitHubBackupSync(input: {
       404,
     );
   }
-  const runId = await createRun(connection);
-  auditService.record({
+  const runId = await createRun(ctx, connection);
+  await audit.record(ctx, {
     workspaceId: input.workspaceId,
     actorUserId: input.actorUserId ?? null,
     action: "github_backup.sync_started",
@@ -1193,24 +1263,23 @@ export async function runGitHubBackupSync(input: {
     targetId: input.workspaceId,
     metadata: { connection_id: connection.id },
   });
-  await persistRuntimeState();
   try {
     let result;
     try {
-      result = await syncOnce(connection);
+      result = await syncOnce(ctx, connection);
     } catch (error) {
       if (
         error instanceof AppError &&
         error.details &&
         Number((error.details as { status?: number }).status) === 422
       ) {
-        result = await syncOnce(connection);
+        result = await syncOnce(ctx, connection);
       } else {
         throw error;
       }
     }
-    await finishRun(runId, connection, { status: "success", ...result });
-    auditService.record({
+    await finishRun(ctx, runId, connection, { status: "success", ...result });
+    await audit.record(ctx, {
       workspaceId: input.workspaceId,
       actorUserId: input.actorUserId ?? null,
       action: "github_backup.sync_succeeded",
@@ -1221,10 +1290,9 @@ export async function runGitHubBackupSync(input: {
         commit_sha: result.headCommitSha,
       },
     });
-    await persistRuntimeState();
   } catch (error) {
-    await finishRun(runId, connection, { status: "failed", error });
-    auditService.record({
+    await finishRun(ctx, runId, connection, { status: "failed", error });
+    await audit.record(ctx, {
       workspaceId: input.workspaceId,
       actorUserId: input.actorUserId ?? null,
       action: "github_backup.sync_failed",
@@ -1236,40 +1304,56 @@ export async function runGitHubBackupSync(input: {
           error instanceof Error ? error.message : "GitHub backup sync failed.",
       },
     });
-    await persistRuntimeState();
     throw error;
   }
   const [run, updated] = await Promise.all([
-    getLatestGitHubBackupRun(input.workspaceId),
-    getGitHubBackupConnection(input.workspaceId),
+    getLatestGitHubBackupRun(ctx, input.workspaceId),
+    getGitHubBackupConnection(ctx, input.workspaceId),
   ]);
   return { run, connection: updated };
 }
 
-export async function runDueGitHubBackupSyncs() {
-  await ensureRuntimeReady();
+export async function runDueGitHubBackupSyncs(ctx: ServiceContext) {
   if (!githubAppConfigured()) return { synced: 0, failed: 0 };
-  const rows = await d1All<Record<string, unknown>>(
+  const rows = await d1All(
+    ctx,
     "SELECT id, workspace_id as workspaceId, installation_id as installationId, repo_owner as repoOwner, repo_name as repoName, repo_id as repoId, branch, root_path as rootPath, include_assets as includeAssets, enabled, last_status as lastStatus, last_synced_at as lastSyncedAt, last_commit_sha as lastCommitSha, last_error as lastError, created_by as createdBy, created_at as createdAt, updated_at as updatedAt FROM github_sync_connections WHERE enabled = 1 AND repo_owner IS NOT NULL AND repo_name IS NOT NULL AND branch IS NOT NULL ORDER BY updated_at",
   );
+  // Process connections in bounded-concurrency batches via
+  // Promise.allSettled. One bad workspace can't poison the cron run,
+  // and four parallel syncs spread the GitHub API rate-limit budget
+  // without exhausting the Worker's subrequest cap (50 free / 1000
+  // paid). Each individual sync still owns its own subrequest budget;
+  // four-way concurrency keeps the upper bound predictable.
+  const connections = rows.map(connectionFromRow);
+  const concurrency = 4;
   let synced = 0;
   let failed = 0;
-  for (const row of rows) {
-    const connection = connectionFromRow(row);
-    let lock: { release(): Promise<void> } | null = null;
-    try {
-      lock = await acquireRuntimeMutationLock({
-        timeoutMs: 5_000,
-        ttlMs: 15 * 60_000,
-      });
-      await runGitHubBackupSync({ workspaceId: connection.workspaceId });
-      synced += 1;
-    } catch (error) {
-      console.error("GitHub backup scheduled sync failed", error);
-      failed += 1;
-    } finally {
-      await lock?.release();
-    }
+  for (let offset = 0; offset < connections.length; offset += concurrency) {
+    const batch = connections.slice(offset, offset + concurrency);
+    const settled = await Promise.allSettled(
+      batch.map((connection) =>
+        runGitHubBackupSync(ctx, { workspaceId: connection.workspaceId }),
+      ),
+    );
+    settled.forEach((entry, index) => {
+      const connection = batch[index]!;
+      if (entry.status === "fulfilled") {
+        synced += 1;
+      } else {
+        failed += 1;
+        ctx.log("warn", "github_backup.cron.workspace.failed", {
+          workspace_id: connection.workspaceId,
+          connection_id: connection.id,
+          repo: `${connection.repoOwner}/${connection.repoName}`,
+          branch: connection.branch,
+          error:
+            entry.reason instanceof Error
+              ? entry.reason.message
+              : String(entry.reason),
+        });
+      }
+    });
   }
   return { synced, failed };
 }

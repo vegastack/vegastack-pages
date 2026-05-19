@@ -59,8 +59,16 @@ async function openShareDialog(trigger: ShareTrigger) {
       },
     };
     root?.render(createElement(ShareDialog, props));
-  } catch {
-    window.vpgToast?.error("Share controls failed to load.");
+  } catch (error) {
+    // Mirrors the sidebar-create-controller diagnostic shape so the
+    // browser console always reports the underlying reason — Vite
+    // optimize-dep 504s, missing exports, etc. — instead of just the
+    // user-facing toast.
+    console.error("[vpg-share-dialog] mount failed:", error);
+    const detail = error instanceof Error && error.message ? error.message : "";
+    window.vpgToast?.error(
+      "Share controls failed to load." + (detail ? `\n${detail}` : ""),
+    );
   } finally {
     trigger.removeAttribute("aria-busy");
     loading = false;

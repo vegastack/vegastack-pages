@@ -1,12 +1,18 @@
 import type { APIRoute, AstroCookies } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import {
+  buildEnvelope,
+  jsonWithEnvelope,
+  permissions,
+} from "@vegastack/pages-services";
 import {
   getApiRequestActor,
-  jsonAppError,
   resolveWorkspaceActorPermission,
 } from "../../../../../lib/access";
 import { runGitHubBackupSync } from "../../../../../lib/github-backup";
-import { ensureSeedData, permissionService } from "../../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../../lib/workspace-navigation";
 
 export const prerender = false;
@@ -17,27 +23,25 @@ async function assertAdmin(
   workspaceId: string,
 ) {
   const actor = await getApiRequestActor(cookies, request);
-  permissionService.assert({
-    actual: resolveWorkspaceActorPermission(actor, workspaceId),
+  const { ctx } = await buildServiceContext({ cookies, request, workspaceId });
+  permissions.assertLevel({
+    actual: await resolveWorkspaceActorPermission(actor, workspaceId),
     required: "admin",
   });
-  return actor;
+  return { actor, ctx };
 }
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    const actor = await assertAdmin(cookies, request, workspaceId);
-    const result = await runGitHubBackupSync({
+    const { actor, ctx } = await assertAdmin(cookies, request, workspaceId);
+    const result = await runGitHubBackupSync(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
     });
     // Sync can pull in new pages from the repo, invalidating the tree.
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
       result as Record<string, unknown>,
       buildEnvelope({
@@ -47,6 +51,6 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "GitHub backup sync failed.");
+    return serviceErrorToResponse(error, "GitHub backup sync failed.");
   }
 };

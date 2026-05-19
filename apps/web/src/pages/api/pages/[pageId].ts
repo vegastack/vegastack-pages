@@ -1,22 +1,23 @@
 import { AppError, hasPermission } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import {
+  comments,
+  pages as pagesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../lib/service-context";
 import { jsonAppError, resolvePageAccess } from "../../../lib/access";
 import { enrichThreads } from "../../../lib/comments-enrich";
 import { renderCachedMarkdown } from "../../../lib/render-cache";
 import { serializePublication } from "../../../lib/publication-api";
-import {
-  commentService,
-  ensureSeedData,
-  pageService,
-} from "../../../lib/runtime";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const ref = params.pageId ?? "";
-    const page = await getPageByRef(ref);
+    const { ctx } = await buildServiceContext({ cookies, request });
+    const page = await getPageByRef(ctx, ref);
     if (!page) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
@@ -31,6 +32,10 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       required: "read",
     });
     const include = parseInclude(url.searchParams.get("include"));
+    const openThreads = await comments.listForPage(ctx, {
+      pageId: page.page.id,
+      status: "open",
+    });
     const body: Record<string, unknown> = {
       page_id: page.page.id,
       workspace_id: page.page.workspaceId,
@@ -43,7 +48,7 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       content_hash: page.page.contentHash,
       updated_at: page.page.updatedAt,
       permission: access.permission,
-      open_comment_count: commentService.listForPage(page.page.id).length,
+      open_comment_count: openThreads.length,
     };
     if (include.has("source")) {
       body.source = page.source;
@@ -72,7 +77,9 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       };
     }
     if (include.has("versions")) {
-      const versions = pageService.listVersions(page.page.id);
+      const versions = await pagesService.listVersions(ctx, {
+        pageId: page.page.id,
+      });
       const limit = parseLimit(
         url.searchParams.get("versions_limit"),
         100,
@@ -82,13 +89,16 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
       body.versions_truncated = versions.length > limit;
     }
     if (include.has("comments")) {
-      const threads = commentService.listForPage(page.page.id, "all");
+      const threads = await comments.listForPage(ctx, {
+        pageId: page.page.id,
+        status: "all",
+      });
       const limit = parseLimit(
         url.searchParams.get("comments_limit"),
         100,
         500,
       );
-      body.threads = enrichThreads(threads.slice(0, limit));
+      body.threads = await enrichThreads(threads.slice(0, limit));
       body.threads_truncated = threads.length > limit;
     }
     if (include.has("publication")) {
@@ -99,7 +109,7 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
           403,
         );
       }
-      body.publication = serializePublication({
+      body.publication = await serializePublication(ctx, {
         type: "page",
         page: page.page,
         slugId: page.page.slugId,
@@ -113,10 +123,8 @@ export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   }
 };
 
-async function getPageByRef(ref: string) {
-  if (!ref) return null;
-  if (ref.startsWith("pg_")) return pageService.getPage(ref);
-  return pageService.getPageBySlugId(ref);
+function getPageByRef(ctx: ServiceContext, ref: string) {
+  return pagesService.getByRef(ctx, ref);
 }
 
 function parseInclude(value: string | null) {

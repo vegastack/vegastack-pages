@@ -1,13 +1,19 @@
 import type { APIRoute } from "astro";
-import { authService, persistRuntimeState } from "../../../lib/runtime";
+import { auth as authService } from "@vegastack/pages-services";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../lib/service-context";
 
 export const prerender = false;
 
-async function clearSession(cookies: Parameters<APIRoute>[0]["cookies"]) {
+async function clearSession(
+  ctx: Awaited<ReturnType<typeof buildServiceContext>>["ctx"],
+  cookies: Parameters<APIRoute>[0]["cookies"],
+) {
   const session = cookies.get("vpg_session")?.value;
-  if (session) authService.destroySession(session);
+  if (session) await authService.destroySession(ctx, session);
   cookies.delete("vpg_session", { path: "/" });
-  if (session) await persistRuntimeState();
 }
 
 export const GET: APIRoute = async () =>
@@ -22,9 +28,14 @@ export const GET: APIRoute = async () =>
   );
 
 export const POST: APIRoute = async ({ cookies, redirect, request }) => {
-  await clearSession(cookies);
-  if ((request.headers.get("accept") ?? "").includes("text/html")) {
-    return redirect("/app/login");
+  try {
+    const { ctx } = await buildServiceContext({ cookies, request });
+    await clearSession(ctx, cookies);
+    if ((request.headers.get("accept") ?? "").includes("text/html")) {
+      return redirect("/app/login");
+    }
+    return Response.json({ ok: true });
+  } catch (error) {
+    return serviceErrorToResponse(error, "Logout failed.");
   }
-  return Response.json({ ok: true });
 };

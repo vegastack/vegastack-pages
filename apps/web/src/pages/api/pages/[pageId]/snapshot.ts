@@ -1,24 +1,19 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { pages as pagesService, reviewEvents } from "@vegastack/pages-services";
+import { resolvePageAccess } from "../../../../lib/access";
 import {
-  pages as pagesService,
-  isServiceError,
-} from "@vegastack/pages-services";
-import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
-import {
-  ensureSeedData,
-  pageService,
-  reviewEventService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
     const body = await request.json();
@@ -28,11 +23,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       url,
       page: page.page,
       required: "write",
-    });
-    const { ctx } = await buildServiceContext({
-      cookies,
-      request,
-      workspaceId: page.page.workspaceId,
     });
     // Manual snapshot: write the existing source through updateSource with
     // checkpoint=true. The service returns the new versionId.
@@ -44,7 +34,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       checkpointLabel: body.label ? String(body.label) : "Manual snapshot",
     });
     const updated = result.data;
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
       type: "page.version_created",
@@ -68,12 +58,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       },
     });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Snapshot failed.");
+    return serviceErrorToResponse(error, "Snapshot failed.");
   }
 };

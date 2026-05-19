@@ -1,14 +1,19 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
-  auditService,
-  ensureSeedData,
-  pageService,
-  permissionService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  audit,
+  buildEnvelope,
+  folders as foldersService,
+  jsonWithEnvelope,
+  pages as pagesService,
+  permissions as permissionsService,
+  workspaces as workspacesService,
+} from "@vegastack/pages-services";
+import { getApiRequestActor } from "../../../../lib/access";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
@@ -19,27 +24,47 @@ async function assertWorkspaceAdmin(
   workspaceId: string,
 ) {
   const actor = await getApiRequestActor(cookies, request);
+  const { ctx } = await buildServiceContext({
+    cookies,
+    request,
+    workspaceId,
+  });
   const member = actor.user
-    ? workspaceService.getMember(workspaceId, actor.user.id)
+    ? await workspacesService.getMember(ctx, {
+        workspaceId,
+        userId: actor.user.id,
+      })
     : null;
   const permission =
     actor.workspaceId && actor.workspaceId !== workspaceId
       ? "none"
-      : permissionService.resolve({
-          user: actor.user,
-          member,
+      : await permissionsService.resolve(ctx, {
           workspaceId,
+          userId: actor.user?.id ?? "",
+          scope: "workspace",
+          targetId: workspaceId,
+          memberRole: member?.role ?? null,
+          instanceRole: actor.user?.role,
         });
-  permissionService.assert({ actual: permission, required: "admin" });
+  permissionsService.assertLevel({ actual: permission, required: "admin" });
   return actor;
 }
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
     await assertWorkspaceAdmin(cookies, request, workspaceId);
-    const workspace = workspaceService.getWorkspace(workspaceId);
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    let workspace;
+    try {
+      workspace = await workspacesService.get(ctx, { workspaceId });
+    } catch {
+      workspace = null;
+    }
     if (!workspace)
       throw new AppError(
         "WORKSPACE_NOT_FOUND",
@@ -50,22 +75,26 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
           location: "path",
         },
       );
+    const [pages, members, folders] = await Promise.all([
+      pagesService.list(ctx, workspaceId),
+      workspacesService.listMembers(ctx, { workspaceId }),
+      foldersService.listAll(ctx, { workspaceId }),
+    ]);
     return Response.json({
       workspace,
       counts: {
-        members: workspaceService.listMembers(workspaceId).length,
-        folders: workspaceService.listFolders(workspaceId).length,
-        pages: pageService.listPages(workspaceId).length,
+        members: members.length,
+        folders: folders.length,
+        pages: pages.length,
       },
     });
   } catch (error) {
-    return jsonAppError(error, "Workspace settings fetch failed.");
+    return serviceErrorToResponse(error, "Workspace settings fetch failed.");
   }
 };
 
 export const PATCH: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
     const actor = await assertWorkspaceAdmin(cookies, request, workspaceId);
     const body = await request.json();
@@ -87,7 +116,12 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
         400,
       );
     }
-    const workspace = workspaceService.updateWorkspace({
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    const workspace = await workspacesService.update(ctx, {
       workspaceId,
       name: body.name === undefined ? undefined : String(body.name),
       slug: body.slug === undefined ? undefined : String(body.slug),
@@ -98,7 +132,7 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
             ? null
             : Math.round(retention),
     });
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "workspace.settings_updated",
@@ -113,10 +147,8 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
     // Workspace name/slug change is visible in the breadcrumb root; the
     // shell uses tree_version to detect this. Slug changes also affect any
     // cached workspace URL.
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
       { workspace },
       buildEnvelope({
@@ -126,6 +158,6 @@ export const PATCH: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Workspace settings update failed.");
+    return serviceErrorToResponse(error, "Workspace settings update failed.");
   }
 };

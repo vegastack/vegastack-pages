@@ -1,31 +1,32 @@
 import {
   AppError,
+  hasPermission,
   templateBuilderFromMarkdown,
   templateBuilderToMarkdown,
   type TemplateBuilderDocument,
   type TemplateProperty,
 } from "@vegastack/pages-core";
 import type { APIRoute, AstroCookies } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import {
+  audit,
+  buildEnvelope,
+  isServiceError,
+  jsonWithEnvelope,
+  templates as templatesService,
+  type TemplateRecord,
+} from "@vegastack/pages-services";
 import {
   assertApiWorkspaceId,
   getApiRequestActor,
   jsonAppError,
+  resolveWorkspaceActorPermission,
 } from "../../../lib/access";
-import {
-  auditService,
-  ensureSeedData,
-  permissionService,
-  templateService,
-  workspaceService,
-} from "../../../lib/runtime";
+import { buildServiceContext } from "../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../lib/workspace-navigation";
 
 export const prerender = false;
 
-function serializeTemplate(
-  template: ReturnType<typeof templateService.getTemplate>,
-) {
+function serializeTemplate(template: TemplateRecord | null | undefined) {
   if (!template) return null;
   return {
     id: template.id,
@@ -52,28 +53,31 @@ async function assertTemplateAccess(
   templateId: string,
   required: "read" | "write",
 ) {
-  const template = templateService.getTemplate(templateId);
+  // Bootstrap a ctx WITHOUT workspaceId so we can look up the template
+  // (which provides workspace scope), then rebuild for the mutation.
+  const bootstrap = await buildServiceContext({ cookies, request });
+  const template = await templatesService.get(bootstrap.ctx, templateId);
   if (!template) {
     throw new AppError("PAGE_NOT_FOUND", "Template was not found.", 404);
   }
   assertApiWorkspaceId({ url, workspaceId: template.workspaceId });
   const actor = await getApiRequestActor(cookies, request);
-  const member = actor.user
-    ? workspaceService.getMember(template.workspaceId, actor.user.id)
-    : null;
-  const permission =
-    actor.workspaceId && actor.workspaceId !== template.workspaceId
-      ? "none"
-      : permissionService.resolve({
-          user: actor.user,
-          member,
-          workspaceId: template.workspaceId,
-        });
-  permissionService.assert({
-    actual: permission,
-    required: required === "read" ? "read" : "write",
+  const permission = await resolveWorkspaceActorPermission(
+    actor,
+    template.workspaceId,
+  );
+  if (!hasPermission(permission, required === "read" ? "read" : "write")) {
+    throw new AppError("PERMISSION_DENIED", "Insufficient permission.", 403, {
+      required,
+      actual: permission,
+    });
+  }
+  const { ctx } = await buildServiceContext({
+    cookies,
+    request,
+    workspaceId: template.workspaceId,
   });
-  return { actor, template };
+  return { actor, template, ctx };
 }
 
 function asProperties(input: unknown): TemplateProperty[] | undefined {
@@ -92,34 +96,38 @@ function sourceFromBody(body: Record<string, unknown>): string | undefined {
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const templateId = params.templateId ?? "";
-    const { template } = await assertTemplateAccess(
+    const { template, ctx } = await assertTemplateAccess(
       cookies,
       request,
       url,
       templateId,
       "read",
     );
-    const withSource = await templateService.getTemplateWithSource(template.id);
+    const withSource = await templatesService.getWithSource(ctx, template.id);
     if (!withSource) {
       throw new AppError("PAGE_NOT_FOUND", "Template was not found.", 404);
     }
     return Response.json({
-      template: serializeTemplate(withSource.template),
+      template: serializeTemplate(withSource),
       source: withSource.source,
       builder: templateBuilderFromMarkdown(withSource.source),
     });
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Failed to load template.");
   }
 };
 
 export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const templateId = params.templateId ?? "";
-    const { actor, template } = await assertTemplateAccess(
+    const { actor, template, ctx } = await assertTemplateAccess(
       cookies,
       request,
       url,
@@ -127,10 +135,8 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
       "write",
     );
     const body = await request.json();
-    const updated = await templateService.updateTemplate({
-      templateId: template.id,
+    const updated = await templatesService.update(ctx, template.id, {
       name: body.name === undefined ? undefined : String(body.name),
-      slug: body.slug === undefined ? undefined : String(body.slug),
       description:
         body.description === undefined ? undefined : String(body.description),
       category: body.category === undefined ? undefined : String(body.category),
@@ -142,89 +148,106 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
             : "markdown",
       source: sourceFromBody(body),
       properties: asProperties(body.properties),
-      updatedBy: actor.user?.id ?? null,
     });
-    auditService.record({
-      workspaceId: updated.template.workspaceId,
+    // Re-read with source so the response can include the canonical
+    // post-update body and builder doc.
+    const withSource = await templatesService.getWithSource(ctx, updated.id);
+    const source = withSource?.source ?? "";
+    await audit.record(ctx, {
+      workspaceId: updated.workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "template.updated",
       targetType: "template",
-      targetId: updated.template.id,
+      targetId: updated.id,
       metadata: {
-        slug: updated.template.slug,
-        name: updated.template.name,
+        slug: updated.slug,
+        name: updated.name,
       },
     });
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      updated.template.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, updated.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       {
-        template: serializeTemplate(updated.template),
-        source: updated.source,
-        builder: templateBuilderFromMarkdown(updated.source),
+        template: serializeTemplate(updated),
+        source,
+        builder: templateBuilderFromMarkdown(source),
       },
       buildEnvelope({
         treeVersion,
         navigationInvalidated: false,
         changedResources: [
-          `templates:${updated.template.workspaceId}`,
-          `template:${updated.template.id}`,
+          `templates:${updated.workspaceId}`,
+          `template:${updated.id}`,
         ],
       }),
     );
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Template update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const templateId = params.templateId ?? "";
-    const { actor, template } = await assertTemplateAccess(
+    const { actor, template, ctx } = await assertTemplateAccess(
       cookies,
       request,
       url,
       templateId,
       "write",
     );
-    const member = actor.user
-      ? workspaceService.getMember(template.workspaceId, actor.user.id)
-      : null;
-    if (member?.role !== "admin" && actor.user?.role !== "instance_admin") {
+    // Workspace-admin (or instance-admin) only — mirrors legacy guard.
+    const adminPermission = await resolveWorkspaceActorPermission(
+      actor,
+      template.workspaceId,
+    );
+    if (
+      !hasPermission(adminPermission, "admin") &&
+      actor.user?.role !== "instance_admin"
+    ) {
       throw new AppError(
         "PERMISSION_DENIED",
         "Only workspace admins can delete templates.",
         403,
       );
     }
-    const deleted = await templateService.deleteTemplate(template.id);
-    auditService.record({
-      workspaceId: deleted.workspaceId,
+    await templatesService.remove(ctx, template.id);
+    await audit.record(ctx, {
+      workspaceId: template.workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "template.deleted",
       targetType: "template",
-      targetId: deleted.id,
-      metadata: { slug: deleted.slug, name: deleted.name },
+      targetId: template.id,
+      metadata: { slug: template.slug, name: template.name },
     });
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      deleted.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, template.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
-      { template: serializeTemplate(deleted) },
+      { template: serializeTemplate(template) },
       buildEnvelope({
         treeVersion,
         navigationInvalidated: false,
         changedResources: [
-          `templates:${deleted.workspaceId}`,
-          `template:${deleted.id}`,
+          `templates:${template.workspaceId}`,
+          `template:${template.id}`,
         ],
       }),
     );
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Template delete failed.");
   }
 };

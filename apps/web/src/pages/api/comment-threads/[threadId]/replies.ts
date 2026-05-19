@@ -2,35 +2,48 @@ import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
   comments as commentsService,
+  pages as pagesService,
+  publications,
+  rateLimit,
+  reviewEvents,
   isServiceError,
+  requireDb,
 } from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
+import { clientRateLimitKey } from "../../../../lib/client-address";
 import { enrichReply } from "../../../../lib/comments-enrich";
 import { guestSessionForPublication } from "../../../../lib/guest-session";
-import {
-  commentService,
-  ensureSeedData,
-  scheduleIndexCommentThread,
-  pageService,
-  publicationService,
-  reviewEventService,
-} from "../../../../lib/runtime";
+import { scheduleIndexCommentThread } from "../../../../lib/runtime";
 import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
+async function lookupThreadPageId(
+  ctx: Awaited<ReturnType<typeof buildServiceContext>>["ctx"],
+  threadId: string,
+): Promise<string | null> {
+  const db = requireDb(ctx);
+  const row = await db
+    .prepare("SELECT page_id FROM comment_threads WHERE id = ?1")
+    .bind(threadId)
+    .first<{ page_id: string }>();
+  return row?.page_id ?? null;
+}
+
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const body = await request.json();
-    const thread = commentService.getThread(params.threadId ?? "");
-    if (!thread)
+    const threadId = params.threadId ?? "";
+    const bootstrap = await buildServiceContext({ cookies, request });
+    const pageId = await lookupThreadPageId(bootstrap.ctx, threadId);
+    if (!pageId) {
       throw new AppError(
         "THREAD_NOT_FOUND",
         "Comment thread was not found.",
         404,
       );
-    const page = await pageService.getPage(thread.thread.pageId);
+    }
+    const page = await pagesService.get(bootstrap.ctx, pageId);
     if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
     if (body.agent) {
       throw new AppError(
@@ -47,10 +60,18 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       required: "comment",
       guestName: body.guest_name ? String(body.guest_name) : null,
     });
+    // Anti-spam on guest reply posts. Authenticated members reuse the
+    // same key so the limit covers both surfaces without favouring the
+    // higher-trust path explicitly.
+    await rateLimit.check(bootstrap.ctx, {
+      key: `comment-reply:${access.actor.user?.id ?? clientRateLimitKey(request, "guest")}:${threadId}`,
+      limit: 20,
+      windowMs: 60 * 60_000,
+    });
     let guestSession = null;
     if (!access.actor.user) {
       const publication = access.publicationId
-        ? publicationService.get(access.publicationId)
+        ? await publications.get(bootstrap.ctx, access.publicationId)
         : null;
       if (!publication) {
         throw new AppError(
@@ -72,7 +93,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       workspaceId: page.page.workspaceId,
     });
     const result = await commentsService.reply(ctx, {
-      threadId: params.threadId ?? "",
+      threadId,
       pageId: page.page.id,
       workspaceId: page.page.workspaceId,
       body: String(body.body ?? ""),
@@ -84,19 +105,19 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       agent: null,
     });
     const reply = result.data;
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
       type: "comment.replied",
       actorUserId: access.actor.user?.id ?? null,
       payload: {
-        thread_id: thread.thread.id,
+        thread_id: threadId,
         reply_id: reply.id,
       },
     });
-    scheduleIndexCommentThread(thread.thread.id);
+    scheduleIndexCommentThread(threadId);
     return Response.json({
-      reply: enrichReply(reply),
+      reply: await enrichReply(reply),
       envelope: result.envelope,
     });
   } catch (error) {

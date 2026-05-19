@@ -1,11 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { auth, users, workspaces } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { POST as callMcp } from "../../../mcp";
-import {
-  authService,
-  createMcpSession,
-  workspaceService,
-} from "../../../../lib/runtime";
+import { createMcpSession } from "../../../../lib/runtime";
 import { DELETE, GET, POST } from "../sessions";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-mcp-sessions-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -17,6 +23,25 @@ function sessionCookies(sessionId: string) {
       return name === "vpg_session" ? { value: sessionId } : undefined;
     },
   } as never;
+}
+
+async function seedAdminWorkspace(name: string) {
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+  });
+  const admin = await users.upsert(seedCtx, {
+    id: uniqueId("usr"),
+    email: `mcp-session-${crypto.randomUUID()}@example.com`,
+    displayName: "MCP Session Admin",
+    role: "user",
+  });
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name,
+    slug: uniqueId("slug"),
+    firstAdminUserId: admin.id,
+  });
+  return { admin, workspace, seedCtx };
 }
 
 afterEach(() => {
@@ -47,20 +72,9 @@ describe("MCP sessions API", () => {
   });
 
   it("does not let a workspace bearer token mint or list MCP sessions", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "MCP Session Token Escalation",
-    });
-    const admin = workspaceService.createUser({
-      id: uniqueId("usr"),
-      email: `mcp-session-token-${crypto.randomUUID()}@example.com`,
-      displayName: "MCP Token Admin",
-    });
-    workspaceService.addMember({
-      workspaceId: workspace.id,
-      userId: admin.id,
-      role: "admin",
-    });
+    const { admin, workspace } = await seedAdminWorkspace(
+      "MCP Session Token Escalation",
+    );
     const session = await createMcpSession({
       workspaceId: workspace.id,
       userId: admin.id,
@@ -101,21 +115,12 @@ describe("MCP sessions API", () => {
   });
 
   it("shows MCP bearer tokens only once at creation", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "MCP Session Hash",
-    });
-    const admin = workspaceService.createUser({
-      id: uniqueId("usr"),
-      email: `mcp-session-admin-${crypto.randomUUID()}@example.com`,
-      displayName: "MCP Session Admin",
-    });
-    workspaceService.addMember({
-      workspaceId: workspace.id,
+    const { admin, workspace, seedCtx } =
+      await seedAdminWorkspace("MCP Session Hash");
+    const adminSession = await auth.createSession(seedCtx, {
       userId: admin.id,
-      role: "admin",
     });
-    const cookies = sessionCookies(authService.createSession(admin.id).id);
+    const cookies = sessionCookies(adminSession.id);
 
     const createdResponse = await POST({
       cookies,

@@ -83,11 +83,36 @@ export class AuthService {
     return { link, rawToken };
   }
 
+  // Atomicity guarantees:
+  //   - Within a single Worker isolate, the check-and-flip below is
+  //     synchronous (no `await` between the `consumedAt` check and the
+  //     assignment), so two concurrent `consumeMagicLink` calls cannot
+  //     interleave between the check and the set. V8 single-threaded
+  //     execution makes this safe without an explicit lock.
+  //   - Across isolates, atomicity relies on the runtime mutation lock
+  //     held by middleware on every mutating request. If a future
+  //     refactor drops the global lock, this method MUST migrate to an
+  //     atomic D1 `UPDATE magic_links SET consumed_at = ? WHERE
+  //     token_hash = ? AND consumed_at IS NULL RETURNING …` so the
+  //     database guarantees single-use.
   async consumeMagicLink(
     rawToken: string,
     userId: string,
   ): Promise<SessionRecord> {
-    const link = this.assertUsableMagicLink(await this.getMagicLink(rawToken));
+    const link = await this.getMagicLink(rawToken);
+    // Re-check consumedAt under the same synchronous slice as the flip.
+    // assertUsableMagicLink already throws on consumed/expired; we just
+    // want to make sure the check and the write live in one tick.
+    this.assertUsableMagicLink(link);
+    if (link.consumedAt) {
+      // Belt-and-braces — if another caller flipped this between the
+      // read inside getMagicLink and now, refuse.
+      throw new AppError(
+        "AUTH_REQUIRED",
+        "Magic link token has already been used.",
+        401,
+      );
+    }
     link.consumedAt = new Date().toISOString();
     this.magicLinks.set(link.id, link);
     return this.createSession(userId);

@@ -1,33 +1,40 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { auth, rateLimit, users, workspaces } from "@vegastack/pages-services";
 import { safeLocalRedirectPath } from "../../../../lib/auth-redirects";
 import { publicSignupEnabled } from "../../../../lib/deployment";
 import { sendMagicLinkEmail } from "../../../../lib/email";
 import { magicLinkHandoffUrl } from "../../../../lib/magic-link";
 import {
-  authService,
-  checkRateLimit,
-  ensureSeedData,
-  workspaceService,
-} from "../../../../lib/runtime";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
+import { sha256Hex } from "../../../../lib/runtime";
+import { randomToken } from "../../../../lib/oauth/codes";
 
 export const prerender = false;
 
-export const POST: APIRoute = async ({ request, url }) => {
+export const POST: APIRoute = async ({ cookies, request, url }) => {
   try {
-    if (!publicSignupEnabled()) {
-      await ensureSeedData();
-    }
     const body = await request.json();
     const email = String(body.email ?? "")
       .trim()
       .toLowerCase();
-    await checkRateLimit({
+    const { ctx } = await buildServiceContext({ cookies, request });
+    const rl = await rateLimit.check(ctx, {
       key: `magic-link:${email}`,
       limit: 5,
       windowMs: 15 * 60_000,
     });
-    const user = workspaceService.getUserByEmail(email);
+    if (!rl.ok) {
+      throw new AppError(
+        "RATE_LIMITED",
+        "Too many requests. Try again later.",
+        429,
+        { reset_at: rl.resetAt },
+      );
+    }
+    const user = await users.getByEmail(ctx, email);
     if (import.meta.env.DEV && !publicSignupEnabled() && !user) {
       throw new AppError(
         "AUTH_REQUIRED",
@@ -35,16 +42,20 @@ export const POST: APIRoute = async ({ request, url }) => {
         401,
       );
     }
-    const created = await authService.createMagicLink({
+    const rawToken = randomToken();
+    const tokenHash = await sha256Hex(rawToken);
+    await auth.createMagicLink(ctx, {
       email,
+      tokenHash,
       redirectTo: safeLocalRedirectPath(
         body.redirect_to ? String(body.redirect_to) : null,
       ),
     });
-    const verifyUrl = magicLinkHandoffUrl(url.origin, created.rawToken);
-    const workspace = user
-      ? workspaceService.listWorkspacesForUser(user.id)[0]
-      : null;
+    const verifyUrl = magicLinkHandoffUrl(url.origin, rawToken);
+    const userWorkspaces = user
+      ? await workspaces.listForUser(ctx, { userId: user.id })
+      : [];
+    const workspace = userWorkspaces[0] ?? null;
     const delivery = await sendMagicLinkEmail({
       to: email,
       verifyUrl,
@@ -52,21 +63,11 @@ export const POST: APIRoute = async ({ request, url }) => {
     });
     const response: Record<string, unknown> = { ok: true, delivery };
     if (import.meta.env.DEV) {
-      response.debug_token = created.rawToken;
+      response.debug_token = rawToken;
       response.debug_verify_url = verifyUrl;
     }
     return Response.json(response);
   } catch (error) {
-    if (error instanceof AppError)
-      return Response.json(error.toJSON(), { status: error.status });
-    return Response.json(
-      {
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Magic link request failed.",
-        },
-      },
-      { status: 500 },
-    );
+    return serviceErrorToResponse(error, "Magic link request failed.");
   }
 };

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.14-next.0
+
+Clean-slate rebuild prerelease shipping on `develop`. Noun-first CLI,
+19-tool MCP surface, five audit cycles of security + correctness
+fixes, refreshed docs and shipped skill. **BREAKING** for anyone on
+v0.1.13: the legacy CLI commands and MCP tools are removed with no
+aliases. See the lists below for the full surface.
+
+### @vegastack/pages
+
+#### Patch changes
+
+- **CLI restructure (pure cutover, no aliases).** `vpg` adopts a noun-first hierarchy modeled on `gh` and `wrangler`. Top-level keeps `login`, `logout`, `whoami`, `use`, `search`, `events`, `validate`, `deploy`, `doctor`, `update`, and `completions`. Resource CRUD moves under noun groups: `vpg pages {create,get,update,move,restore,versions,wait}`, `vpg comments {list,create,reply,resolve,reopen,delete,complete,move-anchor}`, `vpg publish {page,folder,update,revoke}`, `vpg templates {list,get,create,update,render}`, `vpg workspaces {list,tree,export,members,invite}`, `vpg attachments upload`, and `vpg skills {install,update,print,path,doctor}`. Removed shapes: `vpg create`, `vpg comment`, `vpg reply`, `vpg resolve`, `vpg unresolve`, `vpg update-anchor`, `vpg delete-thread`, `vpg complete-thread`, `vpg publish-page`, `vpg publish-folder`, `vpg revoke-publication`, `vpg update-publication`, `vpg pages prepare-edit`, `vpg pages patch`, `vpg pages update-source`, `vpg pages restore-version`.
+- **`--agent` mode on every command.** Non-interactive JSON envelopes on stdout, structured error JSON on stderr, NDJSON for streaming commands (`vpg events`, `vpg pages wait`), exit codes 0–8 (`2` validation, `3` auth, `4` not found, `5` permission, `6` conflict, `7` network, `8` rate limited). Destructive ops require `--yes` under `--agent`.
+- **`vpg pages update` three-mode dispatch.** Full source replace (`--source`/`--file`/`--stdin`), find-replace (`--find`/`--replace`/`--expected-replacements`), or checkpoint-only (`--checkpoint` with no source/find). Body fields are omitted-when-unset on the wire so strict server validators accept the call.
+- **MCP surface consolidated to 19 tools (Notion-style).** One mega-`fetch` for reads, prefix-routed by `resource_id` (`pg_/fld_/tpl_/thr_/pub_/wks_/me`) with sub-data via `include[]` (`metadata`, `source`, `rendered`, `versions`, `comments`, `publication`, `edit_tokens`, `members`, `properties`, `history`, `review_events`, `workspaces`, `templates`, `tree`). Writes are distinct verb_nouns: `create_page`, `update_page` (3 modes), `restore_page_version`, `move_page`, `create_comment`, `update_thread`, `delete_thread`, `apply_publication`, `delete_publication`, `create_template`, `update_template`, `render_template`, `upload_attachment`, `invite_workspace_member`, `validate_page_source`. Plus `search`, `wait_for_review`, `whoami`. Removed tools: `prepare_page_edit`, `patch_page`, `create_page_snapshot`, `get_page`, `list_comments`, `list_workspace`, `list_workspaces`, `list_review_events`, `list_templates`, `get_template`, `list_page_versions`, `update_comment_anchor`, `publication_apply`, `publication_delete`, `search_workspace`, `create_page_from_template`.
+
+#### Patch changes
+
+- Bearer-authenticated requests are now exempt from CSRF, so `vpg` writes against `/api/*` cleanly.
+- `fetch` rejects unknown `resource_id` prefixes instead of silently falling back to slug lookup.
+- `apply_publication` rejects calls where `publication_id` is set but `resource_id` mismatches the target.
+- `whoami` honors `include[]` (e.g. `include=["workspaces"]`).
+- OAuth code-burn fix: a request with a typo'd `client_id` no longer invalidates the authorization code for the legitimate client.
+- AsyncLocalStorage isolation for Cloudflare per-request `waitUntil`.
+- New `GET /api/workspaces/[id]/members` REST endpoint (auth-gated), powering `vpg workspaces members`.
+- `vpg use` only persists `--base-url` when explicitly passed (no silent overwrite of a stored custom origin).
+- `vpg workspaces export` sanitizes the workspace id when interpolating into a default filename.
+
 ## 0.1.13
 
 ### @vegastack/pages

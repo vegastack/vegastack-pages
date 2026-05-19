@@ -1523,8 +1523,12 @@ describe("object stores", () => {
         };
       },
       async put(key, value, options) {
+        const body =
+          typeof value === "string"
+            ? value
+            : new TextDecoder().decode(value as ArrayBuffer | Uint8Array);
         objects.set(key, {
-          body: value,
+          body,
           contentType: options?.httpMetadata?.contentType,
           uploaded,
         });

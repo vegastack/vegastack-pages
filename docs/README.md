@@ -11,7 +11,7 @@ Start here when changing implementation behavior:
 5. [Tech stack and rendering](specs/006-tech-stack-rendering.md)
 6. [Data model and permissions](specs/002-data-model-permissions.md)
 7. [API contracts](specs/007-api-contracts.md)
-8. [MCP and CLI](specs/003-mcp-cli.md)
+8. [MCP and CLI](../apps/web/src/content/docs/mcp-and-cli.md) (the historical spec at `specs/003-mcp-cli.md` is superseded)
 9. [Configuration and environment](specs/008-configuration-env.md)
 10. [Security and trust boundaries](specs/009-security.md)
 11. [Core implementation conventions](specs/011-core-conventions.md)

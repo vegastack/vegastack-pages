@@ -1,47 +1,53 @@
 ---
+import type { PageRecord } from "@vegastack/pages-core";
+import { pages, setup, workspaces } from "@vegastack/pages-services";
 import { getRequestActor } from "../../lib/access";
 import { publicSignupEnabled } from "../../lib/deployment";
-import {
-  ensureRuntimeReady,
-  pageService,
-  seedWorkspace,
-  setupService,
-  workspaceService,
-} from "../../lib/runtime";
+import { seedWorkspace } from "../../lib/runtime";
+import { buildServiceContext } from "../../lib/service-context";
 
 export const prerender = false;
 
 if (publicSignupEnabled()) {
-  const actor = getRequestActor(Astro.cookies);
+  const actor = await getRequestActor(Astro.cookies);
   if (!actor.user || actor.devFallback) {
     return Astro.redirect("/app/signup");
   }
-  const workspace =
-    workspaceService.listWorkspacesForUser(actor.user.id)[0] ?? null;
-  const firstPage = workspace ? pageService.listPages(workspace.id)[0] : null;
+  const { ctx } = await buildServiceContext({
+    cookies: Astro.cookies,
+    request: Astro.request,
+  });
+  const userWorkspaces = await workspaces.listForUser(ctx, {
+    userId: actor.user.id,
+  });
+  const workspace = userWorkspaces[0] ?? null;
+  const firstPage = workspace ? (await pages.list(ctx, workspace.id))[0] : null;
   if (firstPage) {
     return Astro.redirect(`/p/${firstPage.slugId}`);
   }
   return Astro.redirect("/app/signup");
 }
 
-await ensureRuntimeReady();
-const setupStatus = setupService.status();
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+});
+const setupStatus = await setup.status(ctx);
 if (!setupStatus.setupComplete || !setupStatus.firstWorkspaceId) {
   return Astro.redirect("/app/setup");
 }
 
-let firstPage: ReturnType<typeof pageService.listPages>[number] | null =
-  pageService.listPages(setupStatus.firstWorkspaceId)[0] ?? null;
+let firstPage: PageRecord | null =
+  (await pages.list(ctx, setupStatus.firstWorkspaceId))[0] ?? null;
 if (!firstPage) {
   const seeded = await seedWorkspace({
     workspaceId: setupStatus.firstWorkspaceId,
     actorUserId: setupStatus.firstAdminUserId,
   });
   firstPage =
-    pageService
-      .listPages(setupStatus.firstWorkspaceId)
-      .find((page) => page.slugId === seeded.firstPageSlugId) ?? null;
+    (await pages.list(ctx, setupStatus.firstWorkspaceId)).find(
+      (page) => page.slugId === seeded.firstPageSlugId,
+    ) ?? null;
 }
 
 return Astro.redirect(firstPage ? `/p/${firstPage.slugId}` : "/app/setup");

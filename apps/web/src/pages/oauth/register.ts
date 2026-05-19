@@ -1,6 +1,7 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { auditService, checkRateLimit } from "../../lib/runtime";
+import { audit, rateLimit } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../lib/service-context";
 import {
   ANTHROPIC_CONNECTOR_CLIENT_ID,
   matchesAnthropicConnector,
@@ -36,24 +37,61 @@ function oauthError(error: string, description: string, status = 400) {
   );
 }
 
-// auditService.record is a synchronous in-memory push (see
-// @vegastack/pages-core's AuditService). We deliberately don't wrap it in
-// any promise / waitUntil dance — that earlier attempt was both unnecessary
-// and the apparent cause of an opaque 500 on the Cloudflare runtime.
-function recordAudit(input: Parameters<typeof auditService.record>[0]): void {
+// Best-effort audit log push. Writes to D1 via the new audit service;
+// failures (e.g. transient D1 errors) are logged and swallowed — the
+// OAuth flow shouldn't 500 because we couldn't insert an audit row.
+async function recordAudit(
+  request: Request,
+  input: Parameters<typeof audit.record>[1],
+): Promise<void> {
   try {
-    auditService.record(input);
+    const { ctx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      request,
+    });
+    await audit.record(ctx, input);
   } catch (error) {
-    console.error("[oauth.register] audit log push failed:", error);
+    // Structured JSON log so observability tooling can index the
+    // `event` key without parsing freeform strings.
+    console.log(
+      JSON.stringify({
+        event: "vpg.oauth.register.audit.failed",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 }
+
+const MAX_REGISTRATION_BYTES = 32 * 1024;
 
 export const POST: APIRoute = async ({ request }) => {
   try {
     const ip = clientIp(request);
+    // Bound the DCR payload so a hostile registrant can't exhaust Worker
+    // memory before we even get to the rate-limit step. The Anthropic
+    // fast-path skips D1 + rate-limit, so this is the only ceiling.
+    const declaredLength = Number(request.headers.get("content-length") ?? "");
+    if (
+      Number.isFinite(declaredLength) &&
+      declaredLength > MAX_REGISTRATION_BYTES
+    ) {
+      return oauthError(
+        "invalid_client_metadata",
+        "Registration payload is too large.",
+        413,
+      );
+    }
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).byteLength > MAX_REGISTRATION_BYTES) {
+      return oauthError(
+        "invalid_client_metadata",
+        "Registration payload is too large.",
+        413,
+      );
+    }
     let body: Record<string, unknown> = {};
     try {
-      body = (await request.json()) as Record<string, unknown>;
+      body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
     } catch {
       return oauthError(
         "invalid_client_metadata",
@@ -85,7 +123,7 @@ export const POST: APIRoute = async ({ request }) => {
     // touching D1 or the rate limiter so the response lands inside the
     // broker's ~1.5s timeout window.
     if (matchesAnthropicConnector({ redirectUris })) {
-      recordAudit({
+      await recordAudit(request, {
         workspaceId: null,
         actorUserId: null,
         action: "oauth.client_registered",
@@ -117,7 +155,11 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    await checkRateLimit({
+    const { ctx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      request,
+    });
+    await rateLimit.enforce(ctx, {
       key: `oauth.register:${ip ?? "anonymous"}`,
       limit: 20,
       windowMs: 60 * 60_000,
@@ -131,7 +173,7 @@ export const POST: APIRoute = async ({ request }) => {
       registeredUserAgent: request.headers.get("user-agent"),
       registeredIp: ip,
     });
-    recordAudit({
+    await recordAudit(request, {
       workspaceId: null,
       actorUserId: null,
       action: "oauth.client_registered",
@@ -161,7 +203,18 @@ export const POST: APIRoute = async ({ request }) => {
       { status: 201, headers: corsHeaders },
     );
   } catch (error) {
-    console.error("[oauth.register] handler failed:", error);
+    console.log(
+      JSON.stringify({
+        event: "vpg.oauth.register.failed",
+        error_code:
+          error instanceof OAuthClientRegistrationError
+            ? error.oauthError
+            : error instanceof AppError
+              ? error.code
+              : "server_error",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
     if (error instanceof OAuthClientRegistrationError) {
       return oauthError(error.oauthError, error.message, error.status);
     }

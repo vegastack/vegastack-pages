@@ -1,14 +1,11 @@
 const runtimeBypassPrefixes = ["/docs"];
 
-// OAuth + MCP discovery surface. These endpoints must not be wrapped in the
-// runtime-mutation lock + persistRuntimeState() pair the middleware applies
-// to other POSTs: claude.ai's connector broker cancels DCR after ~1.5s, and
-// our per-POST persistence loop alone consumes most of that window even when
-// the handler itself is fast. Each of these endpoints either touches no
-// runtime state (the well-known docs, /register fast path, /revoke, HEAD on
-// /mcp) or does its own narrow D1 writes (the generic /register slow path,
-// /token, /authorize/consent, /authorize/resume) and doesn't need the
-// global persist sweep.
+// OAuth + MCP discovery surface. These endpoints are bypassed from the
+// middleware's mutation-locking layer (legacy snapshot persistence) so
+// short-lived broker calls — claude.ai's DCR completes in ~1.5s — never
+// queue behind the global persist sweep. Most now write through D1
+// directly via the services layer, but the bypass list still applies
+// to keep the middleware overhead off these latency-sensitive paths.
 const oauthBypassExactPaths = new Set([
   "/mcp",
   "/register",

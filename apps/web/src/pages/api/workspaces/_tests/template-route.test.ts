@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { authService, workspaceService } from "../../../../lib/runtime";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { auth, users, workspaces } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { POST as createTemplate } from "../[workspaceId]/templates";
 import {
   GET as getTemplate,
   PATCH as updateTemplate,
 } from "../../templates/[templateId]";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-template-rest-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -24,21 +33,23 @@ function resourceUrl(path: string, workspaceId: string) {
 
 describe("template REST API", () => {
   it("creates, reads, and updates structured template builders", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "Template REST",
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
     });
-    const admin = workspaceService.createUser({
+    const admin = await users.upsert(seedCtx, {
       id: uniqueId("usr"),
       email: `template-rest-${crypto.randomUUID()}@example.test`,
       displayName: "Template REST Admin",
+      role: "user",
     });
-    workspaceService.addMember({
-      workspaceId: workspace.id,
-      userId: admin.id,
-      role: "admin",
+    const workspace = await workspaces.create(seedCtx, {
+      id: uniqueId("wks"),
+      name: "Template REST",
+      slug: uniqueId("slug"),
+      firstAdminUserId: admin.id,
     });
-    const cookies = sessionCookies(authService.createSession(admin.id).id);
+    const session = await auth.createSession(seedCtx, { userId: admin.id });
+    const cookies = sessionCookies(session.id);
 
     const createdResponse = await createTemplate({
       cookies,

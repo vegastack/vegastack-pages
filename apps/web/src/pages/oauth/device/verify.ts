@@ -1,5 +1,10 @@
 import type { APIRoute } from "astro";
-import { getRequestActor } from "../../../lib/access";
+import { workspaces as workspacesService } from "@vegastack/pages-services";
+import {
+  getApiRequestActor,
+  getRequestActor,
+  resolveWorkspaceActorPermission,
+} from "../../../lib/access";
 import {
   approveDeviceCode,
   denyDeviceCode,
@@ -7,7 +12,7 @@ import {
 } from "../../../lib/oauth/codes";
 import { getOAuthClient } from "../../../lib/oauth/clients";
 import { vendorForClient } from "../../../lib/oauth/vendor-map";
-import { permissionService, workspaceService } from "../../../lib/runtime";
+import { buildServiceContext } from "../../../lib/service-context";
 
 export const prerender = false;
 
@@ -47,8 +52,8 @@ button{padding:0.7rem 1.2rem;border-radius:8px;border:1px solid transparent;font
   );
 }
 
-export const GET: APIRoute = ({ url, cookies }) => {
-  const actor = getRequestActor(cookies);
+export const GET: APIRoute = async ({ url, cookies }) => {
+  const actor = await getRequestActor(cookies);
   if (!actor.user) {
     const next = `/oauth/device/verify${url.search}`;
     const target = new URL("/app/login", url);
@@ -69,58 +74,61 @@ export const GET: APIRoute = ({ url, cookies }) => {
        </form>`,
     );
   }
-  return loadDeviceCodeByUserCode(userCode).then(async (row) => {
-    if (!row) {
-      return shellPage(
-        "Code not found",
-        `<h1>Code not recognized</h1>
-         <p>The code <code>${escapeHtml(userCode)}</code> is unknown or expired. Restart the device login in your CLI.</p>`,
-        404,
-      );
-    }
-    if (Date.parse(row.expiresAt) <= Date.now()) {
-      return shellPage(
-        "Code expired",
-        `<h1>Code expired</h1>
-         <p>This code has expired. Restart the device login in your CLI.</p>`,
-        410,
-      );
-    }
-    if (row.status !== "pending") {
-      return shellPage(
-        "Already used",
-        `<h1>Already used</h1>
-         <p>This code has already been processed. Restart the device login if you need a new session.</p>`,
-        409,
-      );
-    }
-    const client = await getOAuthClient(row.clientId);
-    if (!client) {
-      return shellPage("Unknown client", "<h1>Unknown client</h1>", 400);
-    }
-    const vendor = vendorForClient({
-      clientName: client.clientName,
-      redirectUris: client.redirectUris,
-    });
-    const workspaces = workspaceService.listWorkspacesForUser(actor.user!.id);
-    if (workspaces.length === 0) {
-      return shellPage(
-        "No workspaces",
-        "<h1>No workspaces</h1><p>Your account is not a member of any workspace.</p>",
-        403,
-      );
-    }
-    const options = workspaces
-      .map(
-        (workspace, idx) =>
-          `<label class="opt"><input type="radio" name="workspace_id" value="${escapeHtml(workspace.id)}" ${idx === 0 ? "checked" : ""} /> <span>${escapeHtml(workspace.name)}</span></label>`,
-      )
-      .join("\n");
+  const row = await loadDeviceCodeByUserCode(userCode);
+  if (!row) {
     return shellPage(
-      `Authorize ${vendor.label}`,
-      `<h1>${escapeHtml(vendor.label)} wants to access VegaStack Pages</h1>
+      "Code not found",
+      `<h1>Code not recognized</h1>
+         <p>The code <code>${escapeHtml(userCode)}</code> is unknown or expired. Restart the device login in your CLI.</p>`,
+      404,
+    );
+  }
+  if (Date.parse(row.expiresAt) <= Date.now()) {
+    return shellPage(
+      "Code expired",
+      `<h1>Code expired</h1>
+         <p>This code has expired. Restart the device login in your CLI.</p>`,
+      410,
+    );
+  }
+  if (row.status !== "pending") {
+    return shellPage(
+      "Already used",
+      `<h1>Already used</h1>
+         <p>This code has already been processed. Restart the device login if you need a new session.</p>`,
+      409,
+    );
+  }
+  const client = await getOAuthClient(row.clientId);
+  if (!client) {
+    return shellPage("Unknown client", "<h1>Unknown client</h1>", 400);
+  }
+  const vendor = vendorForClient({
+    clientName: client.clientName,
+    redirectUris: client.redirectUris,
+  });
+  const { ctx } = await buildServiceContext({ cookies });
+  const userWorkspaces = await workspacesService.listForUser(ctx, {
+    userId: actor.user.id,
+  });
+  if (userWorkspaces.length === 0) {
+    return shellPage(
+      "No workspaces",
+      "<h1>No workspaces</h1><p>Your account is not a member of any workspace.</p>",
+      403,
+    );
+  }
+  const options = userWorkspaces
+    .map(
+      (workspace, idx) =>
+        `<label class="opt"><input type="radio" name="workspace_id" value="${escapeHtml(workspace.id)}" ${idx === 0 ? "checked" : ""} /> <span>${escapeHtml(workspace.name)}</span></label>`,
+    )
+    .join("\n");
+  return shellPage(
+    `Authorize ${vendor.label}`,
+    `<h1>${escapeHtml(vendor.label)} wants to access VegaStack Pages</h1>
        <p>Client: <strong>${escapeHtml(client.clientName)}</strong></p>
-       <p>Signed in as ${escapeHtml(actor.user!.email)}</p>
+       <p>Signed in as ${escapeHtml(actor.user.email)}</p>
        <form method="POST">
          <input type="hidden" name="user_code" value="${escapeHtml(userCode)}" />
          <div style="margin:1.25rem 0">
@@ -132,12 +140,11 @@ export const GET: APIRoute = ({ url, cookies }) => {
            <button class="primary" name="decision" value="approve" type="submit">Allow ${escapeHtml(vendor.label)}</button>
          </div>
        </form>`,
-    );
-  });
+  );
 };
 
 export const POST: APIRoute = async ({ request, cookies }) => {
-  const actor = getRequestActor(cookies);
+  const actor = await getApiRequestActor(cookies, request);
   if (!actor.user) {
     return new Response("Sign-in required.", { status: 401 });
   }
@@ -152,12 +159,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       "<h1>Cancelled</h1><p>You denied the request. Return to your CLI and start over if needed.</p>",
     );
   }
-  const member = workspaceService.getMember(workspaceId, actor.user.id);
-  const permission = permissionService.resolve({
-    user: actor.user,
-    member,
-    workspaceId,
-  });
+  const permission = await resolveWorkspaceActorPermission(actor, workspaceId);
   if (permission === "none") {
     return shellPage(
       "No access",

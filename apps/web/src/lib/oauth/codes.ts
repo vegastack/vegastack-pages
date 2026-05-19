@@ -158,35 +158,54 @@ export async function persistAuthCode(input: {
 
 /**
  * Atomically claim an authorization code. Returns the row if it was pending
- * and unexpired; returns null otherwise. The atomic UPDATE prevents two
- * concurrent token-endpoint hits from both succeeding on the same code.
+ * and unexpired; returns null otherwise.
+ *
+ * Race safety: uses a single `UPDATE ... WHERE status='pending' AND
+ * expires_at > now RETURNING …` so only ONE concurrent token-endpoint
+ * caller receives the row content; every other caller gets an empty
+ * RETURNING. The prior implementation did SELECT-then-UPDATE which
+ * let two callers both see `status='pending'` in the SELECT and both
+ * return the row content even though only one UPDATE actually flipped
+ * the status — allowing a single code to mint two tokens.
  */
 export async function consumeAuthCode(
   code: string,
+  clientId?: string,
 ): Promise<OAuthGrantRow | null> {
   await ensureRuntimeReady();
   const hash = await sha256Hex(code);
-  const now = Date.now();
+  // If `clientId` is supplied, the UPDATE includes it in the WHERE so a
+  // mismatched client_id never burns the code (audit cycle 5: a legit
+  // client polling with a typo'd `client_id` would otherwise permanently
+  // consume the row). Backwards-compatible: callers passing only `code`
+  // get the previous behavior.
   if (runtimeIsD1()) {
-    const rows = await d1All<OAuthGrantRow>(
-      `SELECT ${SELECT_COLUMNS} FROM oauth_grants WHERE code_hash = ? AND kind = 'auth_code' LIMIT 1`,
-      hash,
-    );
-    const row = rows[0] ?? null;
-    if (!row) return null;
-    if (row.status !== "pending") return null;
-    if (Date.parse(row.expiresAt) <= now) return null;
-    await d1Run(
-      "UPDATE oauth_grants SET status = 'consumed' WHERE code_hash = ? AND status = 'pending'",
-      hash,
-    );
-    fallbackGrants.delete(hash);
-    return row;
+    const nowIso = new Date().toISOString();
+    const sql = clientId
+      ? `UPDATE oauth_grants SET status = 'consumed'
+         WHERE code_hash = ? AND kind = 'auth_code'
+           AND status = 'pending' AND expires_at > ? AND client_id = ?
+         RETURNING ${SELECT_COLUMNS}`
+      : `UPDATE oauth_grants SET status = 'consumed'
+         WHERE code_hash = ? AND kind = 'auth_code'
+           AND status = 'pending' AND expires_at > ?
+         RETURNING ${SELECT_COLUMNS}`;
+    const rows = clientId
+      ? await d1All<OAuthGrantRow>(sql, hash, nowIso, clientId)
+      : await d1All<OAuthGrantRow>(sql, hash, nowIso);
+    if (rows[0]) fallbackGrants.delete(hash);
+    return rows[0] ?? null;
   }
+  // Single-writer Node SQLite path: no concurrency race possible.
   const row = fallbackGrants.get(hash);
   if (!row || row.kind !== "auth_code") return null;
   if (row.status !== "pending") return null;
-  if (Date.parse(row.expiresAt) <= now) return null;
+  if (Date.parse(row.expiresAt) <= Date.now()) return null;
+  if (clientId && row.clientId !== clientId) {
+    // Do NOT consume — leave the row pending so the legit client can
+    // retry with the correct client_id.
+    return null;
+  }
   row.status = "consumed";
   fallbackGrants.delete(hash);
   return row;

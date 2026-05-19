@@ -2,33 +2,58 @@ import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
   comments as commentsService,
+  pages as pagesService,
+  reviewEvents,
   isServiceError,
+  requireDb,
 } from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
-import {
-  commentService,
-  ensureSeedData,
-  scheduleIndexCommentThread,
-  pageService,
-  reviewEventService,
-} from "../../../../lib/runtime";
+import { scheduleIndexCommentThread } from "../../../../lib/runtime";
 import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
+async function lookupThreadPageId(
+  ctx: Awaited<ReturnType<typeof buildServiceContext>>["ctx"],
+  threadId: string,
+): Promise<string | null> {
+  const db = requireDb(ctx);
+  const row = await db
+    .prepare("SELECT page_id FROM comment_threads WHERE id = ?1")
+    .bind(threadId)
+    .first<{ page_id: string }>();
+  return row?.page_id ?? null;
+}
+
+async function readThreadWithReplies(
+  ctx: Awaited<ReturnType<typeof buildServiceContext>>["ctx"],
+  pageId: string,
+  threadId: string,
+) {
+  // listForPage with status='all' includes both open and resolved
+  // threads; filter to the one we just mutated so callers receive the
+  // same enriched thread-with-replies shape the legacy route returned.
+  const all = await commentsService.listForPage(ctx, {
+    pageId,
+    status: "all",
+  });
+  return all.find((entry) => entry.thread.id === threadId) ?? null;
+}
+
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const threadId = params.threadId ?? "";
     const body = await request.json();
-    const thread = commentService.getThread(params.threadId ?? "");
-    if (!thread) {
+    const bootstrap = await buildServiceContext({ cookies, request });
+    const pageId = await lookupThreadPageId(bootstrap.ctx, threadId);
+    if (!pageId) {
       throw new AppError(
         "THREAD_NOT_FOUND",
         "Comment thread was not found.",
         404,
       );
     }
-    const page = await pageService.getPage(thread.thread.pageId);
+    const page = await pagesService.get(bootstrap.ctx, pageId);
     if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
     const access = await resolvePageAccess({
       cookies,
@@ -43,7 +68,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       workspaceId: page.page.workspaceId,
     });
     const replyResult = await commentsService.reply(ctx, {
-      threadId: thread.thread.id,
+      threadId,
       pageId: page.page.id,
       workspaceId: page.page.workspaceId,
       body: String(body.body ?? ""),
@@ -63,13 +88,13 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         : null,
     });
     const reply = replyResult.data;
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: page.page.workspaceId,
       pageId: page.page.id,
       type: "comment.replied",
       actorUserId: access.actor.user?.id ?? null,
       payload: {
-        thread_id: thread.thread.id,
+        thread_id: threadId,
         reply_id: reply.id,
       },
     });
@@ -80,12 +105,12 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     let envelope = replyResult.envelope;
     if (Boolean(body.resolve)) {
       const resolveResult = await commentsService.resolve(ctx, {
-        threadId: thread.thread.id,
+        threadId,
         pageId: page.page.id,
         workspaceId: page.page.workspaceId,
       });
       resolved = resolveResult.data;
-      reviewEventService.emit({
+      await reviewEvents.emit(ctx, {
         workspaceId: page.page.workspaceId,
         pageId: page.page.id,
         type: "comment.resolved",
@@ -109,11 +134,12 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         ],
       };
     }
-    scheduleIndexCommentThread(thread.thread.id);
+    scheduleIndexCommentThread(threadId);
+    const thread = await readThreadWithReplies(ctx, page.page.id, threadId);
     return Response.json({
       reply,
       resolved,
-      thread: commentService.getThread(thread.thread.id),
+      thread,
       envelope,
     });
   } catch (error) {

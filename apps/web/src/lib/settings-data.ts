@@ -1,51 +1,72 @@
+// Settings page bootstrap — resolves the actor, picks the active
+// workspace from URL/cookie/membership, and loads the per-workspace
+// pages/folders. Plan 011 §4 (no legacy singletons). All reads via
+// @vegastack/pages-services + D1.
+
 import type { AstroGlobal } from "astro";
-import { hasPermission } from "@vegastack/pages-core";
+import {
+  hasPermission,
+  type PermissionLevel,
+  type FolderRecord,
+  type PageRecord,
+  type UserRecord,
+  type WorkspaceRecord,
+} from "@vegastack/pages-core";
 import { getRequestActor } from "./access";
 import { publicSignupEnabled } from "./deployment";
+import { getDb } from "./runtime";
 import {
-  ensureSeedData,
-  pageService,
-  permissionService,
-  workspaceService,
-} from "./runtime";
+  folders as foldersService,
+  pages as pagesService,
+  permissions as permissionsService,
+  workspaces as workspacesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
 import { listSelectableWorkspaces } from "./workspace-visibility";
 
 export type SettingsContext = {
-  currentUser: NonNullable<ReturnType<typeof getRequestActor>["user"]>;
-  workspace: NonNullable<ReturnType<typeof listSelectableWorkspaces>[number]>;
-  workspaces: ReturnType<typeof listSelectableWorkspaces>;
-  pages: ReturnType<typeof pageService.listPages>;
-  folders: ReturnType<typeof workspaceService.listFolders>;
-  effectivePermission: ReturnType<typeof permissionService.resolve>;
+  currentUser: UserRecord;
+  workspace: WorkspaceRecord;
+  workspaces: WorkspaceRecord[];
+  pages: PageRecord[];
+  folders: FolderRecord[];
+  effectivePermission: PermissionLevel;
 };
 
 export type SettingsLoad =
   | { kind: "ok"; context: SettingsContext }
   | { kind: "redirect"; response: Response };
 
-export async function loadSettings(Astro: AstroGlobal): Promise<SettingsLoad> {
-  if (!publicSignupEnabled()) {
-    await ensureSeedData();
-  }
+function readOnlyCtx(user: UserRecord | null): ServiceContext {
+  return {
+    actor: {
+      userId: user?.id ?? "",
+      email: user?.email ?? null,
+      workspaceId: null,
+    },
+    async computeTreeVersion() {
+      return "";
+    },
+    waitUntil(promise) {
+      void promise.catch(() => undefined);
+    },
+    log(level, message, fields) {
+      const emit =
+        level === "error" || level === "warn" ? console.error : console.log;
+      emit(`[vpg-settings] [${level}] ${message}`, fields ?? {});
+    },
+  };
+}
 
-  const actor = getRequestActor(Astro.cookies);
+export async function loadSettings(Astro: AstroGlobal): Promise<SettingsLoad> {
+  const actor = await getRequestActor(Astro.cookies);
   if (!actor.user) {
     return { kind: "redirect", response: Astro.redirect("/app/login") };
   }
   const currentUser = actor.user;
 
-  const workspaces = listSelectableWorkspaces(currentUser);
-  /*
-   * Active workspace resolution:
-   *  1. ?workspace_id= in the URL — one-shot switch (workspace switcher).
-   *  2. vpg-active-workspace cookie — sticky preference from a previous
-   *     switch. Lets the user's URLs stay clean.
-   *  3. First workspace the user belongs to — fallback for a fresh session.
-   *
-   * After resolving, we persist the choice to the cookie and — if the URL
-   * carried the param — redirect to the same path without it so the
-   * address bar reads as a clean `/app/settings/<section>`.
-   */
+  const workspaces = await listSelectableWorkspaces(currentUser);
+  // Active workspace resolution: URL > cookie > first available
   const urlWorkspaceId = Astro.url.searchParams.get("workspace_id");
   const cookieWorkspaceId =
     Astro.cookies.get("vpg-active-workspace")?.value ?? null;
@@ -74,23 +95,35 @@ export async function loadSettings(Astro: AstroGlobal): Promise<SettingsLoad> {
     return { kind: "redirect", response: Astro.redirect(target) };
   }
 
-  const member = workspaceService.getMember(workspace.id, currentUser.id);
-  const effectivePermission = permissionService.resolve({
-    user: currentUser,
-    member,
+  const db = await getDb();
+  const ctx = readOnlyCtx(currentUser);
+  if (db) ctx.db = db;
+  const member = await workspacesService.getMember(ctx, {
     workspaceId: workspace.id,
+    userId: currentUser.id,
+  });
+  const effectivePermission = await permissionsService.resolve(ctx, {
+    workspaceId: workspace.id,
+    userId: currentUser.id,
+    scope: "workspace",
+    targetId: workspace.id,
+    memberRole: member?.role ?? null,
+    instanceRole: currentUser.role,
   });
 
   if (!hasPermission(effectivePermission, "admin")) {
-    const firstPage = pageService.listPages(workspace.id)[0];
+    const allPages = await pagesService.list(ctx, workspace.id);
+    const firstPage = allPages[0];
     return {
       kind: "redirect",
       response: Astro.redirect(firstPage ? `/p/${firstPage.slugId}` : "/"),
     };
   }
 
-  const pages = pageService.listPages(workspace.id);
-  const folders = workspaceService.listFolders(workspace.id);
+  const [pages, folders] = await Promise.all([
+    pagesService.list(ctx, workspace.id),
+    foldersService.listAll(ctx, { workspaceId: workspace.id }),
+  ]);
 
   return {
     kind: "ok",
@@ -112,13 +145,6 @@ export function formatDate(value: string | null | undefined) {
   return date.toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 }
 
-/**
- * Compact two-line date for tables with many date columns.
- * Returns { date: "May 14, 2026", time: "3:37 PM" } so callers can stack them.
- * The full `formatDate` output is ~22 chars and wraps awkwardly across 4-6
- * columns at the settings page's max-width; this split lets each cell stay
- * single-line for the date and single-line for the time.
- */
 export function splitDate(value: string | null | undefined): {
   date: string;
   time: string | null;

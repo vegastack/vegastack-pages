@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { authService, workspaceService } from "../../../../lib/runtime";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { auth, users, workspaces } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { DELETE, GET, POST } from "../sessions";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-mcp-views-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -16,31 +25,33 @@ function sessionCookies(sessionId: string) {
 
 async function seedWorkspaceWithMembers() {
   const tag = crypto.randomUUID().slice(0, 8);
-  const workspace = workspaceService.createWorkspace({
-    id: uniqueId("wks"),
-    name: `Sessions View ${tag}`,
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
   });
-  const admin = workspaceService.createUser({
+  const admin = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `sessions-admin-${crypto.randomUUID()}@example.com`,
     displayName: "Sessions Admin",
+    role: "user",
   });
-  const editor = workspaceService.createUser({
+  const editor = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `sessions-editor-${crypto.randomUUID()}@example.com`,
     displayName: "Sessions Editor",
+    role: "user",
   });
-  workspaceService.addMember({
-    workspaceId: workspace.id,
-    userId: admin.id,
-    role: "admin",
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name: `Sessions View ${tag}`,
+    slug: uniqueId("slug"),
+    firstAdminUserId: admin.id,
   });
-  workspaceService.addMember({
+  await workspaces.addMember(seedCtx, {
     workspaceId: workspace.id,
     userId: editor.id,
     role: "editor",
   });
-  return { workspace, admin, editor };
+  return { workspace, admin, editor, seedCtx };
 }
 
 async function createSessionViaApi(
@@ -69,8 +80,11 @@ async function createSessionViaApi(
 
 describe("Sessions API view filtering", () => {
   it("non-admin members can create their own manual sessions", async () => {
-    const { workspace, editor } = await seedWorkspaceWithMembers();
-    const cookies = sessionCookies(authService.createSession(editor.id).id);
+    const { workspace, editor, seedCtx } = await seedWorkspaceWithMembers();
+    const editorSession = await auth.createSession(seedCtx, {
+      userId: editor.id,
+    });
+    const cookies = sessionCookies(editorSession.id);
     const created = await createSessionViaApi(
       cookies,
       workspace.id,
@@ -80,11 +94,16 @@ describe("Sessions API view filtering", () => {
   });
 
   it("view=mine returns only the caller's sessions", async () => {
-    const { workspace, admin, editor } = await seedWorkspaceWithMembers();
-    const adminCookies = sessionCookies(authService.createSession(admin.id).id);
-    const editorCookies = sessionCookies(
-      authService.createSession(editor.id).id,
-    );
+    const { workspace, admin, editor, seedCtx } =
+      await seedWorkspaceWithMembers();
+    const adminSession = await auth.createSession(seedCtx, {
+      userId: admin.id,
+    });
+    const editorSession = await auth.createSession(seedCtx, {
+      userId: editor.id,
+    });
+    const adminCookies = sessionCookies(adminSession.id);
+    const editorCookies = sessionCookies(editorSession.id);
     await createSessionViaApi(adminCookies, workspace.id, "admin own");
     await createSessionViaApi(editorCookies, workspace.id, "editor own");
 
@@ -111,11 +130,16 @@ describe("Sessions API view filtering", () => {
   });
 
   it("view=workspace requires admin and lists all sessions in the workspace", async () => {
-    const { workspace, admin, editor } = await seedWorkspaceWithMembers();
-    const adminCookies = sessionCookies(authService.createSession(admin.id).id);
-    const editorCookies = sessionCookies(
-      authService.createSession(editor.id).id,
-    );
+    const { workspace, admin, editor, seedCtx } =
+      await seedWorkspaceWithMembers();
+    const adminSession = await auth.createSession(seedCtx, {
+      userId: admin.id,
+    });
+    const editorSession = await auth.createSession(seedCtx, {
+      userId: editor.id,
+    });
+    const adminCookies = sessionCookies(adminSession.id);
+    const editorCookies = sessionCookies(editorSession.id);
     await createSessionViaApi(adminCookies, workspace.id, "wks-admin");
     await createSessionViaApi(editorCookies, workspace.id, "wks-editor");
 
@@ -151,17 +175,22 @@ describe("Sessions API view filtering", () => {
   });
 
   it("users may revoke their own session but not someone else's", async () => {
-    const { workspace, admin, editor } = await seedWorkspaceWithMembers();
-    const adminCookies = sessionCookies(authService.createSession(admin.id).id);
-    const editorCookies = sessionCookies(
-      authService.createSession(editor.id).id,
-    );
-    const adminSession = await createSessionViaApi(
+    const { workspace, admin, editor, seedCtx } =
+      await seedWorkspaceWithMembers();
+    const adminSession = await auth.createSession(seedCtx, {
+      userId: admin.id,
+    });
+    const editorSession = await auth.createSession(seedCtx, {
+      userId: editor.id,
+    });
+    const adminCookies = sessionCookies(adminSession.id);
+    const editorCookies = sessionCookies(editorSession.id);
+    const adminSessionRow = await createSessionViaApi(
       adminCookies,
       workspace.id,
       "admin self",
     );
-    const editorSession = await createSessionViaApi(
+    const editorSessionRow = await createSessionViaApi(
       editorCookies,
       workspace.id,
       "editor self",
@@ -175,7 +204,7 @@ describe("Sessions API view filtering", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspace_id: workspace.id,
-          session_id: adminSession.session_id,
+          session_id: adminSessionRow.session_id,
         }),
       }),
     } as never);
@@ -189,7 +218,7 @@ describe("Sessions API view filtering", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspace_id: workspace.id,
-          session_id: editorSession.session_id,
+          session_id: editorSessionRow.session_id,
         }),
       }),
     } as never);
@@ -203,7 +232,7 @@ describe("Sessions API view filtering", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspace_id: workspace.id,
-          session_id: adminSession.session_id,
+          session_id: adminSessionRow.session_id,
         }),
       }),
     } as never);

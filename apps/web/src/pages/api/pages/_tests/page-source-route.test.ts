@@ -1,14 +1,26 @@
-import { describe, expect, it } from "vitest";
-import {
-  authService,
-  createMcpSession,
-  pageService,
-  workspaceService,
-} from "../../../../lib/runtime";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { auth, pages, users, workspaces } from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
+import { createMcpSession } from "../../../../lib/runtime";
+
+async function readPage(pageId: string) {
+  const { ctx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+  });
+  return pages.get(ctx, pageId);
+}
 import { POST as validateSource } from "../../validate-source";
 import { POST as patchSource } from "../[pageId]/patch";
 import { GET as getSource, PUT as updateSource } from "../[pageId]/source";
 import { GET as listVersions } from "../[pageId]/versions";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-source-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -35,21 +47,26 @@ function apiUrl(path: string, workspaceId: string) {
 }
 
 async function createEditablePage(title: string) {
-  const workspace = workspaceService.createWorkspace({
-    id: uniqueId("wks"),
-    name: `Source ${crypto.randomUUID()}`,
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: emptyCookies(),
   });
-  const user = workspaceService.createUser({
+  const user = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `source-${crypto.randomUUID()}@example.test`,
     displayName: "Source Editor",
   });
-  workspaceService.addMember({
-    workspaceId: workspace.id,
-    userId: user.id,
-    role: "admin",
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name: `Source ${crypto.randomUUID()}`,
+    slug: uniqueId("slug"),
+    firstAdminUserId: user.id,
   });
-  const page = await pageService.createPage({
+  const session = await auth.createSession(seedCtx, { userId: user.id });
+  const { ctx: actorCtx } = await buildServiceContext({
+    cookies: sessionCookies(session.id),
+    workspaceId: workspace.id,
+  });
+  const created = await pages.create(actorCtx, {
     id: uniqueId("pg"),
     workspaceId: workspace.id,
     folderPath: "",
@@ -58,8 +75,8 @@ async function createEditablePage(title: string) {
     source: `# ${title}`,
   });
   return {
-    cookies: sessionCookies(authService.createSession(user.id).id),
-    page: page.page,
+    cookies: sessionCookies(session.id),
+    page: created.data.page,
     workspace,
   };
 }
@@ -145,7 +162,7 @@ describe("page source API", () => {
       ),
       url: new URL(apiUrl(`/api/pages/${page.id}/source`, workspace.id)),
     } as never);
-    const current = await pageService.getPage(page.id);
+    const current = await readPage(page.id);
     expect(current).not.toBeNull();
 
     const mismatch = await patchSource({
@@ -193,7 +210,7 @@ describe("page source API", () => {
       changed?: boolean;
       replacement_count?: number;
     };
-    const stored = await pageService.getPage(page.id);
+    const stored = await readPage(page.id);
 
     expect(patched.status).toBe(200);
     expect(patchedBody.changed).toBe(true);
@@ -227,7 +244,6 @@ describe("page source API", () => {
       ),
       url: new URL(apiUrl(`/api/pages/${page.id}/source`, workspace.id)),
     } as never);
-
     const response = await validateSource({
       cookies,
       request: new Request("https://pages.example.test/api/validate-source", {
@@ -250,30 +266,34 @@ describe("page source API", () => {
   });
 
   it("scopes bearer token source reads to the MCP session workspace", async () => {
-    const first = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "Source Bearer First",
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies: emptyCookies(),
     });
-    const second = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "Source Bearer Second",
-    });
-    const user = workspaceService.createUser({
+    const user = await users.upsert(seedCtx, {
       id: uniqueId("usr"),
       email: `source-bearer-${crypto.randomUUID()}@example.test`,
       displayName: "Source Bearer",
     });
-    workspaceService.addMember({
-      workspaceId: first.id,
-      userId: user.id,
-      role: "admin",
+    const first = await workspaces.create(seedCtx, {
+      id: uniqueId("wks"),
+      name: "Source Bearer First",
+      slug: uniqueId("slug"),
+      firstAdminUserId: user.id,
     });
-    workspaceService.addMember({
+    const second = await workspaces.create(seedCtx, {
+      id: uniqueId("wks"),
+      name: "Source Bearer Second",
+      slug: uniqueId("slug"),
+      firstAdminUserId: user.id,
+    });
+    const userSession = await auth.createSession(seedCtx, {
+      userId: user.id,
+    });
+    const { ctx: pageCtx } = await buildServiceContext({
+      cookies: sessionCookies(userSession.id),
       workspaceId: second.id,
-      userId: user.id,
-      role: "admin",
     });
-    const page = await pageService.createPage({
+    const created = await pages.create(pageCtx, {
       id: uniqueId("pg"),
       workspaceId: second.id,
       folderPath: "",
@@ -290,14 +310,16 @@ describe("page source API", () => {
 
     const response = await getSource({
       cookies: emptyCookies(),
-      params: { pageId: page.page.id },
+      params: { pageId: created.data.page.id },
       request: new Request(
-        apiUrl(`/api/pages/${page.page.id}/source`, first.id),
+        apiUrl(`/api/pages/${created.data.page.id}/source`, first.id),
         {
           headers: { authorization: `Bearer ${session.rawToken}` },
         },
       ),
-      url: new URL(apiUrl(`/api/pages/${page.page.id}/source`, first.id)),
+      url: new URL(
+        apiUrl(`/api/pages/${created.data.page.id}/source`, first.id),
+      ),
     } as never);
 
     expect(response.status).toBe(403);
@@ -326,7 +348,7 @@ describe("page source API", () => {
       updated_at?: string;
       version_id?: string;
     };
-    const stored = await pageService.getPage(page.id);
+    const stored = await readPage(page.id);
 
     expect(response.status).toBe(200);
     expect(body.updated_at).toBe(stored?.page.updatedAt);
@@ -335,7 +357,11 @@ describe("page source API", () => {
 
   it("lists versions for only the requested page", async () => {
     const { cookies, page, workspace } = await createEditablePage("History A");
-    const otherPage = await pageService.createPage({
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies,
+      workspaceId: workspace.id,
+    });
+    const otherPage = await pages.create(seedCtx, {
       id: uniqueId("pg"),
       workspaceId: workspace.id,
       folderPath: "",
@@ -359,7 +385,9 @@ describe("page source API", () => {
       true,
     );
     expect(
-      body.versions?.some((version) => version.pageId === otherPage.page.id),
+      body.versions?.some(
+        (version) => version.pageId === otherPage.data.page.id,
+      ),
     ).toBe(false);
   });
 });

@@ -1,3 +1,12 @@
+// Access — actor authentication + permission resolution + publication
+// access enforcement. Plan 011 §4 (no legacy singletons). Every helper
+// goes through the new D1-direct services in `@vegastack/pages-services`.
+//
+// All helpers are async because D1 reads are async. Callers in .astro
+// files were already inside async SSR contexts, and route handlers
+// already awaited the actor-resolver, so the conversion is a one-line
+// `await` insertion at most call sites.
+
 import {
   AppError,
   type FolderRecord,
@@ -12,14 +21,18 @@ import {
 } from "@vegastack/pages-core";
 import type { AstroCookies } from "astro";
 import {
-  auditService,
-  authService,
-  getMcpSession,
-  permissionService,
-  publicationService,
-  touchMcpSession,
-  workspaceService,
-} from "./runtime";
+  audit,
+  auth,
+  folders as foldersService,
+  mcpSessions,
+  permissions as permissionsService,
+  publications as publicationsService,
+  users as usersService,
+  workspaces as workspacesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+import { parseBearerToken } from "./csrf";
+import { getDb } from "./runtime";
 import { devAutoLoginUser } from "./dev-auth";
 
 export type RequestActor = {
@@ -37,6 +50,56 @@ export type PageAccess = {
   publication: PublicationRecord | null;
   guestNameRequired: boolean;
 };
+
+// Coerce the services-package UserRecord (displayName: string | null) to
+// the legacy core UserRecord (displayName: string) by falling back to
+// the email when null. Keeps every consumer's contract intact without
+// cascading nullability changes through ~30 files.
+type ServiceUser = Awaited<ReturnType<typeof usersService.getById>>;
+function toLegacyUser(user: NonNullable<ServiceUser>): UserRecord {
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName ?? user.email,
+    role: user.role,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
+// Throwaway service context for read-only D1 calls from access.ts.
+// Routes use buildServiceContext() for full ctx including envelope +
+// waitUntil; access.ts helpers only need actor + db.
+function readOnlyCtx(actor: RequestActor | null): ServiceContext {
+  return {
+    actor: {
+      userId: actor?.user?.id ?? "",
+      email: actor?.user?.email ?? null,
+      workspaceId: actor?.workspaceId ?? null,
+    },
+    async computeTreeVersion() {
+      return "";
+    },
+    waitUntil(promise) {
+      void promise.catch(() => undefined);
+    },
+    log(level, message, fields) {
+      const emit =
+        level === "error" || level === "warn" ? console.error : console.log;
+      emit(`[vpg-access] [${level}] ${message}`, fields ?? {});
+    },
+  };
+}
+
+async function withDb<T>(
+  actor: RequestActor | null,
+  fn: (ctx: ServiceContext) => Promise<T>,
+): Promise<T> {
+  const db = await getDb();
+  const ctx = readOnlyCtx(actor);
+  if (db) ctx.db = db;
+  return fn(ctx);
+}
 
 async function sha256(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
@@ -106,21 +169,33 @@ export function assertApiWorkspaceId(input: { url: URL; workspaceId: string }) {
   }
 }
 
-export function getRequestActor(cookies: AstroCookies): RequestActor {
-  const sessionId = cookies.get("vpg_session")?.value ?? null;
-  const session = sessionId ? authService.getSession(sessionId) : null;
-  const sessionUser = session ? workspaceService.getUser(session.userId) : null;
-  if (sessionUser) {
-    return {
-      user: sessionUser,
-      sessionId,
-      devFallback: false,
-      workspaceId: null,
-      authMode: "session",
-    };
+export async function getRequestActor(
+  cookies: AstroCookies | undefined,
+): Promise<RequestActor> {
+  const sessionId =
+    typeof cookies?.get === "function"
+      ? (cookies.get("vpg_session")?.value ?? null)
+      : null;
+  if (sessionId) {
+    const session = await withDb(null, (ctx) =>
+      auth.getSession(ctx, sessionId),
+    );
+    if (session) {
+      const sessionUser = await withDb(null, (ctx) =>
+        usersService.getById(ctx, session.userId),
+      );
+      if (sessionUser) {
+        return {
+          user: toLegacyUser(sessionUser),
+          sessionId,
+          devFallback: false,
+          workspaceId: null,
+          authMode: "session",
+        };
+      }
+    }
   }
-
-  const devUser = devAutoLoginUser();
+  const devUser = await devAutoLoginUser();
   if (devUser) {
     return {
       user: devUser,
@@ -130,7 +205,6 @@ export function getRequestActor(cookies: AstroCookies): RequestActor {
       authMode: "session",
     };
   }
-
   return {
     user: null,
     sessionId: null,
@@ -141,169 +215,271 @@ export function getRequestActor(cookies: AstroCookies): RequestActor {
 }
 
 function bearerToken(request: Request | undefined) {
-  const authHeader = request?.headers.get("authorization") ?? "";
-  return authHeader.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length).trim()
-    : "";
+  if (!request) return "";
+  // Delegate to the shared parser so the CSRF bypass and the auth
+  // resolver share one definition of "this request carries a Bearer
+  // token." Returns "" when no Bearer is present so legacy callers that
+  // pattern-match on falsy strings keep working.
+  return parseBearerToken(request) ?? "";
 }
 
 export async function getApiRequestActor(
-  cookies: AstroCookies,
+  cookies: AstroCookies | undefined,
   request?: Request,
 ): Promise<RequestActor> {
   const bearer = bearerToken(request);
   if (bearer) {
-    const session = await getMcpSession(bearer);
-    const user = session ? workspaceService.getUser(session.userId) : null;
-    if (session && user) {
-      const userAgent = request?.headers.get("user-agent") ?? null;
-      const origin = request?.headers.get("origin") ?? null;
-      void touchMcpSession({
-        sessionId: session.id,
-        userAgent,
-        origin,
-      }).catch(() => undefined);
-      return {
-        user,
-        sessionId: session.id,
-        devFallback: false,
-        workspaceId: session.workspaceId,
-        authMode: "mcp_session",
-      };
+    // Stored session id is `mcp_${sha256(rawToken)}`; the bearer header
+    // carries the raw token, so hash it before the D1 lookup. Legacy
+    // pre-hash session ids (`ses_…`) are still looked up by the raw
+    // value for backwards-compatibility.
+    const bearerSessionId = `mcp_${await sha256(bearer)}`;
+    let session = await withDb(null, (ctx) =>
+      mcpSessions.findByBearerToken(ctx, bearerSessionId),
+    );
+    if (!session) {
+      session = await withDb(null, (ctx) =>
+        mcpSessions.findByBearerToken(ctx, bearer),
+      );
+    }
+    if (session) {
+      const user = await withDb(null, (ctx) =>
+        usersService.getById(ctx, session.userId ?? ""),
+      );
+      if (user) {
+        const origin = request?.headers.get("origin") ?? undefined;
+        if (session.agentSessionId) {
+          void withDb(null, (ctx) =>
+            mcpSessions.touchAgentSession(ctx, {
+              sessionId: session.agentSessionId!,
+              origin,
+            }),
+          ).catch(() => undefined);
+        }
+        return {
+          user: toLegacyUser(user),
+          sessionId: session.id,
+          devFallback: false,
+          workspaceId: session.workspaceId,
+          authMode: "mcp_session",
+        };
+      }
     }
     throw new AppError("AUTH_REQUIRED", "Invalid bearer token.", 401);
   }
   return getRequestActor(cookies);
 }
 
-export function folderAncestorIdsForPage(page: PageRecord): string[] {
+// Folder ancestor record list. Used by permissions resolution: each
+// folder in the chain may carry its own grant level.
+async function folderAncestorRecordsForPage(
+  page: PageRecord,
+): Promise<FolderRecord[]> {
   if (!page.folderPath) return [];
-  const folder = workspaceService
-    .listFolders(page.workspaceId)
-    .find((candidate) => candidate.path === page.folderPath);
-  return folder
-    ? workspaceService.folderAncestors(folder.id).map((ancestor) => ancestor.id)
-    : [];
+  const records = await withDb(null, async (ctx) => {
+    const allFolders = await foldersService.listAll(ctx, {
+      workspaceId: page.workspaceId,
+    });
+    // Folders are stored with a leading "/"; page.folderPath strips it.
+    // Normalize both sides to the leading-slash form before mapping.
+    const normalized = page.folderPath.startsWith("/")
+      ? page.folderPath
+      : `/${page.folderPath}`;
+    const byPath = new Map(allFolders.map((folder) => [folder.path, folder]));
+    const folder = byPath.get(normalized);
+    if (!folder) return [];
+    const ids = await foldersService.ancestorPath(ctx, folder.id);
+    const byId = new Map(allFolders.map((folder) => [folder.id, folder]));
+    return ids
+      .map((id) => byId.get(id))
+      .filter((record): record is FolderRecord => Boolean(record));
+  });
+  return records;
 }
 
-export function folderAncestorIdsForFolder(folder: FolderRecord): string[] {
-  return workspaceService
-    .folderAncestors(folder.id)
-    .map((ancestor) => ancestor.id);
+async function folderAncestorRecordsForFolder(
+  folder: FolderRecord,
+): Promise<FolderRecord[]> {
+  return withDb(null, async (ctx) => {
+    const ids = await foldersService.ancestorPath(ctx, folder.id);
+    const records: FolderRecord[] = [];
+    for (const id of ids) {
+      const record = await foldersService.get(ctx, id);
+      if (record) records.push(record);
+    }
+    return records;
+  });
 }
 
-export function resolveActorPermission(input: {
+// Back-compat wrappers — many existing callers consume the id-only
+// shape from the legacy folder-ancestors API.
+export async function folderAncestorIdsForPage(
+  page: PageRecord,
+): Promise<string[]> {
+  const records = await folderAncestorRecordsForPage(page);
+  return records.map((ancestor) => ancestor.id);
+}
+
+export async function folderAncestorIdsForFolder(
+  folder: FolderRecord,
+): Promise<string[]> {
+  const records = await folderAncestorRecordsForFolder(folder);
+  return records.map((ancestor) => ancestor.id);
+}
+
+export async function resolveActorPermission(input: {
   actor: RequestActor;
   page: PageRecord;
-}) {
+}): Promise<PermissionLevel> {
   if (
     input.actor.workspaceId &&
     input.actor.workspaceId !== input.page.workspaceId
   ) {
     return "none";
   }
-  const member = input.actor.user
-    ? workspaceService.getMember(input.page.workspaceId, input.actor.user.id)
-    : null;
-  return permissionService.resolve({
-    user: input.actor.user,
-    member,
-    workspaceId: input.page.workspaceId,
-    folderAncestorIds: folderAncestorIdsForPage(input.page),
-    pageId: input.page.id,
+  return withDb(input.actor, async (ctx) => {
+    const member = input.actor.user
+      ? await workspacesService.getMember(ctx, {
+          workspaceId: input.page.workspaceId,
+          userId: input.actor.user.id,
+        })
+      : null;
+    const ancestors = await folderAncestorRecordsForPage(input.page);
+    return permissionsService.resolve(ctx, {
+      workspaceId: input.page.workspaceId,
+      userId: input.actor.user?.id ?? "",
+      scope: "page",
+      targetId: input.page.id,
+      memberRole: member?.role ?? null,
+      instanceRole: input.actor.user?.role,
+      folderPath: ancestors.map((ancestor) => ancestor.id),
+    });
   });
 }
 
-export function resolveFolderActorPermission(input: {
+export async function resolveFolderActorPermission(input: {
   actor: RequestActor;
   folder: FolderRecord;
-}) {
+}): Promise<PermissionLevel> {
   if (
     input.actor.workspaceId &&
     input.actor.workspaceId !== input.folder.workspaceId
   ) {
     return "none";
   }
-  const member = input.actor.user
-    ? workspaceService.getMember(input.folder.workspaceId, input.actor.user.id)
-    : null;
-  return permissionService.resolve({
-    user: input.actor.user,
-    member,
-    workspaceId: input.folder.workspaceId,
-    folderAncestorIds: folderAncestorIdsForFolder(input.folder),
+  return withDb(input.actor, async (ctx) => {
+    const member = input.actor.user
+      ? await workspacesService.getMember(ctx, {
+          workspaceId: input.folder.workspaceId,
+          userId: input.actor.user.id,
+        })
+      : null;
+    const ancestors = await folderAncestorRecordsForFolder(input.folder);
+    return permissionsService.resolve(ctx, {
+      workspaceId: input.folder.workspaceId,
+      userId: input.actor.user?.id ?? "",
+      scope: "folder",
+      targetId: input.folder.id,
+      memberRole: member?.role ?? null,
+      instanceRole: input.actor.user?.role,
+      folderPath: ancestors
+        .filter((ancestor) => ancestor.id !== input.folder.id)
+        .map((ancestor) => ancestor.id),
+    });
   });
 }
 
-export function resolveWorkspaceActorPermission(
+export async function resolveWorkspaceActorPermission(
   actor: RequestActor,
   workspaceId: string,
-): PermissionLevel {
+): Promise<PermissionLevel> {
   if (actor.workspaceId && actor.workspaceId !== workspaceId) return "none";
-  const member = actor.user
-    ? workspaceService.getMember(workspaceId, actor.user.id)
-    : null;
-  return permissionService.resolve({
-    user: actor.user,
-    member,
-    workspaceId,
+  return withDb(actor, async (ctx) => {
+    const member = actor.user
+      ? await workspacesService.getMember(ctx, {
+          workspaceId,
+          userId: actor.user.id,
+        })
+      : null;
+    return permissionsService.resolve(ctx, {
+      workspaceId,
+      userId: actor.user?.id ?? "",
+      scope: "workspace",
+      targetId: workspaceId,
+      memberRole: member?.role ?? null,
+      instanceRole: actor.user?.role,
+    });
   });
 }
 
-export function assertWorkspaceActorPermission(input: {
+export async function assertWorkspaceActorPermission(input: {
   actor: RequestActor;
   workspaceId: string;
   required: PermissionLevel;
-}) {
-  permissionService.assert({
-    actual: resolveWorkspaceActorPermission(input.actor, input.workspaceId),
-    required: input.required,
+}): Promise<void> {
+  const actual = await resolveWorkspaceActorPermission(
+    input.actor,
+    input.workspaceId,
+  );
+  permissionsService.assertLevel({ actual, required: input.required });
+}
+
+async function folderForPage(page: PageRecord): Promise<FolderRecord | null> {
+  if (!page.folderPath) return null;
+  return withDb(null, async (ctx) => {
+    const allFolders = await foldersService.listAll(ctx, {
+      workspaceId: page.workspaceId,
+    });
+    return (
+      allFolders.find((candidate) => candidate.path === page.folderPath) ?? null
+    );
   });
 }
 
-function folderForPage(page: PageRecord): FolderRecord | null {
-  if (!page.folderPath) return null;
-  return (
-    workspaceService
-      .listFolders(page.workspaceId)
-      .find((candidate) => candidate.path === page.folderPath) ?? null
-  );
-}
-
-export function publicationAncestorsForFolder(
+async function publicationAncestorsForFolder(
   folder: FolderRecord,
-): FolderRecord[] {
-  return workspaceService.folderAncestors(folder.id).reverse();
+): Promise<FolderRecord[]> {
+  return (await folderAncestorRecordsForFolder(folder)).reverse();
 }
 
-export function resolvePublicationForPage(
+export async function resolvePublicationForPage(
   page: PageRecord,
-): PublicationRecord | null {
-  const direct = publicationService.findForResource("page", page.id);
-  if (direct) return direct;
-  const folder = folderForPage(page);
-  if (!folder) return null;
-  for (const candidate of publicationAncestorsForFolder(folder)) {
-    const publication = publicationService.findForResource(
-      "folder",
-      candidate.id,
-    );
-    if (publication) return publication;
-  }
-  return null;
+): Promise<PublicationRecord | null> {
+  return withDb(null, async (ctx) => {
+    const direct = await publicationsService.findForResource(ctx, {
+      workspaceId: page.workspaceId,
+      resourceType: "page",
+      resourceId: page.id,
+    });
+    if (direct) return direct;
+    const folder = await folderForPage(page);
+    if (!folder) return null;
+    for (const candidate of await publicationAncestorsForFolder(folder)) {
+      const publication = await publicationsService.findForResource(ctx, {
+        workspaceId: folder.workspaceId,
+        resourceType: "folder",
+        resourceId: candidate.id,
+      });
+      if (publication) return publication;
+    }
+    return null;
+  });
 }
 
-export function resolvePublicationForFolder(
+async function resolvePublicationForFolder(
   folder: FolderRecord,
-): PublicationRecord | null {
-  for (const candidate of publicationAncestorsForFolder(folder)) {
-    const publication = publicationService.findForResource(
-      "folder",
-      candidate.id,
-    );
-    if (publication) return publication;
-  }
-  return null;
+): Promise<PublicationRecord | null> {
+  return withDb(null, async (ctx) => {
+    for (const candidate of await publicationAncestorsForFolder(folder)) {
+      const publication = await publicationsService.findForResource(ctx, {
+        workspaceId: folder.workspaceId,
+        resourceType: "folder",
+        resourceId: candidate.id,
+      });
+      if (publication) return publication;
+    }
+    return null;
+  });
 }
 
 async function verifyPublicationAccess(input: {
@@ -333,11 +509,25 @@ async function verifyPublicationAccess(input: {
       },
     );
   }
-  return publicationService.verifyPassword(
-    input.publication.id,
-    input.password,
-    { passwordVerified },
-  );
+  if (passwordVerified) return input.publication;
+  if (input.password) {
+    const ok = await withDb(null, (ctx) =>
+      publicationsService.verifyPassword(ctx, {
+        publicationId: input.publication!.id,
+        password: input.password!,
+      }),
+    );
+    if (!ok) {
+      throw new AppError(
+        "PUBLICATION_PASSWORD_INVALID",
+        "Password is incorrect.",
+        401,
+        { publication_id: input.publication.id },
+      );
+    }
+    return input.publication;
+  }
+  return input.publication;
 }
 
 export async function resolvePageAccess(input: {
@@ -352,7 +542,10 @@ export async function resolvePageAccess(input: {
   assertApiWorkspaceId({ url: input.url, workspaceId: input.page.workspaceId });
   const actor = await getApiRequestActor(input.cookies, input.request);
 
-  const memberPermission = resolveActorPermission({ actor, page: input.page });
+  const memberPermission = await resolveActorPermission({
+    actor,
+    page: input.page,
+  });
   if (hasPermission(memberPermission, input.required)) {
     return {
       actor,
@@ -366,13 +559,16 @@ export async function resolvePageAccess(input: {
   const publication = await verifyPublicationAccess({
     cookies: input.cookies,
     url: input.url,
-    publication: resolvePublicationForPage(input.page),
+    publication: await resolvePublicationForPage(input.page),
     password: input.password,
   });
   const permission = publication
     ? permissionForPublication(publication.permission)
     : memberPermission;
-  permissionService.assert({ actual: permission, required: input.required });
+  permissionsService.assertLevel({
+    actual: permission,
+    required: input.required,
+  });
 
   const guestNameRequired =
     !actor.user && Boolean(publication) && hasPermission(permission, "comment");
@@ -410,7 +606,7 @@ export async function resolveFolderAccess(input: {
     workspaceId: input.folder.workspaceId,
   });
   const actor = await getApiRequestActor(input.cookies, input.request);
-  const memberPermission = resolveFolderActorPermission({
+  const memberPermission = await resolveFolderActorPermission({
     actor,
     folder: input.folder,
   });
@@ -426,13 +622,16 @@ export async function resolveFolderAccess(input: {
   const publication = await verifyPublicationAccess({
     cookies: input.cookies,
     url: input.url,
-    publication: resolvePublicationForFolder(input.folder),
+    publication: await resolvePublicationForFolder(input.folder),
     password: input.password,
   });
   const permission = publication
     ? permissionForPublication(publication.permission)
     : memberPermission;
-  permissionService.assert({ actual: permission, required: input.required });
+  permissionsService.assertLevel({
+    actual: permission,
+    required: input.required,
+  });
   return {
     actor,
     permission,
@@ -444,10 +643,6 @@ export async function resolveFolderAccess(input: {
 
 // ---------------------------------------------------------------------------
 // Resource-access admin helpers (per-resource permission grants).
-//
-// Used by /api/folders/[folderId]/access and /api/pages/[pageId]/access
-// to manage member-level grants on folders and pages. Workspace-level
-// admin-required guard plus a small grant CRUD surface.
 
 type ResourceAccessScope = "folder" | "page";
 type AccessResource =
@@ -466,7 +661,10 @@ function resourceTargetId(resource: AccessResource) {
   return resource.scope === "folder" ? resource.folder.id : resource.page.id;
 }
 
-function resourcePermission(actor: RequestActor, resource: AccessResource) {
+async function resourcePermission(
+  actor: RequestActor,
+  resource: AccessResource,
+) {
   return resource.scope === "folder"
     ? resolveFolderActorPermission({ actor, folder: resource.folder })
     : resolveActorPermission({ actor, page: resource.page });
@@ -486,19 +684,34 @@ function parseMemberAccessLevel(value: unknown): PermissionLevel {
   );
 }
 
-function assertMemberSubject(workspaceId: string, subjectId: string) {
-  const subject = workspaceService.getUser(subjectId);
-  if (!subject || !workspaceService.getMember(workspaceId, subject.id)) {
+async function assertMemberSubject(workspaceId: string, subjectId: string) {
+  const subject = await withDb(null, (ctx) =>
+    usersService.getById(ctx, subjectId),
+  );
+  if (!subject) {
     throw new AppError(
       "VALIDATION_ERROR",
       "Choose a workspace member for resource access.",
       400,
     );
   }
-  return subject;
+  const member = await withDb(null, (ctx) =>
+    workspacesService.getMember(ctx, { workspaceId, userId: subject.id }),
+  );
+  if (!member) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Choose a workspace member for resource access.",
+      400,
+    );
+  }
+  return toLegacyUser(subject);
 }
 
-function serializeGrant(grant: PermissionRecord) {
+async function serializeGrant(grant: PermissionRecord) {
+  const user = await withDb(null, (ctx) =>
+    usersService.getById(ctx, grant.subjectId),
+  );
   return {
     id: grant.id,
     subject_id: grant.subjectId,
@@ -507,7 +720,7 @@ function serializeGrant(grant: PermissionRecord) {
     level: grant.level,
     created_at: grant.createdAt,
     updated_at: grant.updatedAt,
-    user: workspaceService.getUser(grant.subjectId),
+    user: user ? toLegacyUser(user) : null,
   };
 }
 
@@ -521,26 +734,45 @@ export async function assertResourceAccessAdmin(input: {
     workspaceId: resourceWorkspaceId(input.resource),
   });
   const actor = await getApiRequestActor(input.cookies, input.request);
-  const actual = resourcePermission(actor, input.resource);
-  permissionService.assert({ actual, required: "admin" });
+  const actual = await resourcePermission(actor, input.resource);
+  permissionsService.assertLevel({ actual, required: "admin" });
   return { actor, permission: actual };
 }
 
-export function listResourceAccess(resource: AccessResource) {
+export async function listResourceAccess(
+  resource: AccessResource,
+  actor: RequestActor | null = null,
+) {
   const workspaceId = resourceWorkspaceId(resource);
   const scope: ResourceAccessScope = resource.scope;
   const targetId = resourceTargetId(resource);
-  return {
-    members: workspaceService.listMembers(workspaceId).map((member) => ({
-      id: member.id,
-      user_id: member.userId,
-      role: member.role,
-      user: workspaceService.getUser(member.userId),
-    })),
-    grants: permissionService
-      .listGrants({ workspaceId, scope, targetId })
-      .map(serializeGrant),
-  };
+  return withDb(actor, async (ctx) => {
+    const members = await workspacesService.listMembers(ctx, { workspaceId });
+    const membersWithUser = await Promise.all(
+      members.map(async (member) => {
+        const user = await usersService.getById(ctx, member.userId);
+        return {
+          id: member.id,
+          user_id: member.userId,
+          role: member.role,
+          user: user ? toLegacyUser(user) : null,
+        };
+      }),
+    );
+    const grantsAll = await permissionsService.listGrants(ctx, {
+      workspaceId,
+      targetId,
+    });
+    // listGrants doesn't filter by scope — do it in-process. Per-target
+    // grant counts are small (single-digit typically), so the filter is
+    // cheap.
+    const grants = grantsAll.filter((grant) => grant.scope === scope);
+    const serialized = await Promise.all(grants.map(serializeGrant));
+    return {
+      members: membersWithUser,
+      grants: serialized,
+    };
+  });
 }
 
 export async function setResourceAccess(input: {
@@ -552,7 +784,7 @@ export async function setResourceAccess(input: {
   const { actor } = await assertResourceAccessAdmin(input);
   const body = input.body as Record<string, unknown>;
   const workspaceId = resourceWorkspaceId(input.resource);
-  const subject = assertMemberSubject(
+  const subject = await assertMemberSubject(
     workspaceId,
     String(body.subject_id ?? ""),
   );
@@ -566,21 +798,25 @@ export async function setResourceAccess(input: {
     );
   }
 
-  const grant = permissionService.setGrant({
-    workspaceId,
-    subjectId: subject.id,
-    scope: input.resource.scope,
-    targetId: resourceTargetId(input.resource),
-    level,
-  });
-  auditService.record({
-    workspaceId,
-    actorUserId: actor.user?.id ?? null,
-    action: "permission.resource_access_set",
-    targetType: input.resource.scope,
-    targetId: grant.targetId,
-    metadata: { subject_id: grant.subjectId, level: grant.level },
-  });
+  const grant = await withDb(actor, (ctx) =>
+    permissionsService.setGrant(ctx, {
+      workspaceId,
+      subjectId: subject.id,
+      scope: input.resource.scope,
+      targetId: resourceTargetId(input.resource),
+      level,
+    }),
+  );
+  await withDb(actor, (ctx) =>
+    audit.record(ctx, {
+      workspaceId,
+      actorUserId: actor.user?.id ?? null,
+      action: "permission.resource_access_set",
+      targetType: input.resource.scope,
+      targetId: grant.targetId,
+      metadata: { subject_id: grant.subjectId, level: grant.level },
+    }),
+  );
   return serializeGrant(grant);
 }
 
@@ -594,9 +830,14 @@ export async function deleteResourceAccess(input: {
   const workspaceId = resourceWorkspaceId(input.resource);
   const scope = input.resource.scope;
   const targetId = resourceTargetId(input.resource);
-  const grant = permissionService
-    .listGrants({ workspaceId, scope, targetId })
-    .find((candidate) => candidate.id === input.grantId);
+  const grantsAll = await withDb(actor, (ctx) =>
+    permissionsService.listGrants(ctx, {
+      workspaceId,
+      targetId,
+    }),
+  );
+  const grants = grantsAll.filter((candidate) => candidate.scope === scope);
+  const grant = grants.find((candidate) => candidate.id === input.grantId);
   if (!grant) {
     throw new AppError(
       "PERMISSION_DENIED",
@@ -605,14 +846,23 @@ export async function deleteResourceAccess(input: {
     );
   }
 
-  const deleted = permissionService.deleteGrant(grant.id);
-  auditService.record({
-    workspaceId,
-    actorUserId: actor.user?.id ?? null,
-    action: "permission.resource_access_deleted",
-    targetType: deleted.scope,
-    targetId: deleted.targetId,
-    metadata: { subject_id: deleted.subjectId, level: deleted.level },
-  });
-  return serializeGrant(deleted);
+  await withDb(actor, (ctx) =>
+    permissionsService.deleteGrant(ctx, {
+      workspaceId,
+      subjectId: grant.subjectId,
+      scope: grant.scope,
+      targetId: grant.targetId,
+    }),
+  );
+  await withDb(actor, (ctx) =>
+    audit.record(ctx, {
+      workspaceId,
+      actorUserId: actor.user?.id ?? null,
+      action: "permission.resource_access_deleted",
+      targetType: scope,
+      targetId,
+      metadata: { subject_id: grant.subjectId, grant_id: grant.id },
+    }),
+  );
+  return { id: grant.id };
 }

@@ -5,56 +5,90 @@ description: Use VegaStack Pages through its Remote MCP server or standalone vpg
 
 # VegaStack Pages
 
-Use the MCP server when it is connected in the current agent harness. Use the `vpg` CLI when MCP tools are unavailable or the task is running in a shell/CI context. Do not mix MCP and CLI calls in the same workflow unless the user asks; both surfaces mutate the same pages and comments.
+Create, edit, comment on, publish, and template Markdown/MDX/HTML pages in a VegaStack Pages workspace. Two surfaces hit the same backend: the Remote MCP server (19 tools) and the `vpg` CLI. Pick one per workflow.
 
-## Surface Selection
+## Your first action
 
-1. If MCP tools named `create_page`, `prepare_page_edit`, `patch_page`, or `update_thread` are available, use MCP.
-2. If no MCP tools are available, use the standalone `vpg` CLI with `--base-url`, `--workspace`, and either `--token` or stored login. CLI workflows do not require MCP.
-3. If both are available, prefer MCP for agent review workflows and the CLI for local files, scripts, CI, exports, or installation tasks.
-4. Never store tokens in this skill or in generated documents. Use the host agent's secret storage, `VPG_TOKEN`, or `vpg login --token`.
+1. Discover identity and workspaces:
+   - MCP: `fetch { "workspace_id": "<any>", "resource_id": "me", "include": ["workspaces"] }`. (`whoami` alone returns the user but no workspace list unless you pass `include: ["workspaces"]`.)
+   - CLI: `vpg --agent whoami`
+2. Pick a `workspace_id` (e.g. `wks_abc123`) and reuse it on every subsequent call. MCP tokens are workspace-scoped; CLI persists the active workspace via `vpg use <id>`.
+3. To explore content, `fetch` with only `workspace_id` returns the tree; or `vpg --agent workspaces tree`.
 
-## Review Loop
+## Surface selection
 
-When creating a document for human review:
+- Prefer **MCP** when the host harness exposes `fetch`, `update_page`, `update_thread`. It is one round-trip per call and the schemas are loaded.
+- Prefer the **CLI** (`vpg --agent ...`) for shells, CI, scripts, local files, and skill installation. The CLI accepts an MCP bearer token via `--token` or `VPG_TOKEN`; the same workspace token works on both surfaces.
+- Do not mix surfaces in the same mutation cycle unless coordinating an explicit migration.
 
-1. Create or update the page.
-2. Publish the page with comment permission when the reviewer is not already in the workspace.
-3. Tell the user the page public URL and that you are waiting for review for up to 10 minutes.
-4. Wait for review comments/events.
-5. When comments arrive, immediately inspect them, patch source safely, reply to each addressed thread, and resolve only threads that are actually handled.
-6. If the wait times out, report the link and the current review state.
+## Tool surface at a glance
 
-If the host agent receives a new user message while waiting, treat that as an interruption from the harness: stop waiting, answer the user, and resume the review loop only if still relevant.
+MCP (19 tools):
 
-## Required Workflow
-
-For edits, always fetch the live source and concurrency tokens first.
-
-MCP:
-
-```text
-prepare_page_edit -> validate_page_source -> patch_page or update_page -> update_thread
+```
+Reads:        fetch · search · wait_for_review · whoami
+Pages:        create_page · update_page · restore_page_version · move_page
+Comments:     create_comment · update_thread · delete_thread
+Publications: apply_publication · delete_publication
+Templates:    create_template · update_template · render_template
+Other:        upload_attachment · invite_workspace_member · validate_page_source
 ```
 
-CLI:
+CLI (noun-first):
+
+```
+Top-level: login / logout / whoami / use / search / events / validate / deploy / doctor / update / completions
+Nouns:     pages / comments / publish / templates / workspaces / attachments / skills
+```
+
+Always pass `--agent` from an agent harness. See [[references/cli.md]] for the JSON envelope and exit codes.
+
+## The mandatory edit cycle
+
+Page edits are optimistic-concurrency. Stale tokens fail with `VPG_CONFLICT` (HTTP 409, CLI exit 6).
+
+```
+fetch (include: ["source", "edit_tokens"])
+   -> validate_page_source           (catch Mermaid / MDX traps before saving)
+   -> update_page (find/replace preferred; full source / checkpoint as needed)
+   -> on conflict: refetch edit_tokens, recompute, retry
+```
+
+CLI equivalent:
 
 ```sh
-vpg pages prepare-edit <page>
-vpg pages validate --page <page>
-vpg pages patch <page> --base-version-id <version> --base-content-hash <hash> --find "old" --replace "new"
-vpg complete-thread <thread> --body "Done." --resolve --agent-name "<agent>"
+vpg --agent pages get pg_abc123 --include source,edit_tokens
+vpg --agent validate --page pg_abc123
+vpg --agent pages update pg_abc123 \
+  --base-version-id ver_42 --base-content-hash sha256:f00 \
+  --find "old wording" --replace "new wording" --expected-replacements 1
 ```
 
-Prefer `patch_page` / `vpg pages patch` for narrow edits. Use full source updates only when rewriting a whole document. Treat stale version or content hash errors as a signal to refetch and reapply.
+## Review loop
+
+1. Create or update the page.
+2. If the reviewer is outside the workspace, `apply_publication` with `permission: "comment"`.
+3. Tell the user the public URL; announce a wait window (up to 10 min).
+4. `wait_for_review` (MCP, `timeout_ms` max 600000) or `vpg pages wait <page> --until first-response --timeout 600` (CLI, NDJSON under `--agent`).
+5. When events arrive: `fetch include: ["comments","source","edit_tokens"]`, patch with `update_page`, reply via `update_thread` (set `agent_name`, `agent_model`, `agent_session_id` for attribution), then `status: "resolved"`.
+6. If the host harness delivers a new user message mid-wait, abandon the wait, answer the user, and only resume if still relevant.
 
 ## References
 
-Read only the file needed for the task:
+Load only the file you need:
 
-- `references/mcp.md` for MCP tools, resources, prompts, and wait behavior.
-- `references/cli.md` for CLI commands, auth, installation, and shell examples.
-- `references/comments.md` for Markdown/MDX text anchors and HTML pin comments.
-- `references/workflows.md` for end-to-end review loops.
-- `references/templates.md` for template builder and frontmatter field structure.
-- `references/security.md` for permissions, token handling, and conflict rules.
+- [[references/mcp.md]] — 19 MCP tools, schemas, conflict recovery.
+- [[references/cli.md]] — noun-first CLI, `--agent` envelope, exit codes.
+- [[references/comments.md]] — text vs point anchors, `coerceCommentAnchor` rules.
+- [[references/workflows.md]] — end-to-end review, conflict recovery, interruptions.
+- [[references/templates.md]] — builder shape, frontmatter field types.
+- [[references/security.md]] — token scope, concurrency, destructive ops, public-publication permission model.
+
+## Hard rules
+
+- Never write tokens into pages, templates, logs, or generated files. Use `VPG_TOKEN`, `vpg login`, or the host secret store.
+- Never call `update_page` without a fresh `base_version_id` from `fetch include: ["edit_tokens"]`.
+- Never set both `source` and `find` on `update_page` — the server rejects it (`VPG_VALIDATION`).
+- Never pass `publication_id` together with a `resource_id` that doesn't own it — the server rejects it.
+- Never busy-poll `fetch` for comments. Use `wait_for_review`.
+- Destructive CLI ops (`pages restore`, `publish revoke`, `comments delete`) under `--agent` require `--yes` or exit 2.

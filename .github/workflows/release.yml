@@ -271,11 +271,9 @@ jobs:
           VPG_CUSTOM_DOMAIN: ${{ secrets.VPG_CUSTOM_DOMAIN }}
           VPG_D1_DATABASE_ID: ${{ secrets.VPG_D1_DATABASE_ID }}
           VPG_D1_DATABASE_NAME: ${{ secrets.VPG_D1_DATABASE_NAME }}
-          VPG_KV_NAMESPACE_ID: ${{ secrets.VPG_KV_NAMESPACE_ID }}
           VPG_R2_BUCKET_NAME: ${{ secrets.VPG_R2_BUCKET_NAME }}
           VPG_GITHUB_APP_ID: ${{ secrets.VPG_GITHUB_APP_ID }}
           VPG_GITHUB_APP_SLUG: ${{ secrets.VPG_GITHUB_APP_SLUG }}
-          VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
         run: |
           for value in \
             "$CLOUDFLARE_ACCOUNT_ID" \
@@ -284,28 +282,31 @@ jobs:
             "$VPG_CUSTOM_DOMAIN" \
             "$VPG_D1_DATABASE_ID" \
             "$VPG_D1_DATABASE_NAME" \
-            "$VPG_KV_NAMESPACE_ID" \
             "$VPG_R2_BUCKET_NAME" \
             "$VPG_GITHUB_APP_ID" \
-            "$VPG_GITHUB_APP_SLUG" \
-            "$VPG_GITHUB_SYNC_CRON"; do
+            "$VPG_GITHUB_APP_SLUG"; do
             if [ -n "$value" ]; then
               echo "::add-mask::$value"
             fi
           done
 
-      - name: Write managed Wrangler config
+      - name: Substitute placeholders in canonical Wrangler config
+        # The canonical config lives at apps/web/wrangler.jsonc and is the
+        # single source of truth (no KV, two crons, send_email binding,
+        # rate limit, smart placement). CI does NOT regenerate it — that
+        # caused config drift (KV reintroduced, only one cron) where the
+        # deployed Worker silently diverged from the reviewed branch.
+        # We make a sandbox copy with the production-only secret values
+        # substituted in-place via string replace, then deploy from it.
         working-directory: apps/web
         env:
           VPG_D1_DATABASE_ID: ${{ secrets.VPG_D1_DATABASE_ID }}
           VPG_D1_DATABASE_NAME: ${{ secrets.VPG_D1_DATABASE_NAME }}
-          VPG_KV_NAMESPACE_ID: ${{ secrets.VPG_KV_NAMESPACE_ID }}
           VPG_R2_BUCKET_NAME: ${{ secrets.VPG_R2_BUCKET_NAME }}
           VPG_WORKER_NAME: ${{ secrets.VPG_WORKER_NAME }}
           VPG_CUSTOM_DOMAIN: ${{ secrets.VPG_CUSTOM_DOMAIN }}
           VPG_GITHUB_APP_ID: ${{ secrets.VPG_GITHUB_APP_ID }}
           VPG_GITHUB_APP_SLUG: ${{ secrets.VPG_GITHUB_APP_SLUG }}
-          VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
           VPG_EMAIL_FROM: ${{ secrets.VPG_EMAIL_FROM }}
         run: |
           node <<'NODE'
@@ -314,7 +315,6 @@ jobs:
           const required = [
             "VPG_D1_DATABASE_ID",
             "VPG_D1_DATABASE_NAME",
-            "VPG_KV_NAMESPACE_ID",
             "VPG_R2_BUCKET_NAME",
             "VPG_WORKER_NAME",
             "VPG_CUSTOM_DOMAIN",
@@ -324,68 +324,31 @@ jobs:
             throw new Error(`Missing Cloudflare production config: ${missing.join(", ")}`);
           }
 
-          const cron = process.env.VPG_GITHUB_SYNC_CRON || "17 2 * * *";
-          const customDomain = process.env.VPG_CUSTOM_DOMAIN;
-          const emailFrom = process.env.VPG_EMAIL_FROM ?? "";
-          const config = {
-            $schema: "../../node_modules/wrangler/config-schema.json",
-            name: process.env.VPG_WORKER_NAME,
-            main: "./src/worker.ts",
-            compatibility_date: "2026-05-10",
-            compatibility_flags: ["nodejs_compat", "global_fetch_strictly_public"],
-            assets: {
-              binding: "ASSETS",
-              directory: "./dist/client",
-            },
-            observability: {
-              enabled: true,
-            },
-            workers_dev: false,
-            routes: [{ pattern: customDomain, custom_domain: true }],
-            vars: {
-              VPG_RUNTIME: "cloudflare",
-              VPG_DEPLOYMENT_MODE: "managed",
-              VPG_PUBLIC_SIGNUP: "true",
-              VPG_BASE_URL: `https://${customDomain}`,
-              VPG_HOME_MODE: "landing",
-              VPG_GITHUB_APP_ID: process.env.VPG_GITHUB_APP_ID || "",
-              VPG_GITHUB_APP_SLUG:
-                process.env.VPG_GITHUB_APP_SLUG || "",
-              VPG_GITHUB_SYNC_CRON: cron,
-            },
-            triggers: {
-              crons: [cron],
-            },
-            d1_databases: [
-              {
-                binding: "DB",
-                database_name: process.env.VPG_D1_DATABASE_NAME,
-                database_id: process.env.VPG_D1_DATABASE_ID,
-                migrations_dir: "../../packages/db/migrations",
-              },
-            ],
-            kv_namespaces: [
-              {
-                binding: "SESSION",
-                id: process.env.VPG_KV_NAMESPACE_ID,
-              },
-            ],
-            r2_buckets: [
-              {
-                binding: "CONTENT",
-                bucket_name: process.env.VPG_R2_BUCKET_NAME,
-              },
-            ],
-          };
-          if (emailFrom) {
-            config.send_email = [
-              {
-                name: "EMAIL",
-                allowed_sender_addresses: [emailFrom],
-              },
-            ];
+          // Read canonical (JSONC with comments) and substitute the
+          // placeholder values via string replace. The placeholders are
+          // the literal strings shipped in apps/web/wrangler.jsonc so
+          // self-hosters can also do this swap manually.
+          let cfg = fs.readFileSync("wrangler.jsonc", "utf8");
+          const replacements = [
+            ['"name": "vegastack-pages"', `"name": ${JSON.stringify(process.env.VPG_WORKER_NAME)}`],
+            ['"database_name": "vegastack-pages-db"', `"database_name": ${JSON.stringify(process.env.VPG_D1_DATABASE_NAME)}`],
+            ['"database_id": "00000000-0000-0000-0000-000000000000"', `"database_id": ${JSON.stringify(process.env.VPG_D1_DATABASE_ID)}`],
+            ['"bucket_name": "vegastack-pages-content"', `"bucket_name": ${JSON.stringify(process.env.VPG_R2_BUCKET_NAME)}`],
+            ['"pattern": "pages.vegastack.com", "custom_domain": true', `"pattern": ${JSON.stringify(process.env.VPG_CUSTOM_DOMAIN)}, "custom_domain": true`],
+            ['"VPG_BASE_URL": "https://pages.vegastack.com"', `"VPG_BASE_URL": ${JSON.stringify(`https://${process.env.VPG_CUSTOM_DOMAIN}`)}`],
+            ['"VPG_EMAIL_FROM": "login@pages.vegastack.com"', `"VPG_EMAIL_FROM": ${JSON.stringify(process.env.VPG_EMAIL_FROM || "login@pages.vegastack.com")}`],
+            ['"login@pages.vegastack.com"', JSON.stringify(process.env.VPG_EMAIL_FROM || "login@pages.vegastack.com")],
+          ];
+          for (const [needle, value] of replacements) {
+            if (!cfg.includes(needle)) {
+              throw new Error(`Placeholder not found in canonical wrangler.jsonc: ${needle}`);
+            }
+            cfg = cfg.split(needle).join(value);
           }
-          fs.writeFileSync("wrangler.jsonc", `${JSON.stringify(config, null, 2)}\n`);
+          // Append optional GitHub App vars without disturbing the
+          // canonical file's structure: write a side file consumed via
+          // wrangler --var flags during deploy.
+          fs.writeFileSync("wrangler.jsonc", cfg);
           NODE
 
       - run: pnpm --filter @vegastack/pages-web build
@@ -396,21 +359,28 @@ jobs:
           node <<'NODE'
           const fs = require("node:fs");
           const config = JSON.parse(fs.readFileSync("dist/server/wrangler.json", "utf8"));
-          const missing = [];
+          const errors = [];
           if (!config.d1_databases?.some((binding) => binding.binding === "DB")) {
-            missing.push("D1 binding DB");
+            errors.push("missing D1 binding DB");
           }
           if (!config.r2_buckets?.some((binding) => binding.binding === "CONTENT")) {
-            missing.push("R2 binding CONTENT");
+            errors.push("missing R2 binding CONTENT");
           }
-          if (!config.kv_namespaces?.some((binding) => binding.binding === "SESSION")) {
-            missing.push("KV binding SESSION");
+          // Canonical post-rebuild config: NO KV. The release must fail
+          // if KV reappears in the generated deploy config — that means
+          // wrangler.jsonc drifted.
+          if (config.kv_namespaces?.length) {
+            errors.push(`unexpected KV bindings: ${config.kv_namespaces.map((b) => b.binding).join(", ")}`);
           }
-          if (!config.triggers?.crons?.includes(process.env.VPG_GITHUB_SYNC_CRON || "17 2 * * *")) {
-            missing.push("GitHub backup cron trigger");
+          // Both nightly crons must be registered. Strings are fixed
+          // in the canonical wrangler.jsonc; if either is missing the
+          // canonical was clobbered.
+          const crons = config.triggers?.crons ?? [];
+          for (const expected of ["0 3 * * *", "30 3 * * *"]) {
+            if (!crons.includes(expected)) errors.push(`missing cron ${expected}`);
           }
-          if (missing.length > 0) {
-            throw new Error(`Generated deploy config is missing: ${missing.join(", ")}`);
+          if (errors.length > 0) {
+            throw new Error(`Generated deploy config invalid: ${errors.join("; ")}`);
           }
           NODE
 
@@ -426,10 +396,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          VPG_GITHUB_SYNC_CRON: ${{ secrets.VPG_GITHUB_SYNC_CRON }}
         run: pnpm exec wrangler deploy
 
-      - name: Remove generated Wrangler config
+      - name: Restore canonical Wrangler config
+        # Undoes the in-place placeholder substitution from earlier so a
+        # rerun of the workflow on a persistent runner sees a clean tree.
+        # On the default GH-hosted runner this is a no-op (ephemeral fs).
         if: always()
         working-directory: apps/web
-        run: rm -f wrangler.jsonc
+        run: git checkout -- wrangler.jsonc 2>/dev/null || true

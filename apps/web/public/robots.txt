@@ -1,0 +1,25 @@
+# VegaStack Pages — production robots.txt
+#
+# Marketing landing, public docs, and public publications (/p/, /f/)
+# are indexable. The signed-in app surface, internal APIs, OAuth/MCP
+# protocol endpoints, and auth pages are not.
+
+User-agent: *
+Allow: /
+Allow: /docs/
+Allow: /p/
+Allow: /f/
+
+Disallow: /app/
+Disallow: /api/
+Disallow: /auth/
+Disallow: /oauth/
+Disallow: /mcp
+Disallow: /.well-known/
+Disallow: /authorize
+Disallow: /token
+Disallow: /register
+Disallow: /revoke
+Disallow: /device
+
+Sitemap: https://pages.vegastack.com/sitemap.xml

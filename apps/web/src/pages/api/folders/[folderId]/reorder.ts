@@ -1,22 +1,20 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
+  audit,
+  folders as foldersService,
+  permissions as permissionsService,
   workspaces as workspacesService,
-  isServiceError,
 } from "@vegastack/pages-services";
 import {
   assertApiWorkspaceId,
   getApiRequestActor,
-  jsonAppError,
   resolveFolderActorPermission,
 } from "../../../../lib/access";
 import {
-  auditService,
-  ensureSeedData,
-  permissionService,
-  workspaceService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -27,19 +25,19 @@ async function assertFolderWrite(
   folderId: string,
 ) {
   const actor = await getApiRequestActor(cookies, request);
-  const folder = workspaceService.getFolder(folderId);
+  const { ctx } = await buildServiceContext({ cookies, request });
+  const folder = await foldersService.get(ctx, folderId);
   if (!folder) {
     throw new AppError("FOLDER_NOT_FOUND", "Folder was not found.", 404);
   }
   assertApiWorkspaceId({ url, workspaceId: folder.workspaceId });
-  const permission = resolveFolderActorPermission({ actor, folder });
-  permissionService.assert({ actual: permission, required: "write" });
+  const permission = await resolveFolderActorPermission({ actor, folder });
+  permissionsService.assertLevel({ actual: permission, required: "write" });
   return { actor, folder };
 }
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
     const folderId = params.folderId ?? "";
     const { actor, folder } = await assertFolderWrite(
       cookies,
@@ -66,7 +64,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       direction,
     });
     const reordered = result.data;
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: folder.workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "folder.reordered",
@@ -84,12 +82,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       envelope: result.envelope,
     });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Folder reorder failed.");
+    return serviceErrorToResponse(error, "Folder reorder failed.");
   }
 };

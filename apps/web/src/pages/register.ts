@@ -4,4 +4,5 @@
 // connector broker, observed via wrangler tail) ignore the
 // `registration_endpoint` field and POST directly to `${issuer}/register`.
 // Re-exporting the same handlers keeps both paths functional.
+export const prerender = false;
 export { OPTIONS, POST } from "./oauth/register";

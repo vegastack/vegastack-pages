@@ -25,7 +25,7 @@ interface Props {
   // Permission of the current user inside the active workspace. Used to
   // gate admin-only sidebar entries (Connections Log). Pass-through
   // from SettingsLayout, which reads it from SettingsContext. The union
-  // mirrors permissionService.resolve()'s return type.
+  // mirrors permissions.resolve()'s return type.
   permission?: "admin" | "write" | "comment" | "read" | "none";
 }
 

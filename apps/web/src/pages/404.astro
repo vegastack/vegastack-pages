@@ -1,0 +1,54 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import { readInitialTheme } from "../lib/theme";
+
+export const prerender = false;
+
+const initialTheme = readInitialTheme(Astro.cookies);
+Astro.response.status = 404;
+---
+
+<AppLayout
+  title="Not found — VegaStack Pages"
+  robots="noindex"
+  initialTheme={initialTheme}
+>
+  <main class="auth-shell">
+    <section class="auth-form-side" aria-labelledby="not-found-heading">
+      <header>
+        <a class="auth-wordmark" href="/">VegaStack Pages</a>
+      </header>
+      <h1 id="not-found-heading">Page not found</h1>
+      <p>
+        The page you are looking for has moved or never existed. Use the links
+        below to get back on track.
+      </p>
+      <div class="not-found-actions">
+        <a class="toolbar-button primary" href="/">Open VegaStack Pages</a>
+        <a class="toolbar-button" href="/app">Go to my workspace</a>
+        <a class="toolbar-button" href="/docs">Read the docs</a>
+      </div>
+    </section>
+    <aside class="auth-aside" aria-hidden="true">
+      <div>
+        <p class="auth-aside-eyebrow">Lost?</p>
+        <h2 class="auth-aside-headline">Looking for something specific?</h2>
+        <div class="auth-aside-body">
+          <p>
+            Page URLs change when pages are moved or unpublished. Try the
+            workspace search (Cmd/Ctrl + K) or the docs index for what you need.
+          </p>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <style>
+    .not-found-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+  </style>
+</AppLayout>

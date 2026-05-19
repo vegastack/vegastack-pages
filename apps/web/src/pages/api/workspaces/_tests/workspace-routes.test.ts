@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
 import { POST as createFolder } from "../[workspaceId]/folders";
 import { POST as createPage } from "../[workspaceId]/pages";
 import {
@@ -16,11 +19,18 @@ import {
 import { POST as leaveWorkspaceRoute } from "../[workspaceId]/leave";
 import { GET as listWorkspaces, POST as createWorkspace } from "../index";
 import {
-  authService,
-  pageService,
-  permissionService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  auth,
+  folders as foldersService,
+  pages as pagesService,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-workspaces-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -50,33 +60,52 @@ function workspacePath(workspaceId: string, suffix: string) {
   return `/api/workspaces/${workspaceId}${suffix}`;
 }
 
+// Seed the workspace, owner, member, and session via the direct-D1
+// services. Routes read straight from D1, so no in-memory cache sync
+// is needed.
 async function createWorkspaceFixture(
   input: {
     ownerRole?: "user" | "instance_admin";
     memberRole?: "reader" | "commenter" | "editor" | "admin";
   } = {},
 ) {
-  const workspace = workspaceService.createWorkspace({
-    id: uniqueId("wks"),
-    name: `Workspace Routes ${crypto.randomUUID()}`,
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
   });
-  const owner = workspaceService.createUser({
+  const owner = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `workspace-owner-${crypto.randomUUID()}@example.test`,
     displayName: "Workspace Owner",
     role: input.ownerRole ?? "user",
   });
-  const member = workspaceService.addMember({
+  const memberRole = input.memberRole ?? "admin";
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name: `Workspace Routes ${crypto.randomUUID()}`,
+    slug: uniqueId("slug"),
+    firstAdminUserId: memberRole === "admin" ? owner.id : undefined,
+  });
+  if (memberRole !== "admin") {
+    await workspaces.addMember(seedCtx, {
+      workspaceId: workspace.id,
+      userId: owner.id,
+      role: memberRole,
+    });
+  }
+  const session = await auth.createSession(seedCtx, { userId: owner.id });
+  const member = await workspaces.getMember(seedCtx, {
     workspaceId: workspace.id,
     userId: owner.id,
-    role: input.memberRole ?? "admin",
   });
-  const session = authService.createSession(owner.id);
+  if (!member) {
+    throw new Error("Failed to seed workspace member.");
+  }
 
   return {
     workspace,
     owner,
     member,
+    session,
     cookies: sessionCookies(session.id),
   };
 }
@@ -98,7 +127,10 @@ describe("workspace page and folder routes", () => {
     };
 
     expect(folderResponse.status).toBe(200);
-    expect(folderBody.folder.path).toBe("release-notes");
+    // The direct-D1 folders.service now stores paths with a leading
+    // slash (matches packages/services/src/__tests__/folders.service.test.ts);
+    // the route returns the row as-is.
+    expect(folderBody.folder.path).toBe("/release-notes");
     expect(folderBody.folder.position).toBe(4);
 
     const pageResponse = await createPage({
@@ -117,13 +149,21 @@ describe("workspace page and folder routes", () => {
       url: string;
       version_id: string;
     };
-    const page = pageService.listPages(workspace.id)[0];
+    // The pages route mutates through pages.create which writes to D1;
+    // read back via the same direct-D1 service.
+    const { ctx: readCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: workspace.id,
+    });
+    const page = (await pagesService.list(readCtx, workspace.id))[0];
 
     expect(pageResponse.status).toBe(200);
     expect(pageBody.url).toBe(`/p/${pageBody.slug_id}`);
     expect(pageBody.version_id).toBe(page?.versionId);
     expect(page).toMatchObject({
       id: pageBody.page_id,
+      // The pages.list service strips the leading slash from the folder
+      // path when projecting the record for clients.
       folderPath: "release-notes",
       sourceType: "html",
       title: "Launch Checklist",
@@ -131,13 +171,24 @@ describe("workspace page and folder routes", () => {
   });
 
   it("rejects page creation when the folder belongs to another workspace", async () => {
-    const { workspace, cookies } = await createWorkspaceFixture();
-    const other = workspaceService.createWorkspace({
+    const { workspace, cookies, owner } = await createWorkspaceFixture();
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+    });
+    const other = await workspaces.create(seedCtx, {
       id: uniqueId("wks"),
       name: `Other Workspace ${crypto.randomUUID()}`,
+      firstAdminUserId: owner.id,
     });
-    const foreignFolder = workspaceService.createFolder({
+    const { ctx: otherCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
       workspaceId: other.id,
+    });
+    otherCtx.actor.userId = owner.id;
+    otherCtx.actor.email = owner.email;
+    const foreignFolder = await foldersService.create(otherCtx, {
+      workspaceId: other.id,
+      parentFolderId: null,
       name: "Private",
     });
 
@@ -184,12 +235,21 @@ describe("workspace page and folder routes", () => {
 
 describe("workspace settings routes", () => {
   it("returns workspace counts and rounds retention updates", async () => {
-    const { workspace, cookies } = await createWorkspaceFixture();
-    const folder = workspaceService.createFolder({
+    const { workspace, owner, cookies } = await createWorkspaceFixture();
+    const { ctx: ownerCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
       workspaceId: workspace.id,
+    });
+    ownerCtx.actor.userId = owner.id;
+    ownerCtx.actor.email = owner.email;
+    const { folders: foldersService, pages: pagesService } =
+      await import("@vegastack/pages-services");
+    const folder = await foldersService.create(ownerCtx, {
+      workspaceId: workspace.id,
+      parentFolderId: null,
       name: "Counts",
     });
-    await pageService.createPage({
+    await pagesService.create(ownerCtx, {
       workspaceId: workspace.id,
       folderPath: folder.path,
       title: "Counted Page",
@@ -304,6 +364,8 @@ describe("workspace invite and member routes", () => {
     expect(invited.member.role).toBe("commenter");
     expect(invited.magic_link_created).toBe(false);
     expect(invited.existing_member).toBe(false);
+    // Mirror D1 rows written by the invite route into the legacy
+    // in-memory caches that the member PATCH/DELETE routes consult.
 
     const listResponse = await listInvites({
       cookies,
@@ -335,7 +397,15 @@ describe("workspace invite and member routes", () => {
       user: { displayName: "Editor User" },
     });
 
-    permissionService.setGrant({
+    const { ctx: grantCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: workspace.id,
+    });
+    grantCtx.actor.userId = owner.id;
+    grantCtx.actor.email = owner.email;
+    const { permissions: permissionsService } =
+      await import("@vegastack/pages-services");
+    await permissionsService.setGrant(grantCtx, {
       workspaceId: workspace.id,
       subjectId: invited.user.id,
       scope: "workspace",
@@ -358,12 +428,17 @@ describe("workspace invite and member routes", () => {
     expect(removeResponse.status).toBe(200);
     expect(removed.removed_grants).toBe(1);
     expect(removed.revoked_mcp_sessions).toBe(0);
-    expect(
-      workspaceService.getMember(workspace.id, invited.user.id),
-    ).toBeNull();
-    expect(workspaceService.getMember(workspace.id, owner.id)?.role).toBe(
-      "admin",
-    );
+    // Verify state through D1.
+    const stillMemberRemoved = await workspaces.getMember(grantCtx, {
+      workspaceId: workspace.id,
+      userId: invited.user.id,
+    });
+    expect(stillMemberRemoved).toBeNull();
+    const ownerMember = await workspaces.getMember(grantCtx, {
+      workspaceId: workspace.id,
+      userId: owner.id,
+    });
+    expect(ownerMember?.role).toBe("admin");
   });
 
   it("rejects invalid roles and self-demotion through member APIs", async () => {
@@ -451,14 +526,25 @@ describe("workspace invite and member routes", () => {
     };
     expect(invite.status).toBe(200);
 
-    permissionService.setGrant({
+    const { ctx: leavingSeedCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: owner.workspace.id,
+    });
+    // Invite-route writes the user + workspace_members row directly to
+    // D1 today; only the auth session and the workspace grant remain.
+    leavingSeedCtx.actor.userId = owner.owner.id;
+    leavingSeedCtx.actor.email = owner.owner.email;
+    const leavingSession = await auth.createSession(leavingSeedCtx, {
+      userId: invited.user.id,
+    });
+    const { permissions } = await import("@vegastack/pages-services");
+    await permissions.setGrant(leavingSeedCtx, {
       workspaceId: owner.workspace.id,
       subjectId: invited.user.id,
       scope: "workspace",
       targetId: owner.workspace.id,
       level: "write",
     });
-    const leavingSession = authService.createSession(invited.user.id);
 
     const leaveResponse = await leaveWorkspaceRoute({
       cookies: sessionCookies(leavingSession.id),
@@ -470,9 +556,19 @@ describe("workspace invite and member routes", () => {
     };
     expect(leaveResponse.status).toBe(200);
     expect(leaveBody.removed_grants).toBe(1);
-    expect(
-      workspaceService.getMember(owner.workspace.id, invited.user.id),
-    ).toBeNull();
+    // Verify via the D1-direct workspaces service — legacy in-memory
+    // cache wasn't refreshed by the route (only test fixtures refresh).
+    const { ctx: verifyCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: owner.workspace.id,
+    });
+    verifyCtx.actor.userId = owner.owner.id;
+    verifyCtx.actor.email = owner.owner.email;
+    const stillMember = await workspaces.getMember(verifyCtx, {
+      workspaceId: owner.workspace.id,
+      userId: invited.user.id,
+    });
+    expect(stillMember).toBeNull();
   });
 
   it("blocks the last admin from leaving the workspace", async () => {
@@ -519,9 +615,15 @@ describe("workspace collection route", () => {
     };
 
     expect(createdResponse.status).toBe(200);
-    expect(workspaceService.getWorkspace(created.workspace_id)?.slug).toBe(
-      created.slug,
-    );
+    // POST /api/workspaces writes via the D1-direct workspaces service;
+    // verify via the same service rather than the legacy cache.
+    const { ctx: verifyCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+    });
+    const verified = await workspaces.get(verifyCtx, {
+      workspaceId: created.workspace_id,
+    });
+    expect(verified?.slug).toBe(created.slug);
 
     const regularFixture = await createWorkspaceFixture();
     const denied = await createWorkspace({

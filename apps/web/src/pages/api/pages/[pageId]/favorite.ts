@@ -2,17 +2,16 @@
 
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { favorites as favoritesService } from "@vegastack/pages-services";
+import {
+  favorites as favoritesService,
+  pages as pagesService,
+  permissions as permissionsService,
+} from "@vegastack/pages-services";
 import {
   assertApiWorkspaceId,
   getApiRequestActor,
   resolveActorPermission,
 } from "../../../../lib/access";
-import {
-  ensureSeedData,
-  pageService,
-  permissionService,
-} from "../../../../lib/runtime";
 import {
   buildServiceContext,
   serviceErrorToResponse,
@@ -26,18 +25,19 @@ async function resolveFavoriteContext(
   url: URL,
   pageId: string,
 ) {
-  await ensureSeedData();
   const actor = await getApiRequestActor(cookies, request);
   if (!actor.user) {
     throw new AppError("AUTH_REQUIRED", "Sign in to manage favorites.", 401);
   }
-  const page = pageService.listPages().find((entry) => entry.id === pageId);
-  if (!page) {
+  const { ctx: lookupCtx } = await buildServiceContext({ cookies, request });
+  const fetched = await pagesService.get(lookupCtx, pageId);
+  if (!fetched) {
     throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
   }
+  const page = fetched.page;
   assertApiWorkspaceId({ url, workspaceId: page.workspaceId });
-  const permission = resolveActorPermission({ actor, page });
-  permissionService.assert({ actual: permission, required: "read" });
+  const permission = await resolveActorPermission({ actor, page });
+  permissionsService.assertLevel({ actual: permission, required: "read" });
 
   const { ctx } = await buildServiceContext({
     cookies,

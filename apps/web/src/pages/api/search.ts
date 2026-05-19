@@ -1,9 +1,11 @@
 import type { APIRoute } from "astro";
 import { AppError, type SearchResourceType } from "@vegastack/pages-core";
-import { getApiRequestActor, jsonAppError } from "../../lib/access";
+import { favorites } from "@vegastack/pages-services";
 import {
-  ensureSeedData,
-  favoriteService,
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../lib/service-context";
+import {
   listRecentSearchResources,
   recordSearchResourceOpen,
   searchIndexedResources,
@@ -19,7 +21,6 @@ export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, request, url }) => {
   try {
-    await ensureSeedData();
     const workspaceId = url.searchParams.get("workspace_id")?.trim();
     if (!workspaceId) {
       throw new AppError(
@@ -39,7 +40,11 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       25,
       Math.max(1, Number(url.searchParams.get("limit") ?? "10")),
     );
-    const actor = await getApiRequestActor(cookies, request);
+    const { ctx, actor } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
     if (request?.method === "POST") {
       const body = (await request.json().catch(() => ({}))) as Record<
         string,
@@ -57,10 +62,13 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       }
       return Response.json({ ok: true });
     }
-    if (actor.user && !canReadWorkspaceOrScopedPages(actor, workspaceId)) {
+    if (
+      actor.user &&
+      !(await canReadWorkspaceOrScopedPages(actor, workspaceId))
+    ) {
       return Response.json({ results: [] });
     }
-    const nav = buildWorkspaceNavigation(actor, workspaceId);
+    const nav = await buildWorkspaceNavigation(actor, workspaceId);
     if (!query.trim()) {
       const recent = await listRecentSearchResources({
         userId: actor.user?.id ?? null,
@@ -73,45 +81,45 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
           .map((item) => item.trim())
           .filter(Boolean),
       );
-      const favorites =
+      const favoriteRecords =
         actor.user && include.has("favorites")
-          ? favoriteService
-              .listForWorkspace(actor.user.id, workspaceId)
-              .map((favorite) => {
-                const page = nav.visiblePageById.get(favorite.pageId);
-                if (!page) return null;
-                return {
-                  type: "page" as const,
-                  id: page.id,
-                  pageId: page.id,
-                  folderId: null,
-                  title: page.title,
-                  url: `/p/${page.slugId}`,
-                  path: page.folderPath
-                    ? `${page.folderPath}/${page.title}`
-                    : page.title,
-                  subtitle: "Favorite",
-                  snippet: "",
-                  updatedAt: favorite.createdAt,
-                  icon: "file-text" as const,
-                  matchedField: "title" as const,
-                };
-              })
-              .filter((favorite): favorite is NonNullable<typeof favorite> =>
-                Boolean(favorite),
-              )
-              .slice(0, Math.min(limit, 10))
+          ? await favorites.listForWorkspace(ctx, { workspaceId })
           : [];
+      const favoritesResult = favoriteRecords
+        .map((favorite) => {
+          const page = nav.visiblePageById.get(favorite.pageId);
+          if (!page) return null;
+          return {
+            type: "page" as const,
+            id: page.id,
+            pageId: page.id,
+            folderId: null,
+            title: page.title,
+            url: `/p/${page.slugId}`,
+            path: page.folderPath
+              ? `${page.folderPath}/${page.title}`
+              : page.title,
+            subtitle: "Favorite",
+            snippet: "",
+            updatedAt: favorite.createdAt,
+            icon: "file-text" as const,
+            matchedField: "title" as const,
+          };
+        })
+        .filter((favorite): favorite is NonNullable<typeof favorite> =>
+          Boolean(favorite),
+        )
+        .slice(0, Math.min(limit, 10));
       return Response.json({
         results: filterSearchResultsByPermission(recent, nav),
-        favorites,
+        favorites: favoritesResult,
       });
     }
     const favoritePageIds = actor.user
       ? new Set(
-          favoriteService
-            .listForWorkspace(actor.user.id, workspaceId)
-            .map((favorite) => favorite.pageId),
+          (await favorites.listForWorkspace(ctx, { workspaceId })).map(
+            (favorite) => favorite.pageId,
+          ),
         )
       : undefined;
     const results = (
@@ -124,7 +132,7 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
 
     return Response.json({ results });
   } catch (error) {
-    return jsonAppError(error, "Search failed.");
+    return serviceErrorToResponse(error, "Search failed.");
   }
 };
 

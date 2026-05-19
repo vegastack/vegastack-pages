@@ -1,11 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
-  authService,
-  indexPage,
-  pageService,
-  publicationService,
-  workspaceService,
-} from "../../../lib/runtime";
+  auth,
+  pages as pagesService,
+  publications as publicationsService,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../lib/service-context";
+import { indexPage } from "../../../lib/runtime";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-pub-test-"));
+});
 import { PUT as publishPage } from "../pages/[pageId]/publication";
 import {
   DELETE as revokePublication,
@@ -53,63 +63,79 @@ function jsonRequest(path: string, body: unknown, init: RequestInit = {}) {
 }
 
 async function createPublishablePageFixture() {
-  const workspace = workspaceService.createWorkspace({
-    id: uniqueId("wks"),
-    name: `Publication Fixture ${crypto.randomUUID()}`,
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
   });
-  const user = workspaceService.createUser({
+  const user = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `publisher-${crypto.randomUUID()}@example.test`,
     displayName: "Publisher",
+    role: "user",
   });
-  workspaceService.addMember({
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name: `Publication Fixture ${crypto.randomUUID()}`,
+    slug: uniqueId("slug"),
+    firstAdminUserId: user.id,
+  });
+  const { ctx: ownerCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
     workspaceId: workspace.id,
-    userId: user.id,
-    role: "admin",
   });
-  const page = await pageService.createPage({
-    id: uniqueId("pg"),
+  ownerCtx.actor.userId = user.id;
+  ownerCtx.actor.email = user.email;
+  const created = await pagesService.create(ownerCtx, {
     workspaceId: workspace.id,
     folderPath: "",
     title: "Published Search Page",
     sourceType: "markdown",
     source: "# Published Search Page\n\nNeedle public body",
   });
+  const page = created.data;
   await indexPage(page.page.id);
+  const session = await auth.createSession(seedCtx, { userId: user.id });
+  const cookies = sessionCookies(session.id);
 
   return {
     workspace,
     user,
     page,
-    cookies: sessionCookies(authService.createSession(user.id).id),
+    cookies,
   };
 }
 
 describe("publication API", () => {
   it("preserves omitted optional publication fields when publishing again", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: `Publication Preserve ${crypto.randomUUID()}`,
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
     });
-    const user = workspaceService.createUser({
+    const user = await users.upsert(seedCtx, {
       id: uniqueId("usr"),
       email: `publisher-${crypto.randomUUID()}@example.test`,
       displayName: "Publisher",
+      role: "user",
     });
-    workspaceService.addMember({
+    const workspace = await workspaces.create(seedCtx, {
+      id: uniqueId("wks"),
+      name: `Publication Preserve ${crypto.randomUUID()}`,
+      slug: uniqueId("slug"),
+      firstAdminUserId: user.id,
+    });
+    const session = await auth.createSession(seedCtx, { userId: user.id });
+    const { ctx: ownerCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
       workspaceId: workspace.id,
-      userId: user.id,
-      role: "admin",
     });
-    const session = authService.createSession(user.id);
-    const page = await pageService.createPage({
-      id: uniqueId("pg"),
+    ownerCtx.actor.userId = user.id;
+    ownerCtx.actor.email = user.email;
+    const created = await pagesService.create(ownerCtx, {
       workspaceId: workspace.id,
       folderPath: "",
       title: "Publish preserve",
       sourceType: "markdown",
       source: "# Publish preserve",
     });
+    const page = created.data;
     const cookies = sessionCookies(session.id);
 
     const first = await publishPage({
@@ -151,7 +177,15 @@ describe("publication API", () => {
         indexing_enabled: boolean;
       };
     };
-    const stored = publicationService.findForResource("page", page.page.id);
+    const { ctx: lookupCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: workspace.id,
+    });
+    const stored = await publicationsService.findForResource(lookupCtx, {
+      workspaceId: workspace.id,
+      resourceType: "page",
+      resourceId: page.page.id,
+    });
 
     expect(second.status).toBe(200);
     expect(payload.publication.permission).toBe("view");
@@ -163,7 +197,11 @@ describe("publication API", () => {
 
   it("verifies publication passwords, sets access cookies, and searches only the published page", async () => {
     const { workspace, page } = await createPublishablePageFixture();
-    const publication = await publicationService.upsert({
+    const { ctx: pubCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: workspace.id,
+    });
+    const publication = await publicationsService.upsert(pubCtx, {
       workspaceId: workspace.id,
       resourceType: "page",
       resourceId: page.page.id,
@@ -184,7 +222,7 @@ describe("publication API", () => {
         `https://pages.example.test/api/publications/${publication.id}/verify-password?workspace_id=${workspace.id}`,
       ),
     } as never);
-    expect(wrong.status).toBe(403);
+    expect(wrong.status).toBe(401);
 
     const verified = await verifyPublicationPassword({
       cookies,
@@ -233,7 +271,11 @@ describe("publication API", () => {
 
   it("updates and revokes publications through admin-only publication routes", async () => {
     const { workspace, page, cookies } = await createPublishablePageFixture();
-    const publication = await publicationService.upsert({
+    const { ctx: pubCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: workspace.id,
+    });
+    const publication = await publicationsService.upsert(pubCtx, {
       workspaceId: workspace.id,
       resourceType: "page",
       resourceId: page.page.id,

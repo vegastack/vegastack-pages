@@ -1,28 +1,27 @@
 import type { APIRoute } from "astro";
 import { AppError } from "@vegastack/pages-core";
 import {
+  audit,
+  folders as foldersService,
   pages as pagesService,
-  isServiceError,
+  permissions as permissionsService,
+  reviewEvents,
+  workspaces as workspacesService,
 } from "@vegastack/pages-services";
-import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
+import { resolvePageAccess } from "../../../../lib/access";
+import { scheduleIndexPage } from "../../../../lib/runtime";
 import {
-  auditService,
-  ensureSeedData,
-  scheduleIndexPage,
-  pageService,
-  permissionService,
-  reviewEventService,
-  workspaceService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) {
       return Response.json(
@@ -40,14 +39,20 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       guestName: body.guest_name ? String(body.guest_name) : null,
     });
     const member = access.actor.user
-      ? workspaceService.getMember(page.page.workspaceId, access.actor.user.id)
+      ? await workspacesService.getMember(ctx, {
+          workspaceId: page.page.workspaceId,
+          userId: access.actor.user.id,
+        })
       : null;
-    const workspacePermission = permissionService.resolve({
-      user: access.actor.user,
-      member,
+    const workspacePermission = await permissionsService.resolve(ctx, {
       workspaceId: page.page.workspaceId,
+      userId: access.actor.user?.id ?? "",
+      scope: "workspace",
+      targetId: page.page.workspaceId,
+      memberRole: member?.role ?? null,
+      instanceRole: access.actor.user?.role,
     });
-    permissionService.assert({
+    permissionsService.assertLevel({
       actual: workspacePermission,
       required: "write",
     });
@@ -60,9 +65,16 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     // NOT_FOUND) so we keep this check here to preserve the contract.
     if (
       folderPath &&
-      !workspaceService
-        .listFolders(page.page.workspaceId)
-        .some((folder) => folder.path === folderPath)
+      !(
+        await foldersService.listAll(ctx, {
+          workspaceId: page.page.workspaceId,
+        })
+      ).some(
+        (folder) =>
+          folder.path === folderPath ||
+          folder.path === `/${folderPath}` ||
+          folder.path.replace(/^\/+/, "") === folderPath,
+      )
     ) {
       throw new AppError(
         "FOLDER_NOT_FOUND",
@@ -70,11 +82,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         404,
       );
     }
-    const { ctx } = await buildServiceContext({
-      cookies,
-      request,
-      workspaceId: page.page.workspaceId,
-    });
     const result = await pagesService.move(ctx, {
       pageId: page.page.id,
       title: body.title === undefined ? undefined : String(body.title),
@@ -82,7 +89,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     });
     const updated = result.data;
     scheduleIndexPage(updated.id);
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: updated.workspaceId,
       actorUserId: access.actor.user?.id ?? null,
       action: "page.moved",
@@ -90,7 +97,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       targetId: updated.id,
       metadata: { title: updated.title, folder_path: updated.folderPath },
     });
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: updated.workspaceId,
       pageId: updated.id,
       type: "page.moved",
@@ -107,12 +114,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       envelope: result.envelope,
     });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Page move failed.");
+    return serviceErrorToResponse(error, "Page move failed.");
   }
 };

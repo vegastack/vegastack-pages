@@ -3,7 +3,7 @@ title: Backup to Git
 description: Sync workspace pages, templates, optional assets, and a manifest to a GitHub repository.
 category: Administration
 order: 30
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 Backup to Git keeps a workspace portable. It mirrors the knowledge base into a repository through a GitHub App.

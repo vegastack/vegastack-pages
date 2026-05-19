@@ -1,30 +1,43 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
-  auditService,
-  ensureSeedData,
-  listMcpSessions,
-  permissionService,
-  revokeMcpSession,
-  workspaceService,
-} from "../../../../lib/runtime";
+  audit,
+  buildEnvelope,
+  jsonWithEnvelope,
+  permissions,
+  users,
+  workspaces as workspacesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+import { getApiRequestActor } from "../../../../lib/access";
+import { listMcpSessions, revokeMcpSession } from "../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
-function adminCount(workspaceId: string) {
-  return workspaceService
-    .listMembers(workspaceId)
-    .filter((member) => member.role === "admin").length;
+async function adminCount(ctx: ServiceContext, workspaceId: string) {
+  const members = await workspacesService.listMembers(ctx, { workspaceId });
+  return members.filter((member) => member.role === "admin").length;
 }
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    const workspace = workspaceService.getWorkspace(workspaceId);
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    let workspace;
+    try {
+      workspace = await workspacesService.get(ctx, { workspaceId });
+    } catch {
+      workspace = null;
+    }
     if (!workspace)
       throw new AppError(
         "WORKSPACE_NOT_FOUND",
@@ -37,7 +50,10 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
     if (!actor.user) {
       throw new AppError("AUTH_REQUIRED", "Sign in to leave a workspace.", 401);
     }
-    const member = workspaceService.getMember(workspaceId, actor.user.id);
+    const member = await workspacesService.getMember(ctx, {
+      workspaceId,
+      userId: actor.user.id,
+    });
     if (!member) {
       throw new AppError(
         "AUTH_REQUIRED",
@@ -45,7 +61,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         404,
       );
     }
-    if (member.role === "admin" && adminCount(workspaceId) <= 1) {
+    if (member.role === "admin" && (await adminCount(ctx, workspaceId)) <= 1) {
       throw new AppError(
         "VALIDATION_ERROR",
         "Promote another admin before leaving — a workspace must keep at least one admin.",
@@ -53,7 +69,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       );
     }
 
-    const removedGrants = permissionService.deleteGrantsForSubject({
+    const removedGrants = await permissions.deleteGrantsForSubject(ctx, {
       workspaceId,
       subjectId: actor.user.id,
     });
@@ -64,8 +80,11 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
     for (const session of mcpSessions) {
       await revokeMcpSession({ workspaceId, sessionId: session.id });
     }
-    const removed = workspaceService.removeMember(member.id);
-    auditService.record({
+    const removedResult = await workspacesService.removeMember(ctx, {
+      memberId: member.id,
+    });
+    const removed = removedResult.data;
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user.id,
       action: "workspace.member_left",
@@ -74,21 +93,19 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       metadata: {
         user_id: removed.userId,
         role: removed.role,
-        removed_grants: removedGrants.length,
+        removed_grants: removedGrants.removed,
         revoked_mcp_sessions: mcpSessions.length,
       },
     });
     // Compute tree_version against the actor's now-empty membership. This
     // signals to any other tabs that the workspace tree should be refetched
     // (and will likely 403, prompting a workspace switch).
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      workspaceId,
-    ).treeVersion;
+    const treeVersion = (await buildWorkspaceNavigation(actor, workspaceId))
+      .treeVersion;
     return jsonWithEnvelope(
       {
-        member: { ...removed, user: workspaceService.getUser(removed.userId) },
-        removed_grants: removedGrants.length,
+        member: { ...removed, user: await users.getById(ctx, removed.userId) },
+        removed_grants: removedGrants.removed,
         revoked_mcp_sessions: mcpSessions.length,
       },
       buildEnvelope({
@@ -98,6 +115,6 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Leaving workspace failed.");
+    return serviceErrorToResponse(error, "Leaving workspace failed.");
   }
 };

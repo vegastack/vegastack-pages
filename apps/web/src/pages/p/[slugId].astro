@@ -18,15 +18,15 @@ import {
   resolvePageAccess,
   type PageAccess,
 } from "../../lib/access";
-import { publicSignupEnabled } from "../../lib/deployment";
 import { renderCachedMarkdown } from "../../lib/render-cache";
 import {
-  commentService,
-  ensureSeedData,
-  favoriteService,
-  pageService,
-  workspaceService,
-} from "../../lib/runtime";
+  comments as commentsService,
+  favorites as favoritesService,
+  folders as foldersService,
+  pages as pagesService,
+  workspaces as workspacesService,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../lib/service-context";
 import {
   listSelectableWorkspaces,
   listVisibleFoldersForActor,
@@ -40,14 +40,52 @@ import "../../styles/comments.css";
 export const prerender = false;
 
 const { slugId } = Astro.params;
-if (!publicSignupEnabled()) {
-  await ensureSeedData();
-}
+const { ctx: lookupCtx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+});
 const pageWithSource = slugId
-  ? await pageService.getPageBySlugId(slugId)
+  ? await pagesService.getBySlugId(lookupCtx, slugId)
   : null;
 if (!pageWithSource) {
   return new Response("Page not found", { status: 404 });
+}
+
+// Phase G fast path: when the request is anonymous AND the page has a
+// pre-baked publication artifact in R2, serve that directly via the
+// Cache API. This avoids the full SSR + sidebar render for the common
+// public-publication read.
+{
+  const {
+    isAnonymousPublicRequest,
+    servePublishedArtifact,
+    verifyPasswordCookie,
+  } = await import("../../lib/publication-cache");
+  if (isAnonymousPublicRequest(Astro.cookies)) {
+    const publication = await resolvePublicationForPage(pageWithSource.page);
+    if (
+      publication &&
+      !publication.revokedAt &&
+      publication.latestArtifactKey
+    ) {
+      const passwordOk = await verifyPasswordCookie(Astro.cookies, publication);
+      if (passwordOk) {
+        const { buildServiceContext } =
+          await import("../../lib/service-context");
+        const { ctx } = await buildServiceContext({
+          cookies: Astro.cookies,
+          request: Astro.request,
+          workspaceId: pageWithSource.page.workspaceId,
+        });
+        const served = await servePublishedArtifact({
+          ctx,
+          publication,
+          request: Astro.request,
+        });
+        if (served) return served.response;
+      }
+    }
+  }
 }
 let access: PageAccess | null = null;
 let passwordPrompt: { publicationId: string } | null = null;
@@ -74,15 +112,13 @@ try {
   }
 }
 
-const pageAccess =
-  access ??
-  ({
-    actor: getRequestActor(Astro.cookies),
-    permission: "none",
-    publicationId: null,
-    publication: null,
-    guestNameRequired: false,
-  } as PageAccess);
+const pageAccess: PageAccess = access ?? {
+  actor: await getRequestActor(Astro.cookies),
+  permission: "none",
+  publicationId: null,
+  publication: null,
+  guestNameRequired: false,
+};
 const canExportSource = hasPermission(pageAccess.permission, "write");
 const canWrite = hasPermission(pageAccess.permission, "write");
 const canComment = hasPermission(pageAccess.permission, "comment");
@@ -157,9 +193,19 @@ const sidebarUser = actor.user ?? {
   email: "guest@local",
   displayName: "Guest",
 };
-const workspaceRecord = workspaceService.getWorkspace(
-  pageWithSource.page.workspaceId,
-);
+const { ctx: pageCtx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+  workspaceId: pageWithSource.page.workspaceId,
+});
+let workspaceRecord;
+try {
+  workspaceRecord = await workspacesService.get(pageCtx, {
+    workspaceId: pageWithSource.page.workspaceId,
+  });
+} catch {
+  workspaceRecord = null;
+}
 const sidebarWorkspace = workspaceRecord ?? {
   id: pageWithSource.page.workspaceId,
   name: "Workspace",
@@ -170,7 +216,7 @@ const sidebarWorkspace = workspaceRecord ?? {
 };
 const sidebarWorkspaces =
   !isPublicPublication && actor.user
-    ? listSelectableWorkspaces(actor.user)
+    ? await listSelectableWorkspaces(actor.user)
     : [];
 const isHtmlPage = pageWithSource.page.sourceType === "html";
 const rendered = isHtmlPage
@@ -196,27 +242,57 @@ const metadataEntries = isHtmlPage
       ([key]) => key !== "title" && key !== "description",
     );
 
-const workspaceFolders = workspaceService.listFolders(
-  pageWithSource.page.workspaceId,
-);
+const workspaceFolders = await foldersService.listAll(pageCtx, {
+  workspaceId: pageWithSource.page.workspaceId,
+});
+const normalizedFolderPath = pageWithSource.page.folderPath
+  ? pageWithSource.page.folderPath.startsWith("/")
+    ? pageWithSource.page.folderPath
+    : `/${pageWithSource.page.folderPath}`
+  : "";
 const currentFolder =
-  workspaceFolders.find(
-    (folder) => folder.path === pageWithSource.page.folderPath,
-  ) ?? null;
-const ancestorFolders = currentFolder
-  ? workspaceService.folderAncestors(currentFolder.id)
+  workspaceFolders.find((folder) => folder.path === normalizedFolderPath) ??
+  null;
+const ancestorIds = currentFolder
+  ? await foldersService.ancestorPath(pageCtx, currentFolder.id)
   : [];
+const foldersById = new Map(workspaceFolders.map((node) => [node.id, node]));
+const ancestorFolders = ancestorIds
+  .map((id) => foldersById.get(id))
+  .filter((node): node is (typeof workspaceFolders)[number] => Boolean(node));
 const publicPublication =
-  pageAccess.publication ?? resolvePublicationForPage(pageWithSource.page);
+  pageAccess.publication ??
+  (await resolvePublicationForPage(pageWithSource.page));
 const publicRootFolder =
   publicPublication?.resourceType === "folder"
-    ? workspaceService.getFolder(publicPublication.resourceId)
+    ? await foldersService.get(pageCtx, publicPublication.resourceId)
     : null;
 const publicFolderPrefix = publicRootFolder
   ? `${publicRootFolder.path}/`
   : null;
-const workspacePages = pageService
-  .listPages(pageWithSource.page.workspaceId)
+const allWorkspacePages = await pagesService.list(
+  pageCtx,
+  pageWithSource.page.workspaceId,
+);
+// Pre-resolve per-page permissions for the non-public path so the
+// .filter() callback below stays synchronous (Array.filter can't await).
+const pagePermissions = isPublicPublication
+  ? new Map<string, boolean>()
+  : new Map(
+      await Promise.all(
+        allWorkspacePages.map(
+          async (page) =>
+            [
+              page.id,
+              hasPermission(
+                await resolveActorPermission({ actor, page }),
+                "read",
+              ),
+            ] as const,
+        ),
+      ),
+    );
+const workspacePages = allWorkspacePages
   .filter((page) =>
     isPublicPublication
       ? publicRootFolder
@@ -226,7 +302,7 @@ const workspacePages = pageService
               page.folderPath.startsWith(publicFolderPrefix!)),
           )
         : page.id === pageWithSource.page.id
-      : hasPermission(resolveActorPermission({ actor, page }), "read"),
+      : pagePermissions.get(page.id) === true,
   )
   .sort(
     (left, right) =>
@@ -241,7 +317,7 @@ const visibleFolders = isPublicPublication
           folder.path.startsWith(publicFolderPrefix!),
       )
     : []
-  : listVisibleFoldersForActor(actor, pageWithSource.page.workspaceId);
+  : await listVisibleFoldersForActor(actor, pageWithSource.page.workspaceId);
 
 // Build breadcrumb segments. Each segment's `siblings` are the children of
 // that segment's container so the dropdown reveals lateral navigation
@@ -326,10 +402,10 @@ const displayedHtml =
 const publicIndexable = Boolean(
   publicPublication?.indexingEnabled && !publicPublication.passwordHash,
 );
-const initialThreadRecords = commentService.listForPage(
-  pageWithSource.page.id,
-  "all",
-);
+const initialThreadRecords = await commentsService.listForPage(pageCtx, {
+  pageId: pageWithSource.page.id,
+  status: "all",
+});
 const initialCommentStats = {
   open: initialThreadRecords.filter((entry) => entry.thread.status === "open")
     .length,
@@ -351,8 +427,11 @@ const sidebarPages = workspacePages.map((page) => ({
 }));
 const sidebarPageIds = new Set(sidebarPages.map((page) => page.id));
 const initialFavoriteIds = actor.user
-  ? favoriteService
-      .listForWorkspace(actor.user.id, sidebarWorkspace.id)
+  ? (
+      await favoritesService.listForWorkspace(pageCtx, {
+        workspaceId: sidebarWorkspace.id,
+      })
+    )
       .map((favorite) => favorite.pageId)
       .filter((pageId) => sidebarPageIds.has(pageId))
   : [];
@@ -365,7 +444,7 @@ const sidebarFoldersForTree = visibleFolders.map((folder) => ({
 }));
 const sidebarTreeVersion = isPublicPublication
   ? null
-  : buildWorkspaceNavigation(actor, sidebarWorkspace.id).treeVersion;
+  : (await buildWorkspaceNavigation(actor, sidebarWorkspace.id)).treeVersion;
 
 // The same shell layout in every state — the TOC column is always reserved
 // so unlocking the editor never shifts the main column.
@@ -1103,6 +1182,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
       <div class={shellClasses} data-vpg-workspace-id={sidebarWorkspace.id}>
         {!isPublicPublication && (
           <Sidebar
+            transition:persist="vpg-sidebar"
             workspace={{
               id: sidebarWorkspace.id,
               name: sidebarWorkspace.name,
@@ -1133,6 +1213,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
 
         <div class="vpg-shell-right">
           <PageHeader
+            transition:persist="vpg-page-header"
             workspaceId={sidebarWorkspace.id}
             workspaceName={sidebarWorkspace.name}
             workspaceHref={workspaceHref}
@@ -1233,6 +1314,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
             {canComment && (
               <CommentsRail
                 client:idle
+                transition:persist="vpg-comments-rail"
                 workspaceId={sidebarWorkspace.id}
                 pageId={pageWithSource.page.id}
                 contentHash={pageWithSource.page.contentHash}
@@ -1247,11 +1329,16 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette client:idle workspaceId={sidebarWorkspace.id} />
+          <CommandPalette
+            client:idle
+            transition:persist="vpg-command-palette"
+            workspaceId={sidebarWorkspace.id}
+          />
         )}
 
         {!isPublicPublication && (
           <MobileTabBar
+            transition:persist="vpg-mobile-tabbar"
             pageId={pageWithSource.page.id}
             showComments={canComment}
             commentsBadge={initialCommentStats.open}
@@ -1262,18 +1349,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
   }
 
   {
-    /* Shell controller activation is deferred — the controller and
-      partial endpoints are built (apps/web/src/scripts/shell and
-      /api/workspaces/:wid/documents/*) but bootShell() is not yet
-      called from this route. The follow-up wires up the React
-      islands (CommentsRail, etc.) to a shell-swap event so they
-      reset state on each swap; today's ClientRouter-driven nav
-      already re-renders them correctly. Plan §16.5. */
-  }
-
-  {
-    /* Prose / editor / TOC initializers moved into AppLayout.astro so
-      they run uniformly under ClientRouter view transitions or the
-      future shell-driven swaps. */
+    /* Prose / editor / TOC initializers live in AppLayout.astro so
+      they run uniformly on every ClientRouter view transition. */
   }
 </AppLayout>

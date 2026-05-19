@@ -1,28 +1,38 @@
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import {
+  buildEnvelope,
+  folders as foldersService,
+  jsonWithEnvelope,
+} from "@vegastack/pages-services";
 import {
   assertResourceAccessAdmin,
   deleteResourceAccess,
   getApiRequestActor,
-  jsonAppError,
   listResourceAccess,
   setResourceAccess,
 } from "../../../../lib/access";
-import { ensureSeedData, workspaceService } from "../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
-function getResource(folderId: string) {
-  const folder = workspaceService.getFolder(folderId);
+async function getResource(
+  cookies: Parameters<APIRoute>[0]["cookies"],
+  request: Request,
+  folderId: string,
+) {
+  const { ctx } = await buildServiceContext({ cookies, request });
+  const folder = await foldersService.get(ctx, folderId);
   if (!folder) return null;
   return { scope: "folder" as const, folder };
 }
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
-    const resource = getResource(params.folderId ?? "");
+    const resource = await getResource(cookies, request, params.folderId ?? "");
     if (!resource) {
       return Response.json(
         {
@@ -31,17 +41,20 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
         { status: 404 },
       );
     }
-    await assertResourceAccessAdmin({ cookies, request, resource });
-    return Response.json(listResourceAccess(resource));
+    const { actor } = await assertResourceAccessAdmin({
+      cookies,
+      request,
+      resource,
+    });
+    return Response.json(await listResourceAccess(resource, actor));
   } catch (error) {
-    return jsonAppError(error, "Folder access listing failed.");
+    return serviceErrorToResponse(error, "Folder access listing failed.");
   }
 };
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
-    const resource = getResource(params.folderId ?? "");
+    const resource = await getResource(cookies, request, params.folderId ?? "");
     if (!resource) {
       return Response.json(
         {
@@ -57,9 +70,8 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       body: await request.json(),
     });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.folder.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.folder.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       { grant },
@@ -73,14 +85,13 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Folder access update failed.");
+    return serviceErrorToResponse(error, "Folder access update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
-    const resource = getResource(params.folderId ?? "");
+    const resource = await getResource(cookies, request, params.folderId ?? "");
     if (!resource) {
       return Response.json(
         {
@@ -97,9 +108,8 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       grantId: String(body.grant_id ?? ""),
     });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.folder.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.folder.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       { grant },
@@ -113,6 +123,6 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Folder access deletion failed.");
+    return serviceErrorToResponse(error, "Folder access deletion failed.");
   }
 };

@@ -1,6 +1,6 @@
 {
   "name": "@vegastack/pages-renderer",
-  "version": "0.1.13",
+  "version": "0.1.14-next.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -13,9 +13,13 @@
   "dependencies": {
     "@shikijs/rehype": "^4.0.0",
     "hast-util-to-string": "^3.0.1",
+    "katex": "^0.16.11",
+    "rehype-katex": "^7.0.1",
+    "rehype-parse": "^9.0.1",
     "rehype-sanitize": "^6.0.0",
     "rehype-stringify": "^10.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
     "shiki": "^4.0.0",

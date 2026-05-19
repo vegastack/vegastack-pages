@@ -1,11 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { GET } from "../[attachmentId]";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
-  attachmentService,
-  authService,
-  pageService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  attachments,
+  auth,
+  pages as pagesService,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
+import { GET } from "../[attachmentId]";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-attachment-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -21,23 +31,40 @@ function sessionCookies(sessionId: string) {
 
 describe("attachment API", () => {
   it("serves SVG attachments as downloads instead of inline documents", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "Attachment Test",
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
     });
-    const user = workspaceService.createUser({
+    const owner = await users.upsert(seedCtx, {
+      id: uniqueId("usr"),
+      email: `attachment-owner-${crypto.randomUUID()}@example.com`,
+      displayName: "Attachment Owner",
+      role: "user",
+    });
+    const reader = await users.upsert(seedCtx, {
       id: uniqueId("usr"),
       email: `attachment-${crypto.randomUUID()}@example.com`,
       displayName: "Attachment Reader",
       role: "user",
     });
-    workspaceService.addMember({
+    const workspace = await workspaces.create(seedCtx, {
+      id: uniqueId("wks"),
+      name: "Attachment Test",
+      slug: uniqueId("slug"),
+      firstAdminUserId: owner.id,
+    });
+    await workspaces.addMember(seedCtx, {
       workspaceId: workspace.id,
-      userId: user.id,
+      userId: reader.id,
       role: "reader",
     });
-    const session = authService.createSession(user.id);
-    const page = await pageService.createPage({
+    const session = await auth.createSession(seedCtx, { userId: reader.id });
+    const { ctx: ownerCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId: workspace.id,
+    });
+    ownerCtx.actor.userId = owner.id;
+    ownerCtx.actor.email = owner.email;
+    const created = await pagesService.create(ownerCtx, {
       id: uniqueId("pg"),
       workspaceId: workspace.id,
       folderPath: "",
@@ -45,13 +72,17 @@ describe("attachment API", () => {
       sourceType: "markdown",
       source: "# Attachment page",
     });
-    const attachment = await attachmentService.upload({
-      page: page.page,
+    const page = created.data.page;
+    const rawSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+    const body = btoa(rawSvg);
+    const attachment = await attachments.upload(ownerCtx, {
+      workspaceId: workspace.id,
+      pageId: page.id,
       filename: "chart.svg",
       contentType: "image/svg+xml",
-      base64Body: btoa(
-        '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
-      ),
+      body,
+      byteSize: rawSvg.length,
     });
 
     const response = await GET({

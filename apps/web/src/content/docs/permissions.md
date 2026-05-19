@@ -3,7 +3,7 @@ title: Permissions
 description: Roles at the instance, workspace, folder, and page level, and how they compose.
 category: Sharing
 order: 20
-lastUpdated: 2026-05-13
+lastUpdated: 2026-05-20
 ---
 
 Permissions are checked server-side on every read, write, search, export, attachment, comment, and MCP call. There is no permission state that lives only on the client.

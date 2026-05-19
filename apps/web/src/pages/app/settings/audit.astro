@@ -1,7 +1,8 @@
 ---
+import { audit, users } from "@vegastack/pages-services";
 import SettingsLayout from "../../../layouts/SettingsLayout.astro";
 import { loadSettings, formatDate } from "../../../lib/settings-data";
-import { auditService, workspaceService } from "../../../lib/runtime";
+import { buildServiceContext } from "../../../lib/service-context";
 
 export const prerender = false;
 
@@ -9,14 +10,36 @@ const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
 const { workspace } = result.context;
 
-const logs = auditService
-  .list({ workspaceId: workspace.id, limit: 80 })
-  .reverse();
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+  workspaceId: workspace.id,
+});
+
+// audit.list returns DESC by created_at — newest-first already.
+const logs = await audit.list(ctx, {
+  workspaceId: workspace.id,
+  limit: 80,
+});
+
+const actorIds = [
+  ...new Set(
+    logs
+      .map((log) => log.actorUserId)
+      .filter((id): id is string => Boolean(id)),
+  ),
+];
+const actorLookup = new Map<string, { email: string }>();
+await Promise.all(
+  actorIds.map(async (id) => {
+    const user = await users.getById(ctx, id);
+    if (user) actorLookup.set(id, { email: user.email });
+  }),
+);
 
 function actorLabel(actorUserId: string | null) {
   if (!actorUserId) return "System";
-  const user = workspaceService.getUser(actorUserId);
-  return user?.email ?? "(deleted user)";
+  return actorLookup.get(actorUserId)?.email ?? "(deleted user)";
 }
 ---
 

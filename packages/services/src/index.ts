@@ -17,10 +17,13 @@ export type {
   ServiceContext,
   RepoRegistry,
 } from "./context.ts";
+export { requireDb, requireObjectStore } from "./context.ts";
 export { ServiceError, isServiceError, httpStatusFor } from "./errors.ts";
 export type { ServiceErrorCode } from "./errors.ts";
 export { buildEnvelope, jsonWithEnvelope } from "./envelope.ts";
 export type { EnvelopeInput } from "./envelope.ts";
+export { encodeCursor, decodeCursor, clampLimit } from "./cursor.ts";
+export type { ListCursor, ListPageOptions, PaginatedResult } from "./cursor.ts";
 
 // Repo interfaces. Implementations live in apps/web/src/lib/runtime/repos.
 export type {
@@ -63,21 +66,6 @@ export type {
   CreateWorkspaceInput,
   CreateFolderInput,
 } from "./repo/workspace.repo.ts";
-export type {
-  TemplateRepo,
-  TemplateRecord,
-  TemplateWithSource,
-  TemplateBuilderDocument,
-  TemplateProperty,
-  CreateTemplateInput,
-  UpdateTemplateInput,
-  RenderTemplateInput,
-} from "./repo/template.repo.ts";
-export type {
-  AttachmentRepo,
-  AttachmentRecord,
-  AttachmentUploadInput,
-} from "./repo/attachment.repo.ts";
 
 // Application services. AUTHORIZATION CONTRACT: services validate
 // AUTHENTICATION (actor.userId present). They do NOT enforce
@@ -89,10 +77,50 @@ export * as favorites from "./favorites.service.ts";
 export * as pages from "./pages.service.ts";
 export * as comments from "./comments.service.ts";
 export * as workspaces from "./workspaces.service.ts";
-export * as templates from "./templates.service.ts";
+export * as setup from "./setup.service.ts";
+export * as users from "./users.service.ts";
+export * as folders from "./folders.service.ts";
+export * as auth from "./auth.service.ts";
+export * as rateLimit from "./rate-limit.service.ts";
+export * as audit from "./audit.service.ts";
+export * as reviewEvents from "./review-events.service.ts";
 export * as attachments from "./attachments.service.ts";
+export * as permissions from "./permissions.service.ts";
+export * as publications from "./publications.service.ts";
+export * as mcpSessions from "./mcp-sessions.service.ts";
+export type {
+  AgentSessionKind,
+  AgentSessionRecord,
+  McpSessionRecord,
+} from "./mcp-sessions.service.ts";
+export * as templates from "./templates.service.ts";
+export * as search from "./search.service.ts";
+export type {
+  PermissionGrant,
+  PermissionScope,
+  PermissionLevel,
+} from "./permissions.service.ts";
+export type {
+  PublicationRecord,
+  PublicationPermission,
+  PublicationResourceType,
+} from "./publications.service.ts";
+export type { AuditLogRecord } from "./audit.service.ts";
+export type { ReviewEventRecord } from "./review-events.service.ts";
+export type {
+  AttachmentRecord,
+  UploadAttachmentInput,
+} from "./attachments.service.ts";
+export type {
+  TemplateRecord,
+  TemplateVersionRecord,
+  TemplateSourceType,
+  TemplateWithSource,
+  CreateTemplateInput,
+  UpdateTemplateInput,
+  RenderInput as RenderTemplateInput,
+  RenderResult as RenderTemplateResult,
+} from "./templates.service.ts";
 export type { ServiceOutput } from "./pages.service.ts";
 export type { CommentMutationResult } from "./comments.service.ts";
 export type { WorkspaceMutation } from "./workspaces.service.ts";
-export type { TemplateMutation } from "./templates.service.ts";
-export type { AttachmentMutation } from "./attachments.service.ts";

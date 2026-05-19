@@ -1,27 +1,35 @@
-# Comments And Anchors
+# Comments and anchors
 
-Use comment tools when the task is to leave, inspect, move, reply to, resolve, or delete review feedback.
+Use when leaving, inspecting, moving, replying to, resolving, or deleting review feedback.
 
-## Reading Comments
+## Reading
 
-`list_comments` / `vpg comments` returns threads with `anchor_context`. Always inspect:
+`fetch include: ["comments"]` (MCP) or `vpg comments list <page>` (CLI). Both honor `status: "open" | "resolved" | "all"` (defaults: MCP `all`, CLI `open`).
 
-- `surface`: `prose` for rendered Markdown/MDX, `html` for HTML preview pins.
-- `kind`: `text` for selected text, `point` for pinned coordinates.
-- `confidence`: `active` is reliable; `fuzzy` or `stale` means inspect nearby context before editing.
-- `selectedText`, `prefixText`, `suffixText`, `sourceStart`, `sourceEnd`: use these to find the exact source span.
-- `selector`: for HTML pins, use `selector.point`, `selector.element`, `selector.textHit`, and `nearbyText` to locate the visual target.
+Inspect on every thread:
 
-## Markdown And MDX Text Comments
+- `surface` — `prose` (Markdown/MDX) or `html` (HTML preview pins).
+- `kind` — `text` (selected text in source) or `point` (visual coordinate).
+- `confidence` — `active` is safe to act on; `fuzzy`, `reanchored`, `stale`, `manual` mean read `nearbyText` / `prefixText` / `suffixText` before mutating source.
+- `selectedText`, `prefixText`, `suffixText`, `sourceStart`, `sourceEnd` — text anchor span.
+- `selector.point`, `selector.element`, `selector.textHit`, `nearbyText` — HTML pin context.
 
-Create text comments with `anchor_kind: "text"` and `surface: "prose"`.
+## Anchor coercion (server rules)
+
+The server normalizes anchors via `coerceCommentAnchor` before storing them:
+
+- `anchor_kind: "text"` + `surface: "prose"` — must include `selected_text`; `source_start` / `source_end` accepted; offsets optional if `prefix_text` + `suffix_text` are sufficient to locate the span.
+- `anchor_kind: "point"` + `surface: "html"` — must include `selector.point` with `x`, `y` in `[0, 1]` (`coordinateSpace: "document"`). Offsets are ignored.
+- Mixing `point` with `surface: "prose"` or `text` with `surface: "html"` is rejected.
+
+## Markdown / MDX text comments
 
 MCP:
 
 ```json
 {
-  "workspace_id": "wks_123",
-  "page_id": "pg_123",
+  "workspace_id": "wks_abc123",
+  "page_id": "pg_xyz789",
   "body": "Please clarify this.",
   "anchor": {
     "selected_text": "ambiguous phrase",
@@ -38,20 +46,22 @@ MCP:
 CLI:
 
 ```sh
-vpg comment pg_123 --body "Please clarify this." --selected-text "ambiguous phrase" --source-start 120 --source-end 136 --prefix-text "The " --suffix-text " needs"
+vpg --agent comments create pg_xyz789 \
+  --body "Please clarify this." \
+  --selected-text "ambiguous phrase" \
+  --source-start 120 --source-end 136 \
+  --anchor-kind text --surface prose
 ```
 
-If offsets are unknown, provide selected text plus prefix/suffix. The API will try to place the anchor in source.
+If you don't know offsets, send `selected_text` + `prefix_text` + `suffix_text` and let the server place it.
 
-## HTML Pin Comments
+## HTML pin comments
 
-HTML pages render in an isolated preview. Comments are usually point pins, not source-text anchors. Create them with `anchor_kind: "point"`, `surface: "html"`, and a `selector.point` coordinate. Coordinates are normalized from `0` to `1`.
-
-MCP:
+HTML pages render in an isolated preview; comments are point pins, not text anchors.
 
 ```json
 {
-  "workspace_id": "wks_123",
+  "workspace_id": "wks_abc123",
   "page_id": "pg_html",
   "body": "This hero CTA needs the final copy.",
   "anchor": {
@@ -73,19 +83,51 @@ MCP:
 }
 ```
 
-CLI:
+CLI: pass the anchor as JSON via `--anchor-file`:
 
 ```sh
-vpg comment pg_html --body "This hero CTA needs the final copy." --anchor-file html-pin.json
+vpg --agent comments create pg_html --body "..." --anchor-file html-pin.json
 ```
 
-Use `update_comment_anchor` / `vpg update-anchor` only to move a fuzzy, stale, or manually repositioned pin. Do not rewrite anchors while addressing text feedback unless the comment is clearly disconnected.
+## Acting on comments
 
-## Acting On Comments
+1. List threads, filter to actionable ones.
+2. For text comments: `fetch include: ["source","edit_tokens"]`, validate, patch with find/replace, reply.
+3. For HTML pins: edit markup/CSS/copy; validate as `html`; reply.
+4. Resolve only after the change is in. Use `update_thread status: "open"` (MCP) or `vpg comments reopen` (CLI) to undo a premature resolve.
+5. Move a fuzzy/stale anchor with `update_thread anchor: {...}` or `vpg comments move-anchor` — don't rewrite anchors while addressing feedback.
+6. Delete only on explicit request; emits a `comment.deleted` review event and removes the whole conversation (admin-only).
 
-1. List comments and identify actionable threads.
-2. For text comments, fetch source with `prepare_page_edit` / `vpg pages prepare-edit`, patch with concurrency tokens, then validate.
-3. For HTML pin comments, inspect the HTML source and selector context. Patch the relevant markup, CSS, or copy. Validate as `html`.
-4. Reply with what changed. Resolve only after the feedback is handled.
-5. Use `update_thread` with `status: "open"` / `vpg unresolve` if a thread was resolved by mistake.
-6. Delete threads only when explicitly requested; deletion requires admin permission and removes the whole conversation.
+## Agent attribution
+
+For agent-generated replies, attach `agent_name`, `agent_model`, `agent_session_id`:
+
+```json
+{
+  "workspace_id": "wks_abc123",
+  "thread_id": "thr_456",
+  "body": "Fixed.",
+  "complete": true,
+  "status": "resolved",
+  "agent_name": "Claude",
+  "agent_model": "claude-opus-4-7",
+  "agent_session_id": "sess_42"
+}
+```
+
+```sh
+vpg --agent comments complete thr_456 --body "Fixed." --resolve \
+  --agent-name Claude --agent-model claude-opus-4-7 --agent-session-id sess_42
+```
+
+## CLI cheat sheet
+
+```sh
+vpg --agent comments list pg_xyz789 --status open
+vpg --agent comments reply thr_456 --body "Thanks, fixed."
+vpg --agent comments resolve thr_456
+vpg --agent comments reopen thr_456
+vpg --agent comments complete thr_456 --body "Fixed and verified." --resolve --agent-name Claude
+vpg --agent comments delete thr_456 --yes
+vpg --agent comments move-anchor thr_456 --anchor-file html-pin.json
+```

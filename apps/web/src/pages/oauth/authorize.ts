@@ -1,10 +1,11 @@
 import type { APIRoute } from "astro";
+import { workspaces } from "@vegastack/pages-services";
 import { getRequestActor } from "../../lib/access";
 import {
   clientRedirectUriIsRegistered,
   getOAuthClient,
 } from "../../lib/oauth/clients";
-import { workspaceService } from "../../lib/runtime";
+import { buildServiceContext } from "../../lib/service-context";
 import { vendorForClient } from "../../lib/oauth/vendor-map";
 
 export const prerender = false;
@@ -112,7 +113,7 @@ export const GET: APIRoute = async ({ cookies, url }) => {
       "redirect_uri does not match any URI registered for this client.",
     );
   }
-  const actor = getRequestActor(cookies);
+  const actor = await getRequestActor(cookies);
   if (!actor.user) {
     cookies.set(PENDING_COOKIE, encodePending(params), {
       httpOnly: true,
@@ -128,14 +129,15 @@ export const GET: APIRoute = async ({ cookies, url }) => {
     target.searchParams.set("redirect_to", `${url.pathname}${url.search}`);
     return Response.redirect(target.toString(), 302);
   }
-  const workspaces = workspaceService
-    .listWorkspacesForUser(actor.user.id)
-    .map((workspace) => ({
-      id: workspace.id,
-      name: workspace.name,
-      slug: workspace.slug,
-    }));
-  if (workspaces.length === 0) {
+  const { ctx } = await buildServiceContext({ cookies });
+  const userWorkspaces = (
+    await workspaces.listForUser(ctx, { userId: actor.user.id })
+  ).map((workspace) => ({
+    id: workspace.id,
+    name: workspace.name,
+    slug: workspace.slug,
+  }));
+  if (userWorkspaces.length === 0) {
     return redirectWithOAuthError(
       params.redirectUri,
       "access_denied",
@@ -148,7 +150,13 @@ export const GET: APIRoute = async ({ cookies, url }) => {
     redirectUris: client.redirectUris,
   });
   return new Response(
-    renderConsent(params, client, workspaces, vendor.label, actor.user.email),
+    renderConsent(
+      params,
+      client,
+      userWorkspaces,
+      vendor.label,
+      actor.user.email,
+    ),
     {
       status: 200,
       headers: {
@@ -162,7 +170,7 @@ export const GET: APIRoute = async ({ cookies, url }) => {
 function renderConsent(
   params: AuthorizeParams,
   client: { clientName: string; redirectUris: string[] },
-  workspaces: Array<{ id: string; name: string; slug: string }>,
+  userWorkspaces: Array<{ id: string; name: string; slug: string }>,
   vendorLabel: string,
   email: string,
 ) {
@@ -180,7 +188,7 @@ function renderConsent(
         `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value ?? "")}" />`,
     )
     .join("\n");
-  const workspaceOptions = workspaces
+  const workspaceOptions = userWorkspaces
     .map(
       (workspace, idx) =>
         `<label class="opt"><input type="radio" name="workspace_id" value="${escapeHtml(workspace.id)}" ${idx === 0 ? "checked" : ""} /> <span>${escapeHtml(workspace.name)} <small>${escapeHtml(workspace.slug)}</small></span></label>`,

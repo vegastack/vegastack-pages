@@ -1,5 +1,5 @@
 import { AppError, slugifyTitle } from "@vegastack/pages-core";
-import { workspaceService } from "./runtime";
+import { workspaces, type ServiceContext } from "@vegastack/pages-services";
 
 export type SignupIntent = {
   displayName: string;
@@ -38,17 +38,27 @@ export function parseSignupIntentRedirect(value: string): SignupIntent | null {
   }
 }
 
-export function createUniqueWorkspace(name: string) {
-  const baseSlug = slugifyTitle(name);
+// Create a workspace with a slug derived from the title; retry up to 8
+// times with a random suffix if there's a collision. Workspaces.create
+// in @vegastack/pages-services now auto-picks a free slug when none is
+// supplied — but we keep an explicit retry loop here for callers that
+// need to surface meaningful errors per attempt.
+export async function createUniqueWorkspace(
+  ctx: ServiceContext,
+  name: string,
+  firstAdminUserId?: string,
+) {
+  const baseSlug = slugifyTitle(name) || "workspace";
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const suffix =
       attempt === 0
         ? ""
         : `-${crypto.randomUUID().replaceAll("-", "").slice(0, 6)}`;
     try {
-      return workspaceService.createWorkspace({
+      return await workspaces.create(ctx, {
         name,
         slug: `${baseSlug}${suffix}`,
+        firstAdminUserId,
       });
     } catch (error) {
       if (!(error instanceof AppError) || error.code !== "VALIDATION_ERROR") {

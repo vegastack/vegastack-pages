@@ -10,7 +10,7 @@ VegaStack Pages turns agent-authored Markdown into a reviewable page with source
 
 ## Agent workflow
 
-1. An agent creates a page using \`vpg create\` or MCP.
+1. An agent creates a page using \`vpg pages create\` or MCP \`create_page\`.
 2. A reviewer opens the shared page.
 3. The reviewer selects text and adds comments.
 4. The agent receives selected text and context.
@@ -46,7 +46,7 @@ Agents create pages, ask for review, and wait for reviewer feedback without losi
 Use the CLI or MCP tool to publish Markdown, MDX, or HTML into a workspace page.
 
 \`\`\`bash
-vpg create --title "API Plan" --file docs/plans/api.md
+vpg pages create --title "API Plan" --file docs/plans/api.md
 \`\`\`
 
 ## Wait conditions
@@ -76,12 +76,11 @@ https://your-domain.example/mcp
 
 ## Useful tools
 
-- \`create_page\`
-- \`update_page\`
-- \`wait_for_review\`
-- \`list_review_events\`
-- \`update_thread\`
-- \`search_workspace\`
+- \`fetch\` — mega-read; routes by \`resource_id\` prefix (\`pg_/fld_/tpl_/thr_/pub_/wks_/me\`) and accepts \`include[]\` for sub-data (\`source\`, \`edit_tokens\`, \`comments\`, \`versions\`, \`publication\`, \`members\`, ...)
+- \`create_page\` / \`update_page\` (three modes: source / find-replace / checkpoint) / \`move_page\` / \`restore_page_version\`
+- \`create_comment\` / \`update_thread\` (reply, resolve, reopen, anchor, complete in one call) / \`delete_thread\`
+- \`apply_publication\` / \`delete_publication\` (page + folder)
+- \`search\`, \`wait_for_review\`, \`validate_page_source\`, \`whoami\`
 
 ## Local development
 
@@ -92,5 +91,6 @@ pnpm dev -- --host 127.0.0.1 --port 4322
 \`\`\`
 
 For tunneled or public testing, set \`VPG_MCP_TOKEN\` and configure clients to send \`Authorization: Bearer <token>\`.
-Agents should use \`prepare_page_edit\` before edits, then \`patch_page\` or \`update_page\` with the returned \`base_version_id\` and \`base_content_hash\`.
+
+Safe edit cycle: \`fetch\` the page with \`include: ["source", "edit_tokens"]\`, then \`update_page\` with the returned \`base_version_id\` (and \`base_content_hash\` for stricter optimistic locking). On a 409 conflict, refetch and reapply.
 `;

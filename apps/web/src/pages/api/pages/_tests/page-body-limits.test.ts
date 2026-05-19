@@ -1,11 +1,21 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
-  authService,
-  pageService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  auth,
+  pages as pagesService,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { POST as createComment } from "../[pageId]/comments";
 import { PUT as updateSource } from "../[pageId]/source";
+
+beforeAll(() => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-body-limits-"));
+});
 
 function uniqueId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -20,21 +30,29 @@ function sessionCookies(sessionId: string) {
 }
 
 async function createEditablePage() {
-  const workspace = workspaceService.createWorkspace({
-    id: uniqueId("wks"),
-    name: `Body Limits ${crypto.randomUUID()}`,
+  const { ctx: seedCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
   });
-  const user = workspaceService.createUser({
+  const user = await users.upsert(seedCtx, {
     id: uniqueId("usr"),
     email: `body-limits-${crypto.randomUUID()}@example.test`,
     displayName: "Body Limit Editor",
+    role: "user",
   });
-  workspaceService.addMember({
+  const workspace = await workspaces.create(seedCtx, {
+    id: uniqueId("wks"),
+    name: `Body Limits ${crypto.randomUUID()}`,
+    slug: uniqueId("slug"),
+    firstAdminUserId: user.id,
+  });
+  const session = await auth.createSession(seedCtx, { userId: user.id });
+  const { ctx: actorCtx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
     workspaceId: workspace.id,
-    userId: user.id,
-    role: "admin",
   });
-  const page = await pageService.createPage({
+  actorCtx.actor.userId = user.id;
+  actorCtx.actor.email = user.email;
+  const created = await pagesService.create(actorCtx, {
     id: uniqueId("pg"),
     workspaceId: workspace.id,
     folderPath: "",
@@ -43,9 +61,11 @@ async function createEditablePage() {
     source: "# Body limit page",
   });
   return {
-    page: page.page,
+    page: created.data.page,
+    contentHash: created.data.page.contentHash,
     workspace,
-    cookies: sessionCookies(authService.createSession(user.id).id),
+    actorCtx,
+    cookies: sessionCookies(session.id),
   };
 }
 
@@ -57,7 +77,7 @@ afterEach(() => {
 describe("page API body limits", () => {
   it("rejects oversized page source before updating the page", async () => {
     process.env.VPG_MAX_PAGE_SOURCE_BYTES = "32";
-    const { page, workspace, cookies } = await createEditablePage();
+    const { page, workspace, cookies, actorCtx } = await createEditablePage();
 
     const response = await updateSource({
       cookies,
@@ -81,14 +101,14 @@ describe("page API body limits", () => {
 
     expect(response.status).toBe(413);
     expect(body.error?.code).toBe("PAYLOAD_TOO_LARGE");
-    expect((await pageService.getPage(page.id))?.source).toBe(
-      "# Body limit page",
-    );
+    const after = await pagesService.get(actorCtx, page.id);
+    expect(after?.source).toBe("# Body limit page");
   });
 
   it("rejects oversized comment bodies before creating a thread", async () => {
     process.env.VPG_MAX_PUBLIC_COMMENT_BODY_BYTES = "16";
-    const { page, workspace, cookies } = await createEditablePage();
+    const { page, workspace, cookies, contentHash } =
+      await createEditablePage();
 
     const response = await createComment({
       cookies,
@@ -104,7 +124,7 @@ describe("page API body limits", () => {
               selected_text: "Body",
               source_start: 2,
               source_end: 6,
-              content_hash: page.contentHash,
+              content_hash: contentHash,
             },
           }),
         },

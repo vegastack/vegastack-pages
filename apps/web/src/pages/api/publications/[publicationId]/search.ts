@@ -1,23 +1,23 @@
 import type { APIRoute } from "astro";
 import {
+  folders,
+  pages as pagesService,
+  publications,
+  search,
+} from "@vegastack/pages-services";
+import {
   jsonAppError,
   publicationPasswordCookieName,
   publicationPasswordCookieValue,
 } from "../../../../lib/access";
-import {
-  ensureSeedData,
-  pageService,
-  publicationService,
-  searchIndexedPages,
-  workspaceService,
-} from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
-export const GET: APIRoute = async ({ cookies, params, url }) => {
+export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
-    const publication = publicationService.get(params.publicationId ?? "");
+    const { ctx } = await buildServiceContext({ cookies, request });
+    const publication = await publications.get(ctx, params.publicationId ?? "");
     if (!publication || publication.revokedAt) {
       return Response.json(
         {
@@ -60,19 +60,28 @@ export const GET: APIRoute = async ({ cookies, params, url }) => {
       }
     }
     const query = url.searchParams.get("q") ?? "";
-    const results = await searchIndexedPages(
-      publication.workspaceId,
-      query,
-      Math.min(Number(url.searchParams.get("limit") ?? 10) || 10, 25),
+    const limit = Math.min(
+      Number(url.searchParams.get("limit") ?? 10) || 10,
+      25,
     );
+    const results = await search.query(ctx, {
+      workspaceId: publication.workspaceId,
+      query,
+      limit,
+      resourceTypes: ["page"],
+    });
     const allowedPageIds = new Set<string>();
     if (publication.resourceType === "page") {
       allowedPageIds.add(publication.resourceId);
     } else {
-      const folder = workspaceService.getFolder(publication.resourceId);
+      const folder = await folders.get(ctx, publication.resourceId);
       if (folder) {
         const prefix = `${folder.path}/`;
-        for (const page of pageService.listPages(publication.workspaceId)) {
+        const workspacePages = await pagesService.list(
+          ctx,
+          publication.workspaceId,
+        );
+        for (const page of workspacePages) {
           if (
             page.folderPath === folder.path ||
             page.folderPath.startsWith(prefix)

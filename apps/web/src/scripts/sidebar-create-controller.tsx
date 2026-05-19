@@ -83,9 +83,21 @@ export function initSidebarCreateController() {
             );
           });
         })
-        .catch(() => {
-          window.alert(
-            "Create controls could not be loaded. Refresh and try again.",
+        .catch((error: unknown) => {
+          // Log the real cause to the browser console (and let DevTools
+          // preserve the stack trace) before surfacing the user-facing
+          // toast. Without the console line, sidebar mount failures
+          // are completely opaque to operators.
+          console.error("[vpg-sidebar-create] mount failed:", error);
+          const detail =
+            error instanceof Error && error.message ? error.message : "";
+          // Sonner toast via the global helper installed in
+          // SonnerHost — same surface every other controller uses, so
+          // styling and dismissal stay consistent. Native `alert` is
+          // blocking and out of place in the Sonner-toast UX.
+          window.vpgToast?.error(
+            "Create controls could not be loaded. Refresh and try again." +
+              (detail ? `\n${detail}` : ""),
           );
         });
     },

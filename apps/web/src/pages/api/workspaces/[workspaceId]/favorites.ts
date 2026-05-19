@@ -1,21 +1,20 @@
 import { AppError, hasPermission } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
+  favorites as favoritesService,
+  pages as pagesService,
+} from "@vegastack/pages-services";
+import {
   getApiRequestActor,
   jsonAppError,
   resolveActorPermission,
 } from "../../../../lib/access";
-import {
-  ensureSeedData,
-  favoriteService,
-  pageService,
-} from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
     if (!workspaceId) {
       throw new AppError("VALIDATION_ERROR", "workspaceId is required.", 400);
@@ -25,16 +24,29 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
     if (!actor.user) {
       throw new AppError("AUTH_REQUIRED", "Sign in to manage favorites.", 401);
     }
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
 
     const pageById = new Map(
-      pageService.listPages(workspaceId).map((page) => [page.id, page]),
+      (await pagesService.list(ctx, workspaceId)).map((page) => [
+        page.id,
+        page,
+      ]),
     );
-    const favorites = favoriteService
-      .listForWorkspace(actor.user.id, workspaceId)
-      .map((favorite) => {
+    const favoriteRows = await favoritesService.listForWorkspace(ctx, {
+      workspaceId,
+    });
+    // Resolve per-page permissions in parallel — async permission checks
+    // can't sit inside a sync `.map` callback. After resolution we drop
+    // the nulls (page missing OR no read access) in one pass.
+    const favoritesWithMaybe = await Promise.all(
+      favoriteRows.map(async (favorite) => {
         const page = pageById.get(favorite.pageId);
         if (!page) return null;
-        const permission = resolveActorPermission({ actor, page });
+        const permission = await resolveActorPermission({ actor, page });
         if (!hasPermission(permission, "read")) return null;
         return {
           page_id: page.id,
@@ -44,10 +56,11 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
           url: `/p/${page.slugId}`,
           created_at: favorite.createdAt,
         };
-      })
-      .filter((favorite): favorite is NonNullable<typeof favorite> =>
-        Boolean(favorite),
-      );
+      }),
+    );
+    const favorites = favoritesWithMaybe.filter(
+      (favorite): favorite is NonNullable<typeof favorite> => Boolean(favorite),
+    );
 
     return Response.json({ favorites });
   } catch (error) {

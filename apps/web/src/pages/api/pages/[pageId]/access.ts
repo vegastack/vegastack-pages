@@ -1,20 +1,31 @@
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
+import {
+  buildEnvelope,
+  jsonWithEnvelope,
+  pages as pagesService,
+} from "@vegastack/pages-services";
 import {
   assertResourceAccessAdmin,
   deleteResourceAccess,
   getApiRequestActor,
-  jsonAppError,
   listResourceAccess,
   setResourceAccess,
 } from "../../../../lib/access";
-import { ensureSeedData, pageService } from "../../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
 
-async function getResource(pageId: string) {
-  const page = await pageService.getPage(pageId);
+async function getResource(
+  cookies: Parameters<typeof getApiRequestActor>[0],
+  request: Request,
+  pageId: string,
+) {
+  const { ctx } = await buildServiceContext({ cookies, request });
+  const page = await pagesService.get(ctx, pageId);
   if (!page) {
     return null;
   }
@@ -23,25 +34,27 @@ async function getResource(pageId: string) {
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
-    const resource = await getResource(params.pageId ?? "");
+    const resource = await getResource(cookies, request, params.pageId ?? "");
     if (!resource) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
         { status: 404 },
       );
     }
-    await assertResourceAccessAdmin({ cookies, request, resource });
-    return Response.json(listResourceAccess(resource));
+    const { actor } = await assertResourceAccessAdmin({
+      cookies,
+      request,
+      resource,
+    });
+    return Response.json(await listResourceAccess(resource, actor));
   } catch (error) {
-    return jsonAppError(error, "Page access listing failed.");
+    return serviceErrorToResponse(error, "Page access listing failed.");
   }
 };
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
-    const resource = await getResource(params.pageId ?? "");
+    const resource = await getResource(cookies, request, params.pageId ?? "");
     if (!resource) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
@@ -55,9 +68,8 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       body: await request.json(),
     });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.page.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.page.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       { grant },
@@ -71,14 +83,13 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Page access update failed.");
+    return serviceErrorToResponse(error, "Page access update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
-    const resource = await getResource(params.pageId ?? "");
+    const resource = await getResource(cookies, request, params.pageId ?? "");
     if (!resource) {
       return Response.json(
         { error: { code: "PAGE_NOT_FOUND", message: "Page was not found." } },
@@ -93,9 +104,8 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       grantId: String(body.grant_id ?? ""),
     });
     const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      resource.page.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, resource.page.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       { grant },
@@ -109,6 +119,6 @@ export const DELETE: APIRoute = async ({ cookies, params, request }) => {
       }),
     );
   } catch (error) {
-    return jsonAppError(error, "Page access deletion failed.");
+    return serviceErrorToResponse(error, "Page access deletion failed.");
   }
 };

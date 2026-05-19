@@ -1,11 +1,8 @@
 import { AppError, type UserRecord } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { audit, users } from "@vegastack/pages-services";
 import { getApiRequestActor, jsonAppError } from "../../../lib/access";
-import {
-  auditService,
-  ensureSeedData,
-  workspaceService,
-} from "../../../lib/runtime";
+import { buildServiceContext } from "../../../lib/service-context";
 
 export const prerender = false;
 
@@ -57,7 +54,6 @@ function publicUserShape(user: UserRecord) {
 
 export const GET: APIRoute = async ({ cookies, request }) => {
   try {
-    await ensureSeedData();
     const actor = await getApiRequestActor(cookies, request);
     if (!actor.user) {
       throw new AppError("AUTH_REQUIRED", "Sign-in required.", 401);
@@ -70,7 +66,6 @@ export const GET: APIRoute = async ({ cookies, request }) => {
 
 export const PATCH: APIRoute = async ({ cookies, request }) => {
   try {
-    await ensureSeedData();
     const actor = await getApiRequestActor(cookies, request);
     if (!actor.user) {
       throw new AppError("AUTH_REQUIRED", "Sign-in required.", 401);
@@ -116,7 +111,8 @@ export const PATCH: APIRoute = async ({ cookies, request }) => {
       });
     }
 
-    const updated = workspaceService.updateUser({
+    const { ctx } = await buildServiceContext({ cookies, request });
+    const updatedUser = await users.setDisplayName(ctx, {
       userId: actor.user.id,
       displayName: nextDisplayName,
     });
@@ -124,7 +120,7 @@ export const PATCH: APIRoute = async ({ cookies, request }) => {
     // Profile changes are audited at the user level. There's no workspace
     // scope on this action, so the activity surfaces in every workspace the
     // user belongs to via the user_id filter.
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: null,
       actorUserId: actor.user.id,
       action: "profile.display_name_changed",
@@ -136,7 +132,13 @@ export const PATCH: APIRoute = async ({ cookies, request }) => {
       },
     });
 
-    return Response.json({ user: publicUserShape(updated), changed: true });
+    return Response.json({
+      user: publicUserShape({
+        ...updatedUser,
+        displayName: updatedUser.displayName ?? updatedUser.email,
+      }),
+      changed: true,
+    });
   } catch (error) {
     return jsonAppError(error, "Failed to load or update the current user.");
   }

@@ -1,45 +1,73 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
 import {
+  audit,
+  folders as foldersService,
   pages as pagesService,
-  isServiceError,
+  permissions as permissionsService,
+  rateLimit,
+  reviewEvents,
+  workspaces as workspacesService,
 } from "@vegastack/pages-services";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
+import { getApiRequestActor } from "../../../../lib/access";
+import { clientRateLimitKey } from "../../../../lib/client-address";
+import { scheduleIndexPage } from "../../../../lib/runtime";
 import {
-  auditService,
-  ensureSeedData,
-  scheduleIndexPage,
-  permissionService,
-  reviewEventService,
-  workspaceService,
-} from "../../../../lib/runtime";
-import { buildServiceContext } from "../../../../lib/service-context";
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const body = await request.json();
     const workspaceId = params.workspaceId?.trim();
     if (!workspaceId) {
       throw new AppError("VALIDATION_ERROR", "workspace id is required.", 400);
     }
     const actor = await getApiRequestActor(cookies, request);
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
     const member = actor.user
-      ? workspaceService.getMember(workspaceId, actor.user.id)
+      ? await workspacesService.getMember(ctx, {
+          workspaceId,
+          userId: actor.user.id,
+        })
       : null;
     const permission =
       actor.workspaceId && actor.workspaceId !== workspaceId
         ? "none"
-        : permissionService.resolve({
-            user: actor.user,
-            member,
+        : await permissionsService.resolve(ctx, {
             workspaceId,
+            userId: actor.user?.id ?? "",
+            scope: "workspace",
+            targetId: workspaceId,
+            memberRole: member?.role ?? null,
+            instanceRole: actor.user?.role,
           });
-    permissionService.assert({ actual: permission, required: "write" });
+    permissionsService.assertLevel({ actual: permission, required: "write" });
+    // Anti-abuse: 60 page creations per user per minute. Generous for
+    // template-driven bulk creates, tight enough to slow runaway scripts
+    // and the public-signup-on case where any signed-in user can create.
+    const rl = await rateLimit.check(ctx, {
+      key: `pages-create:${actor.user?.id ?? clientRateLimitKey(request, "anon")}`,
+      limit: 60,
+      windowMs: 60_000,
+    });
+    if (!rl.ok) {
+      throw new AppError(
+        "RATE_LIMITED",
+        "Too many requests. Try again later.",
+        429,
+        { reset_at: rl.resetAt },
+      );
+    }
     const folder = body.folder_id
-      ? workspaceService.getFolder(String(body.folder_id))
+      ? await foldersService.get(ctx, String(body.folder_id))
       : null;
     if (body.folder_id && (!folder || folder.workspaceId !== workspaceId)) {
       throw new AppError(
@@ -48,11 +76,6 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         404,
       );
     }
-    const { ctx } = await buildServiceContext({
-      cookies,
-      request,
-      workspaceId,
-    });
     const result = await pagesService.create(ctx, {
       workspaceId,
       folderPath:
@@ -67,7 +90,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
     });
     const created = result.data;
     scheduleIndexPage(created.page.id);
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId: created.page.workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "page.created",
@@ -78,7 +101,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         folder_path: created.page.folderPath,
       },
     });
-    reviewEventService.emit({
+    await reviewEvents.emit(ctx, {
       workspaceId: created.page.workspaceId,
       pageId: created.page.id,
       type: "page.created",
@@ -94,12 +117,6 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
       envelope: result.envelope,
     });
   } catch (error) {
-    if (isServiceError(error)) {
-      return Response.json(
-        { error: { code: error.code, message: error.message } },
-        { status: error.status },
-      );
-    }
-    return jsonAppError(error, "Page creation failed.");
+    return serviceErrorToResponse(error, "Page creation failed.");
   }
 };

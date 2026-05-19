@@ -1,20 +1,22 @@
-import { AppError } from "@vegastack/pages-core";
+import { AppError, hasPermission } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { buildEnvelope, jsonWithEnvelope } from "@vegastack/pages-services";
-import { assertApiWorkspaceId, jsonAppError } from "../../../../lib/access";
-import { assertPublicationPasswordPolicy } from "../../../../lib/share-password-policy";
 import {
-  ensureSeedData,
-  pageService,
-  permissionService,
-  publicationService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  buildEnvelope,
+  folders,
+  isServiceError,
+  jsonWithEnvelope,
+  pages as pagesService,
+  publications,
+} from "@vegastack/pages-services";
 import {
+  assertApiWorkspaceId,
+  getApiRequestActor,
+  jsonAppError,
   resolveActorPermission,
   resolveFolderActorPermission,
-  getApiRequestActor,
 } from "../../../../lib/access";
+import { assertPublicationPasswordPolicy } from "../../../../lib/share-password-policy";
+import { buildServiceContext } from "../../../../lib/service-context";
 import { buildWorkspaceNavigation } from "../../../../lib/workspace-navigation";
 
 export const prerender = false;
@@ -25,8 +27,16 @@ async function assertPublicationAdmin(input: {
   url: URL;
   publicationId: string;
 }) {
-  await ensureSeedData();
-  const publication = publicationService.get(input.publicationId);
+  // Look up the publication first to learn its workspace, then build
+  // the per-workspace ctx for the actual mutation below.
+  const bootstrap = await buildServiceContext({
+    cookies: input.cookies,
+    request: input.request,
+  });
+  const publication = await publications.get(
+    bootstrap.ctx,
+    input.publicationId,
+  );
   if (!publication) {
     throw new AppError(
       "PUBLICATION_NOT_FOUND",
@@ -39,33 +49,41 @@ async function assertPublicationAdmin(input: {
     workspaceId: publication.workspaceId,
   });
   const actor = await getApiRequestActor(input.cookies, input.request);
-  const actual =
-    publication.resourceType === "page"
-      ? (() => {
-          const page = pageService
-            .listPages(publication.workspaceId)
-            .find((candidate) => candidate.id === publication.resourceId);
-          if (!page)
-            throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
-          return resolveActorPermission({ actor, page });
-        })()
-      : (() => {
-          const folder = workspaceService.getFolder(publication.resourceId);
-          if (!folder)
-            throw new AppError(
-              "FOLDER_NOT_FOUND",
-              "Folder was not found.",
-              404,
-            );
-          return resolveFolderActorPermission({ actor, folder });
-        })();
-  permissionService.assert({ actual, required: "admin" });
-  return publication;
+  let actual: Awaited<ReturnType<typeof resolveActorPermission>>;
+  if (publication.resourceType === "page") {
+    // pages.list returns the full workspace listing; find the target
+    // page so the legacy resolveActorPermission helper can compute the
+    // effective level (membership + grants).
+    const pageList = await pagesService.list(
+      bootstrap.ctx,
+      publication.workspaceId,
+    );
+    const page = pageList.find(
+      (candidate) => candidate.id === publication.resourceId,
+    );
+    if (!page) {
+      throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
+    }
+    actual = await resolveActorPermission({ actor, page });
+  } else {
+    const folder = await folders.get(bootstrap.ctx, publication.resourceId);
+    if (!folder) {
+      throw new AppError("FOLDER_NOT_FOUND", "Folder was not found.", 404);
+    }
+    actual = await resolveFolderActorPermission({ actor, folder });
+  }
+  if (!hasPermission(actual, "admin")) {
+    throw new AppError("PERMISSION_DENIED", "Insufficient permission.", 403, {
+      required: "admin",
+      actual,
+    });
+  }
+  return { actor, publication, ctx: bootstrap.ctx };
 }
 
 export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    const publication = await assertPublicationAdmin({
+    const { actor, publication, ctx } = await assertPublicationAdmin({
       cookies,
       request,
       url,
@@ -79,7 +97,7 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
           ? String(body.password)
           : null;
     if (password !== undefined) assertPublicationPasswordPolicy(password);
-    const updated = await publicationService.update(publication.id, {
+    const updated = await publications.update(ctx, publication.id, {
       permission:
         body.permission === "view" ||
         body.permission === "comment" ||
@@ -98,10 +116,8 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
           ? undefined
           : Boolean(body.indexing_enabled),
     });
-    const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      publication.workspaceId,
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, publication.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       { publication: updated },
@@ -115,23 +131,27 @@ export const PATCH: APIRoute = async ({ cookies, params, request, url }) => {
       }),
     );
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Publication update failed.");
   }
 };
 
 export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    const publication = await assertPublicationAdmin({
+    const { actor, publication, ctx } = await assertPublicationAdmin({
       cookies,
       request,
       url,
       publicationId: params.publicationId ?? "",
     });
-    const revoked = publicationService.revoke(publication.id);
-    const actor = await getApiRequestActor(cookies, request);
-    const treeVersion = buildWorkspaceNavigation(
-      actor,
-      publication.workspaceId,
+    const revoked = await publications.revoke(ctx, publication.id);
+    const treeVersion = (
+      await buildWorkspaceNavigation(actor, publication.workspaceId)
     ).treeVersion;
     return jsonWithEnvelope(
       { publication: revoked },
@@ -145,6 +165,12 @@ export const DELETE: APIRoute = async ({ cookies, params, request, url }) => {
       }),
     );
   } catch (error) {
+    if (isServiceError(error)) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status },
+      );
+    }
     return jsonAppError(error, "Publication removal failed.");
   }
 };

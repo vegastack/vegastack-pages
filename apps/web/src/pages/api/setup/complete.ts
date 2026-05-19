@@ -1,13 +1,18 @@
-import { AppError } from "@vegastack/pages-core";
+import { AppError, slugifyTitle } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
-import { clientRateLimitKey } from "../../../lib/client-address";
 import {
-  authService,
-  checkRateLimit,
-  seedWorkspace,
-  setupService,
-  workspaceService,
-} from "../../../lib/runtime";
+  auth,
+  rateLimit,
+  setup,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { clientRateLimitKey } from "../../../lib/client-address";
+import { seedWorkspace } from "../../../lib/runtime";
+import {
+  buildServiceContext,
+  serviceErrorToResponse,
+} from "../../../lib/service-context";
 
 export const prerender = false;
 
@@ -29,7 +34,10 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     const expectedSetupToken =
       process.env.VPG_SETUP_TOKEN ??
       (import.meta.env.DEV ? "dev-setup-token" : "");
-    if (setupService.status().setupComplete) {
+
+    const { ctx } = await buildServiceContext({ cookies, request });
+
+    if ((await setup.status(ctx)).setupComplete) {
       throw new AppError(
         "SETUP_ALREADY_COMPLETE",
         "Setup has already been completed.",
@@ -43,45 +51,77 @@ export const POST: APIRoute = async ({ cookies, request }) => {
         403,
       );
     }
-    await checkRateLimit({
+    const rl = await rateLimit.check(ctx, {
       key: clientRateLimitKey(request, "setup-complete"),
       limit: 5,
       windowMs: 15 * 60_000,
     });
+    if (!rl.ok) {
+      throw new AppError(
+        "RATE_LIMITED",
+        "Too many requests. Try again later.",
+        429,
+        { reset_at: rl.resetAt },
+      );
+    }
     if (
       !constantTimeEqual(String(body.setup_token ?? ""), expectedSetupToken)
     ) {
       throw new AppError("PERMISSION_DENIED", "Invalid setup token.", 403);
     }
 
-    const admin = workspaceService.createUser({
-      email: String(body.admin_email ?? ""),
-      displayName: String(body.admin_name ?? ""),
+    const adminEmail = String(body.admin_email ?? "");
+    const adminName = String(body.admin_name ?? "");
+    const workspaceName = String(body.workspace_name ?? "");
+
+    const admin = await users.upsert(ctx, {
+      email: adminEmail,
+      displayName: adminName,
       role: "instance_admin",
     });
-    const workspace = workspaceService.createWorkspace({
-      name: String(body.workspace_name ?? ""),
-    });
-    workspaceService.addMember({
-      workspaceId: workspace.id,
-      userId: admin.id,
-      role: "admin",
+    const workspace = await workspaces.create(ctx, {
+      name: workspaceName,
+      slug: slugifyTitle(workspaceName),
+      firstAdminUserId: admin.id,
     });
     const seeded = await seedWorkspace({
       workspaceId: workspace.id,
       actorUserId: admin.id,
     });
 
-    const result = setupService.complete({
+    // Re-check setupComplete immediately before the flip. Without this,
+    // a setup POST that lost a race to a concurrent setup POST would
+    // create a SECOND admin + SECOND workspace before failing on the
+    // setup-flag flip — leaving orphan rows. Re-reading the flag right
+    // before `complete()` shrinks that race window to the synchronous
+    // setup.complete() call itself.
+    if ((await setup.status(ctx)).setupComplete) {
+      throw new AppError(
+        "SETUP_ALREADY_COMPLETE",
+        "Setup completed by a concurrent request.",
+        409,
+      );
+    }
+
+    const result = await setup.complete(ctx, {
       setupToken: String(body.setup_token ?? ""),
       expectedSetupToken,
-      adminEmail: String(body.admin_email ?? ""),
-      adminName: String(body.admin_name ?? ""),
-      workspaceName: String(body.workspace_name ?? ""),
+      adminEmail,
+      adminName,
+      workspaceName,
       adminUserId: admin.id,
       workspaceId: workspace.id,
     });
-    const session = authService.createSession(admin.id);
+    const session = await auth.createSession(ctx, { userId: admin.id });
+    // Invalidate any prior session cookie so first-run setup replaces
+    // (rather than supplements) whatever was there. Defensive against
+    // minimal cookie mocks used in route-level unit tests.
+    if (typeof cookies?.get === "function") {
+      const previous = cookies.get("vpg_session")?.value ?? null;
+      if (previous && previous !== session.id) {
+        await auth.destroySession(ctx, previous);
+      }
+    }
     cookies.set("vpg_session", session.id, {
       path: "/",
       httpOnly: true,
@@ -105,13 +145,6 @@ export const POST: APIRoute = async ({ cookies, request }) => {
       ...result,
     });
   } catch (error) {
-    if (error instanceof AppError) {
-      return Response.json(error.toJSON(), { status: error.status });
-    }
-    console.error("[VegaStack Pages] Setup failed.", error);
-    return Response.json(
-      { error: { code: "INTERNAL_ERROR", message: "Setup failed." } },
-      { status: 500 },
-    );
+    return serviceErrorToResponse(error, "Setup failed.");
   }
 };

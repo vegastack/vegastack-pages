@@ -1,8 +1,8 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { permissions } from "@vegastack/pages-services";
 import {
   getApiRequestActor,
-  jsonAppError,
   resolveWorkspaceActorPermission,
 } from "../../../../lib/access";
 import { sameOrigin } from "../../../../lib/csrf";
@@ -10,13 +10,12 @@ import {
   githubAppConfigured,
   githubAppSlug,
 } from "../../../../lib/github-backup";
-import { ensureSeedData, permissionService } from "../../../../lib/runtime";
+import { serviceErrorToResponse } from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, request, url }) => {
   try {
-    await ensureSeedData();
     if (!sameOrigin(request)) {
       throw new AppError(
         "PERMISSION_DENIED",
@@ -40,8 +39,8 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       );
     }
     const actor = await getApiRequestActor(cookies, request);
-    permissionService.assert({
-      actual: resolveWorkspaceActorPermission(actor, workspaceId),
+    permissions.assertLevel({
+      actual: await resolveWorkspaceActorPermission(actor, workspaceId),
       required: "admin",
     });
     const nonce = crypto.randomUUID();
@@ -61,6 +60,6 @@ export const GET: APIRoute = async ({ cookies, request, url }) => {
       302,
     );
   } catch (error) {
-    return jsonAppError(error, "GitHub backup connection failed.");
+    return serviceErrorToResponse(error, "GitHub backup connection failed.");
   }
 };

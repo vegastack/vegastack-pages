@@ -1,53 +1,127 @@
-import { hasPermission, type PageRecord } from "@vegastack/pages-core";
-import type { FolderRecord } from "@vegastack/pages-core";
+// Workspace navigation — builds the actor-scoped page/folder tree
+// model used by sidebars, command palette, and tree-version envelopes.
+// Plan 011 §4 (no legacy singletons): every read goes through the new
+// D1-direct services.
+
+import {
+  hasPermission,
+  type FolderRecord,
+  type PageRecord,
+} from "@vegastack/pages-core";
+import {
+  favorites as favoritesService,
+  folders as foldersService,
+  pages as pagesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+import { getDb } from "./runtime";
 import {
   resolveActorPermission,
   resolveFolderActorPermission,
   type RequestActor,
 } from "./access";
-import { favoriteService, pageService, workspaceService } from "./runtime";
 
-export type WorkspaceNavigationModel = ReturnType<
-  typeof buildWorkspaceNavigation
->;
+export type WorkspaceNavigationModel = {
+  workspaceId: string;
+  allPages: PageRecord[];
+  allFolders: FolderRecord[];
+  visiblePages: PageRecord[];
+  visibleFolders: FolderRecord[];
+  visiblePageIds: Set<string>;
+  visibleFolderIds: Set<string>;
+  visiblePageById: Map<string, PageRecord>;
+  visibleFolderById: Map<string, FolderRecord>;
+  folderById: Map<string, FolderRecord>;
+  folderByPath: Map<string, FolderRecord>;
+  favoritePageIds: Set<string>;
+  favorites: Array<{ pageId: string; userId: string; workspaceId: string }>;
+  treeVersion: string;
+};
+
 export type WorkspaceNavigationFilter = {
   folderId?: string | null;
   depth?: number | null;
   updatedAfter?: string | null;
 };
 
-export function buildWorkspaceNavigation(
+function readOnlyCtx(actor: RequestActor): ServiceContext {
+  return {
+    actor: {
+      userId: actor.user?.id ?? "",
+      email: actor.user?.email ?? null,
+      workspaceId: actor.workspaceId ?? null,
+    },
+    async computeTreeVersion() {
+      return "";
+    },
+    waitUntil(promise) {
+      void promise.catch(() => undefined);
+    },
+    log(level, message, fields) {
+      const emit =
+        level === "error" || level === "warn" ? console.error : console.log;
+      emit(`[vpg-navigation] [${level}] ${message}`, fields ?? {});
+    },
+  };
+}
+
+export async function buildWorkspaceNavigation(
   actor: RequestActor,
   workspaceId: string,
-) {
-  const allPages = pageService.listPages(workspaceId);
-  const allFolders = workspaceService.listFolders(workspaceId);
+): Promise<WorkspaceNavigationModel> {
+  const db = await getDb();
+  const ctx = readOnlyCtx(actor);
+  if (db) ctx.db = db;
+
+  const [allPages, allFolders, favorites] = await Promise.all([
+    pagesService.list(ctx, workspaceId),
+    foldersService.listAll(ctx, { workspaceId }),
+    actor.user
+      ? favoritesService.listForWorkspace(ctx, { workspaceId })
+      : Promise.resolve(
+          [] as Array<{ pageId: string; userId: string; workspaceId: string }>,
+        ),
+  ]);
+
   const folderById = new Map(allFolders.map((folder) => [folder.id, folder]));
   const folderByPath = new Map(
     allFolders.map((folder) => [folder.path, folder]),
   );
 
-  const visiblePages = actorCanUseWorkspace(actor, workspaceId)
-    ? allPages.filter((page) =>
-        hasPermission(resolveActorPermission({ actor, page }), "read"),
-      )
-    : [];
-  const visiblePageIds = new Set(visiblePages.map((page) => page.id));
+  let visiblePages: PageRecord[] = [];
   const visibleFolderIds = new Set<string>();
-
   if (actorCanUseWorkspace(actor, workspaceId)) {
-    for (const folder of allFolders) {
-      if (
-        hasPermission(resolveFolderActorPermission({ actor, folder }), "read")
-      ) {
-        addFolderAncestors(folder, folderById, visibleFolderIds);
+    const pageChecks = await Promise.all(
+      allPages.map(async (page) => ({
+        page,
+        permission: await resolveActorPermission({ actor, page }),
+      })),
+    );
+    visiblePages = pageChecks
+      .filter((entry) => hasPermission(entry.permission, "read"))
+      .map((entry) => entry.page);
+
+    const folderChecks = await Promise.all(
+      allFolders.map(async (folder) => ({
+        folder,
+        permission: await resolveFolderActorPermission({ actor, folder }),
+      })),
+    );
+    for (const entry of folderChecks) {
+      if (hasPermission(entry.permission, "read")) {
+        addFolderAncestors(entry.folder, folderById, visibleFolderIds);
       }
     }
     for (const page of visiblePages) {
       if (!page.folderPath) continue;
-      const parts = page.folderPath.split("/");
+      // Folders are stored with a leading "/"; page.folderPath does not
+      // carry one. Normalize before walking ancestors so the lookups
+      // hit the same key shape.
+      const normalized = page.folderPath.replace(/^\/+/, "");
+      const parts = normalized.split("/");
       for (let index = 1; index <= parts.length; index += 1) {
-        const folder = folderByPath.get(parts.slice(0, index).join("/"));
+        const key = `/${parts.slice(0, index).join("/")}`;
+        const folder = folderByPath.get(key);
         if (folder) visibleFolderIds.add(folder.id);
       }
     }
@@ -59,10 +133,8 @@ export function buildWorkspaceNavigation(
   const visibleFolderById = new Map(
     visibleFolders.map((folder) => [folder.id, folder]),
   );
+  const visiblePageIds = new Set(visiblePages.map((page) => page.id));
   const visiblePageById = new Map(visiblePages.map((page) => [page.id, page]));
-  const favorites = actor.user
-    ? favoriteService.listForWorkspace(actor.user.id, workspaceId)
-    : [];
   const favoritePageIds = new Set(favorites.map((favorite) => favorite.pageId));
 
   return {

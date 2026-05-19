@@ -1,17 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  attachmentService,
-  pageService,
-  templateService,
-  workspaceService,
-} from "./runtime";
-import {
-  buildGitHubBackupFiles,
   normalizeRootPath,
   planGitHubBackupDeletes,
   verifyGitHubInstallationForUser,
-  type GitHubBackupConnection,
 } from "./github-backup";
+
+// Note: data-shape tests (folder layout, attachment mirroring, template
+// mirroring) live alongside the services they touch in
+// packages/services/__tests__ now that buildGitHubBackupFiles reads
+// directly from D1. This file keeps the pure-function planning tests
+// and the GitHub OAuth verification tests, which don't need a workspace
+// or page fixture.
 
 const githubEnvKeys = [
   "VPG_GITHUB_APP_ID",
@@ -34,10 +33,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function uniqueId(prefix: string) {
-  return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
-}
-
 function configureGithubAppEnv() {
   process.env.VPG_GITHUB_APP_ID = "42";
   process.env.VPG_GITHUB_APP_SLUG = "vegastack-pages-test";
@@ -46,130 +41,12 @@ function configureGithubAppEnv() {
   process.env.VPG_GITHUB_APP_CLIENT_SECRET = "client-secret";
 }
 
-function connection(input: {
-  workspaceId: string;
-  includeAssets?: boolean;
-  rootPath?: string;
-}): GitHubBackupConnection {
-  const now = new Date().toISOString();
-  return {
-    id: uniqueId("ghc"),
-    workspaceId: input.workspaceId,
-    installationId: 123,
-    repoOwner: "acme",
-    repoName: "docs",
-    repoId: 456,
-    branch: "main",
-    rootPath: input.rootPath ?? "docs",
-    includeAssets: input.includeAssets ?? false,
-    enabled: true,
-    lastStatus: "idle",
-    lastSyncedAt: null,
-    lastCommitSha: null,
-    lastError: null,
-    createdBy: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
 describe("GitHub backup planning", () => {
   it("validates root paths before writing to a repository", () => {
     expect(normalizeRootPath(" /docs ")).toBe("docs");
     expect(() => normalizeRootPath(".github")).toThrow(/unsafe/);
     expect(() => normalizeRootPath("docs//drafts")).toThrow(/unsafe/);
     expect(() => normalizeRootPath("../docs")).toThrow(/unsafe/);
-  });
-
-  it("preserves folder structure and resolves page filename collisions", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "GitHub Backup Test",
-    });
-    workspaceService.createFolder({
-      id: uniqueId("fld"),
-      workspaceId: workspace.id,
-      name: "Engineering",
-    });
-    const first = await pageService.createPage({
-      id: uniqueId("pg"),
-      workspaceId: workspace.id,
-      folderPath: "engineering",
-      title: "API Guide",
-      sourceType: "markdown",
-      source: "# API Guide",
-    });
-    const second = await pageService.createPage({
-      id: uniqueId("pg"),
-      workspaceId: workspace.id,
-      folderPath: "engineering",
-      title: "API Guide",
-      sourceType: "markdown",
-      source: "# API Guide duplicate",
-    });
-
-    const built = await buildGitHubBackupFiles(
-      connection({ workspaceId: workspace.id }),
-    );
-    const paths = built.files.map((file) => file.path);
-
-    expect(paths).toContain("docs/engineering/api-guide.md");
-    expect(paths).toContain(
-      `docs/engineering/api-guide-${second.page.slugId.slice(second.page.slugId.lastIndexOf("-") + 1)}.md`,
-    );
-    expect(built.manifest.pages.map((page) => page.id)).toEqual([
-      first.page.id,
-      second.page.id,
-    ]);
-  });
-
-  it("mirrors templates and includes attachments only when enabled", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: uniqueId("wks"),
-      name: "GitHub Asset Test",
-    });
-    const page = await pageService.createPage({
-      id: uniqueId("pg"),
-      workspaceId: workspace.id,
-      title: "Asset Page",
-      sourceType: "markdown",
-      source: "# Asset Page",
-    });
-    await attachmentService.upload({
-      page: page.page,
-      filename: "diagram.svg",
-      contentType: "image/svg+xml",
-      base64Body: btoa("<svg viewBox='0 0 1 1'></svg>"),
-    });
-    const template = await templateService.createTemplate({
-      workspaceId: workspace.id,
-      name: "Release Notes",
-      slug: "release-notes",
-      category: "general",
-      source: "# {{title}}",
-    });
-
-    const withoutAssets = await buildGitHubBackupFiles(
-      connection({ workspaceId: workspace.id, includeAssets: false }),
-    );
-    const withAssets = await buildGitHubBackupFiles(
-      connection({ workspaceId: workspace.id, includeAssets: true }),
-    );
-
-    expect(withoutAssets.manifest.assets).toHaveLength(0);
-    expect(withAssets.manifest.assets[0]?.path).toContain(
-      "docs/assets/asset-page-",
-    );
-    expect(withAssets.manifest.assets[0]?.path).toContain(
-      withAssets.manifest.assets[0]?.id,
-    );
-    expect(withAssets.files.map((file) => file.path)).toContain(
-      ".vegastack-pages/templates/general/release-notes.md",
-    );
-    expect(withAssets.manifest.templates[0]).toMatchObject({
-      id: template.template.id,
-      slug: "release-notes",
-    });
   });
 
   it("plans deletions only from prior manifest-owned files", () => {

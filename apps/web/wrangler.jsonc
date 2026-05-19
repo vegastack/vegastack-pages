@@ -8,12 +8,23 @@
   // directly with `wrangler deploy`.
   //
   // Secrets (set via `wrangler secret put <NAME>` — never in this file):
-  //   - RESEND_API_KEY
+  //
+  //   Email (canonical: AWS SES primary, Cloudflare send_email fallback):
+  //   - AWS_REGION              (e.g. "us-east-1")
+  //   - AWS_ACCESS_KEY_ID
+  //   - AWS_SECRET_ACCESS_KEY
+  //   - AWS_SESSION_TOKEN       (only if using STS-issued credentials)
+  //
+  //   GitHub backup integration:
   //   - VPG_GITHUB_APP_PRIVATE_KEY
   //   - VPG_GITHUB_APP_CLIENT_ID
   //   - VPG_GITHUB_APP_CLIENT_SECRET
+  //
+  //   First-run admin setup:
   //   - VPG_SETUP_TOKEN
-  //   - ASTRO_KEY                (for Astro server-island prop crypto)
+  //
+  //   Astro server-island prop encryption:
+  //   - ASTRO_KEY
 
   "$schema": "node_modules/wrangler/config-schema.json",
   // Worker name. CI substitutes this with VPG_WORKER_NAME from secrets.
@@ -75,8 +86,18 @@
     },
   ],
 
-  // Workers Images — runtime image transforms for embedded pictures.
-  "images": { "binding": "IMAGES" },
+  // Cloudflare Email Sending binding (`env.EMAIL.send(...)`). Acts as
+  // the secondary outbound path when AWS SES credentials are absent
+  // and is the canonical reply path inside Email Routing's `email()`
+  // inbound handler. The sending domain must be verified at
+  // https://dash.cloudflare.com/?to=/:account/email/send before
+  // `env.EMAIL.send` will accept the From: address.
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["login@pages.vegastack.com"],
+    },
+  ],
 
   // Per-user rate limiting on Astro Actions (60 req/min/user).
   "ratelimits": [
@@ -87,9 +108,14 @@
     },
   ],
 
-  // Nightly GitHub backup sync.
+  // Cron triggers:
+  //   "0 3 * * *"  — nightly GitHub backup sync (existing).
+  //   "30 3 * * *" — nightly search-index reconciler (re-derives
+  //                  search_documents + FTS5 entries from base tables,
+  //                  heals any background-task drop that left search
+  //                  stale).
   "triggers": {
-    "crons": ["0 3 * * *"],
+    "crons": ["0 3 * * *", "30 3 * * *"],
   },
 
   // ---------------------------------------------------------------------
@@ -102,5 +128,9 @@
     "VPG_HOME_MODE": "landing",
     "VPG_BASE_URL": "https://pages.vegastack.com",
     "VPG_EMAIL_FROM": "login@pages.vegastack.com",
+    "VPG_EMAIL_FROM_NAME": "VegaStack Pages",
+    // `auto` picks AWS SES when AWS_* secrets are present, falls back
+    // to the Cloudflare send_email binding, then to console/dev mode.
+    "VPG_EMAIL_PROVIDER": "auto",
   },
 }

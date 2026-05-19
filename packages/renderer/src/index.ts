@@ -1,11 +1,14 @@
 import rehypeShikiFromHighlighter from "@shikijs/rehype/core";
 import type { RehypeShikiOptions } from "@shikijs/rehype";
+import rehypeKatex from "rehype-katex";
+import rehypeParse from "rehype-parse";
 import rehypeSanitize, {
   defaultSchema,
   type Options as SanitizeOptions,
 } from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import {
@@ -41,6 +44,11 @@ type HeadingNode = {
   children?: Array<TextNode | { children?: TextNode[] }>;
 };
 type CodeNode = { type: "code"; lang?: string; meta?: string; value: string };
+// mdast distinguishes block-level `code` (fenced/indented) from
+// `inlineCode` (backtick spans). Both carry the user's literal text and
+// both must reach the FTS bodyText — without inlineCode, words like
+// function names or env vars wrapped in `backticks` are unfindable.
+type InlineCodeNode = { type: "inlineCode"; value: string };
 type HastPropertyValue =
   | boolean
   | number
@@ -197,34 +205,37 @@ function collectMetadata() {
     plain,
     plugin() {
       return (tree: unknown) => {
-        visit(tree as never, (node: HeadingNode | CodeNode | TextNode) => {
-          if (node.type === "heading") {
-            const text = textFromNode(node).trim();
-            const slug = slugifyHeading(text, seen);
-            (
-              node as HeadingNode & {
-                data?: { hProperties?: Record<string, unknown> };
-              }
-            ).data = {
-              hProperties: { id: slug },
-            };
-            const htmlId = `${clobberPrefix}${slug}`;
-            headings.push({
-              depth: node.depth,
-              href: `#${htmlId}`,
-              htmlId,
-              slug,
-              text,
-            });
-            plain.push(text);
-          }
-          if (node.type === "text") {
-            plain.push(node.value);
-          }
-          if (node.type === "code") {
-            plain.push(node.value);
-          }
-        });
+        visit(
+          tree as never,
+          (node: HeadingNode | CodeNode | InlineCodeNode | TextNode) => {
+            if (node.type === "heading") {
+              const text = textFromNode(node).trim();
+              const slug = slugifyHeading(text, seen);
+              (
+                node as HeadingNode & {
+                  data?: { hProperties?: Record<string, unknown> };
+                }
+              ).data = {
+                hProperties: { id: slug },
+              };
+              const htmlId = `${clobberPrefix}${slug}`;
+              headings.push({
+                depth: node.depth,
+                href: `#${htmlId}`,
+                htmlId,
+                slug,
+                text,
+              });
+              plain.push(text);
+            }
+            if (node.type === "text") {
+              plain.push(node.value);
+            }
+            if (node.type === "code" || node.type === "inlineCode") {
+              plain.push(node.value);
+            }
+          },
+        );
       };
     },
   };
@@ -292,6 +303,34 @@ function remarkRecoverIndentedFences() {
 const sanitizeSchema: SanitizeOptions = {
   ...defaultSchema,
   clobberPrefix,
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    // KaTeX tags (server-rendered math).
+    "math",
+    "semantics",
+    "mrow",
+    "mi",
+    "mo",
+    "mn",
+    "mtext",
+    "msup",
+    "msub",
+    "msubsup",
+    "mfrac",
+    "msqrt",
+    "mroot",
+    "menclose",
+    "mstyle",
+    "mspace",
+    "munder",
+    "mover",
+    "munderover",
+    "mtable",
+    "mtr",
+    "mtd",
+    "annotation",
+    "annotation-xml",
+  ],
   attributes: {
     ...defaultSchema.attributes,
     "*": [
@@ -303,6 +342,10 @@ const sanitizeSchema: SanitizeOptions = {
       ["data-anchor"],
       "dataMermaidSource",
       ["data-mermaid-source"],
+      // KaTeX inline styles for layout.
+      "style",
+      "aria-hidden",
+      "ariaHidden",
     ],
     h1: [...(defaultSchema.attributes?.h1 ?? []), "id"],
     h2: [...(defaultSchema.attributes?.h2 ?? []), "id"],
@@ -433,11 +476,15 @@ export async function renderMarkdown(
     .use(remarkParse)
     .use(remarkRecoverIndentedFences)
     .use(remarkGfm)
+    .use(remarkMath)
     .use(metadata.plugin)
     .use(remarkRehype)
     .use(rehypeHeadingAnchors)
     .use(rehypeMermaidBlocks)
     .use(() => rehypeShikiFromHighlighter(highlighter, shikiOptions))
+    // rehype-katex passes options straight through to katex.renderToString;
+    // we accept the upstream defaults (HTML+MathML output, non-strict).
+    .use(rehypeKatex)
     .use(rehypeSanitize, sanitizeSchema)
     .use(rehypeStringify)
     .process(parsed.content);
@@ -447,6 +494,118 @@ export async function renderMarkdown(
     frontmatter: parsed.frontmatter,
     headings: metadata.headings,
     plainText: metadata.plain.join("\n"),
+  };
+}
+
+// HTML source-type pipeline: parse, sanitize, stringify. Used by the
+// publish/render path when the page source is raw HTML. We DROP all
+// scripts and on-* attributes via rehype-sanitize, then the view-time
+// shell wraps the artifact in a sandboxed iframe (Plan 011 §6 HTML
+// pipeline). Two layers of defense.
+export async function renderHtmlSource(source: string): Promise<string> {
+  const file = await unified()
+    .use(rehypeParse, { fragment: true })
+    .use(rehypeSanitize, sanitizeSchema)
+    .use(rehypeStringify)
+    .process(source);
+  return String(file);
+}
+
+export type SaveTimeRenderInput = {
+  source: string;
+  sourceType: "markdown" | "mdx" | "html";
+};
+
+export type SaveTimeRenderOutput = {
+  html: string;
+  frontmatter: Record<string, unknown>;
+  headings: RenderHeading[];
+  plainText: string;
+  hasCode: boolean;
+  hasMermaid: boolean;
+  hasMath: boolean;
+  hasWardley: boolean;
+  hasCytoscape: boolean;
+  hasIframe: boolean;
+};
+
+// Cheap regex-based flag scan. Mirrors the implementation in
+// packages/services/src/pages.service.ts.scanFlags so flags written to
+// the database match the markup actually produced.
+function scanRenderFlags(
+  source: string,
+  sourceType: SaveTimeRenderInput["sourceType"],
+): {
+  hasCode: boolean;
+  hasMermaid: boolean;
+  hasMath: boolean;
+  hasWardley: boolean;
+  hasCytoscape: boolean;
+  hasIframe: boolean;
+} {
+  const lower = source;
+  if (sourceType === "html") {
+    return {
+      hasCode: /<pre[\s>]|<code[\s>]/i.test(lower),
+      hasMermaid: false,
+      hasMath: false,
+      hasWardley: false,
+      hasCytoscape: false,
+      hasIframe: /<iframe[\s>]/i.test(lower),
+    };
+  }
+  // markdown / mdx: detect fenced blocks + JSX components.
+  const codeFence = /(^|\n)\s*```[a-zA-Z0-9_+-]*[ \t]*\n/;
+  const mermaidFence = /(^|\n)\s*```mermaid\b/;
+  const wardleyFence = /(^|\n)\s*```wardley\b/;
+  const cytoFence = /(^|\n)\s*```(?:cytoscape|cyto)\b/;
+  const mathDollar = /(^|[^\\])\$\$?[^\n$]+\$\$?/;
+  const mathBracket = /(^|\n)\s*\\\[[^\n]+\\\]/;
+  const iframeTag = /<iframe[\s>]/i;
+  return {
+    hasCode: codeFence.test(lower),
+    hasMermaid: mermaidFence.test(lower),
+    hasMath: mathDollar.test(lower) || mathBracket.test(lower),
+    hasWardley: wardleyFence.test(lower),
+    hasCytoscape: cytoFence.test(lower),
+    hasIframe: iframeTag.test(lower),
+  };
+}
+
+// Save-time render. Called by pages.service.ts.updateSource AFTER the
+// page row is atomically updated and the source blob is PUT to R2.
+// Produces the fully-baked HTML stored at
+//   pages/{workspaceId}/{pageId}/rendered-{contentHash}.html
+// and served verbatim (with a shell wrapper) by /p/[slug] and /f/[slug].
+//
+// For MDX we re-use the markdown pipeline. MDX-specific JSX components
+// are not evaluated at save time (Workers blocks `eval` / `new Function`,
+// and Plan 011's allowlist surface — Callout, Tabs, Steps — is small).
+// The rehype-sanitize step drops any unknown JSX as plain text, which is
+// the safe default. A future iteration can introduce safe-mdx for the
+// allowlisted components without changing the calling surface.
+export async function renderAtSave(
+  input: SaveTimeRenderInput,
+): Promise<SaveTimeRenderOutput> {
+  const flags = scanRenderFlags(input.source, input.sourceType);
+  if (input.sourceType === "html") {
+    const html = await renderHtmlSource(input.source);
+    return {
+      html,
+      frontmatter: {},
+      headings: [],
+      plainText: "",
+      ...flags,
+    };
+  }
+  // markdown + mdx (mdx treated as markdown for now)
+  const rendered = await renderMarkdown(input.source);
+  return {
+    html: rendered.html,
+    frontmatter: rendered.frontmatter,
+    headings: rendered.headings,
+    plainText: rendered.plainText,
+    ...flags,
   };
 }
 

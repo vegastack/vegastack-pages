@@ -1,13 +1,19 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mcpToolNames } from "@vegastack/pages-mcp";
-import { GET, HEAD, POST } from "../mcp";
 import {
-  auditService,
-  authService,
-  commentService,
-  workspaceService,
-} from "../../lib/runtime";
+  audit,
+  auth,
+  comments,
+  folders,
+  users,
+  workspaces,
+} from "@vegastack/pages-services";
+import { GET, HEAD, POST } from "../mcp";
+import { buildServiceContext } from "../../lib/service-context";
 
 type JsonRpcResponse = {
   id: unknown;
@@ -15,6 +21,8 @@ type JsonRpcResponse = {
     structuredContent?: Record<string, unknown>;
   };
   error?: {
+    // JSON-RPC 2.0 numeric code (e.g. -32600 for Invalid Request).
+    code?: number;
     message: string;
     data?: {
       error?: {
@@ -24,6 +32,46 @@ type JsonRpcResponse = {
     };
   };
 };
+
+beforeAll(async () => {
+  process.env.VPG_RUNTIME = "node";
+  process.env.VPG_STATE_DIR = mkdtempSync(join(tmpdir(), "vpg-mcp-test-"));
+  // Seed wks_demo + usr_demo_admin so dev-auto-login (set by post()) has a
+  // real D1 user/workspace pair to operate against. Tests below use the
+  // workspace_id "wks_demo" throughout.
+  const { ctx } = await buildServiceContext({
+    cookies: { get: () => undefined } as never,
+  });
+  await users.upsert(ctx, {
+    id: "usr_demo_admin",
+    email: "admin@example.com",
+    displayName: "Demo Admin",
+    role: "instance_admin",
+  });
+  await workspaces.create(ctx, {
+    id: "wks_demo",
+    name: "VegaStack Pages",
+    slug: "vegastack-pages",
+    firstAdminUserId: "usr_demo_admin",
+  });
+  ctx.actor.userId = "usr_demo_admin";
+  ctx.actor.email = "admin@example.com";
+  ctx.actor.workspaceId = "wks_demo";
+  await folders.create(ctx, {
+    workspaceId: "wks_demo",
+    parentFolderId: null,
+    name: "Agents",
+  });
+  await folders.create(ctx, {
+    workspaceId: "wks_demo",
+    parentFolderId: null,
+    name: "Guides",
+  });
+});
+
+function uniqueId(prefix: string) {
+  return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
+}
 
 afterEach(() => {
   delete process.env.VPG_MCP_TOKEN;
@@ -191,7 +239,7 @@ describe("MCP route", () => {
       result?: { messages?: Array<{ content?: { text?: string } }> };
     };
     expect(promptBody.result?.messages?.[0]?.content?.text).toContain(
-      "prepare_page_edit",
+      "update_page",
     );
 
     const reviewPrompt = await post({
@@ -213,26 +261,30 @@ describe("MCP route", () => {
   });
 
   it("does not compare static MCP bearer tokens with strict equality", () => {
-    const source = readFileSync(new URL("../mcp.ts", import.meta.url), "utf8");
+    const source = readFileSync(
+      new URL("../../lib/mcp/server.ts", import.meta.url),
+      "utf8",
+    );
 
     expect(source.includes("bearer === token")).toBe(false);
     expect(source.includes("constantTimeEqual(bearer, token)")).toBe(true);
   });
 
   it("requires workspace scoping and audits explicitly enabled static MCP token use", async () => {
-    const workspace = workspaceService.createWorkspace({
-      id: `wks_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`,
-      name: "Static MCP Audit",
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
     });
-    const user = workspaceService.createUser({
-      id: `usr_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`,
+    const user = await users.upsert(seedCtx, {
+      id: uniqueId("usr"),
       email: `static-mcp-${crypto.randomUUID()}@example.test`,
       displayName: "Static MCP User",
+      role: "user",
     });
-    workspaceService.addMember({
-      workspaceId: workspace.id,
-      userId: user.id,
-      role: "admin",
+    const workspace = await workspaces.create(seedCtx, {
+      id: uniqueId("wks"),
+      name: "Static MCP Audit",
+      slug: uniqueId("slug"),
+      firstAdminUserId: user.id,
     });
     process.env.VPG_MCP_TOKEN = "test-token";
     process.env.VPG_ALLOW_STATIC_MCP_TOKEN = "true";
@@ -251,10 +303,9 @@ describe("MCP route", () => {
     );
 
     expect(scoped.status).toBe(200);
+    const auditLogs = await audit.list(seedCtx, { workspaceId: workspace.id });
     expect(
-      auditService
-        .list({ workspaceId: workspace.id })
-        .some((log) => log.action === "mcp.static_token_used"),
+      auditLogs.some((log) => log.action === "mcp.static_token_used"),
     ).toBe(true);
   });
 
@@ -279,11 +330,16 @@ describe("MCP route", () => {
 
   it("rejects browser session ids as MCP bearer tokens", async () => {
     process.env.VPG_MCP_TOKEN = "test-token";
-    const user = workspaceService.createUser({
+    const { ctx: seedCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+    });
+    const user = await users.upsert(seedCtx, {
+      id: uniqueId("usr"),
       email: `mcp-browser-session-${crypto.randomUUID()}@example.com`,
       displayName: "MCP Browser Session",
+      role: "user",
     });
-    const session = authService.createSession(user.id);
+    const session = await auth.createSession(seedCtx, { userId: user.id });
 
     const response = await post(
       { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
@@ -304,13 +360,14 @@ describe("MCP route", () => {
     });
     const pageId = String(created.page_id);
 
-    const prepared = await callTool("prepare_page_edit", {
+    const prepared = await callTool("fetch", {
       workspace_id: "wks_demo",
-      page_id: pageId,
+      resource_id: pageId,
+      include: ["source", "edit_tokens"],
     });
     expect(prepared.source).toContain("Original text.");
 
-    const patched = await callTool("patch_page", {
+    const patched = await callTool("update_page", {
       workspace_id: "wks_demo",
       page_id: pageId,
       base_version_id: prepared.base_version_id,
@@ -374,7 +431,10 @@ describe("MCP route", () => {
   });
 
   it("caps wait_for_review timeout and rejects concurrent waits for the same actor and page", async () => {
-    const source = readFileSync(new URL("../mcp.ts", import.meta.url), "utf8");
+    const source = readFileSync(
+      new URL("../../lib/mcp/tools/review.ts", import.meta.url),
+      "utf8",
+    );
     expect(source).toContain(
       "clampNumber(args.timeout_ms, 600_000, 0, 600_000)",
     );
@@ -501,7 +561,6 @@ describe("MCP route", () => {
         key: "audience",
         label: "Audience",
         type: "text",
-        required: false,
         default: "engineering",
       },
     ]);
@@ -562,7 +621,6 @@ describe("MCP route", () => {
         key: "status",
         label: "Status",
         type: "select",
-        required: false,
         default: "approved",
         options: ["draft", "approved"],
       },
@@ -587,17 +645,18 @@ describe("MCP route", () => {
     });
     const pageId = String(created.page_id);
 
-    const fetched = await tool("get_page", {
+    const fetched = await tool("fetch", {
       workspace_id: workspaceId,
-      page_id: pageId,
+      resource_id: pageId,
+      include: ["source"],
     });
     expect(JSON.stringify(fetched)).toContain(
       "Original local MCP coverage body",
     );
 
-    const fetchedBySlug = await tool("get_page", {
+    const fetchedBySlug = await tool("fetch", {
       workspace_id: workspaceId,
-      page_id: String(created.slug_id),
+      resource_id: String(created.slug_id),
       include: ["metadata", "source"],
     });
     const fetchedBySlugPage = fetchedBySlug.page as Record<string, unknown>;
@@ -606,18 +665,19 @@ describe("MCP route", () => {
       "Original local MCP coverage body",
     );
 
-    const renderedPage = await tool("get_page", {
+    const renderedPage = await tool("fetch", {
       workspace_id: workspaceId,
-      page_id: pageId,
+      resource_id: pageId,
       include: ["rendered"],
     });
     const renderedPayload = renderedPage.rendered as Record<string, unknown>;
     expect(String(renderedPayload.html)).toContain("MCP All Tools");
     expect(renderedPayload.render_mode).toBe("html");
 
-    let prepared = await tool("prepare_page_edit", {
+    let prepared = await tool("fetch", {
       workspace_id: workspaceId,
-      page_id: pageId,
+      resource_id: pageId,
+      include: ["source", "edit_tokens"],
     });
     const updated = await tool("update_page", {
       workspace_id: workspaceId,
@@ -628,11 +688,12 @@ describe("MCP route", () => {
     });
     expect(updated.changed).toBe(true);
 
-    prepared = await tool("prepare_page_edit", {
+    prepared = await tool("fetch", {
       workspace_id: workspaceId,
-      page_id: pageId,
+      resource_id: pageId,
+      include: ["source", "edit_tokens"],
     });
-    const patched = await tool("patch_page", {
+    const patched = await tool("update_page", {
       workspace_id: workspaceId,
       page_id: pageId,
       base_version_id: prepared.base_version_id,
@@ -643,14 +704,23 @@ describe("MCP route", () => {
     });
     expect(patched.replacement_count).toBe(1);
 
-    const snapshot = await tool("create_page_snapshot", {
+    // Checkpoint-only update (folds the former create_page_snapshot).
+    const reprepared = await callTool("fetch", {
       workspace_id: workspaceId,
-      page_id: pageId,
-      label: "local MCP coverage snapshot",
+      resource_id: pageId,
+      include: ["edit_tokens"],
     });
-    const versions = await tool("list_page_versions", {
+    const snapshot = await tool("update_page", {
       workspace_id: workspaceId,
       page_id: pageId,
+      base_version_id: reprepared.base_version_id,
+      checkpoint: true,
+      checkpoint_label: "local MCP coverage snapshot",
+    });
+    const versions = await callTool("fetch", {
+      workspace_id: workspaceId,
+      resource_id: pageId,
+      include: ["versions"],
     });
     expect(JSON.stringify(versions.versions)).toContain(
       String(snapshot.version_id),
@@ -701,9 +771,10 @@ describe("MCP route", () => {
     });
     const thread = createdComment.thread as Record<string, unknown>;
     const threadId = String(thread.id);
-    const listedComments = await tool("list_comments", {
+    const listedComments = await callTool("fetch", {
       workspace_id: workspaceId,
-      page_id: pageId,
+      resource_id: pageId,
+      include: ["comments"],
       status: "all",
     });
     expect(JSON.stringify(listedComments)).toContain(threadId);
@@ -788,7 +859,9 @@ describe("MCP route", () => {
     });
     const htmlThread = htmlComment.thread as Record<string, unknown>;
     const htmlThreadId = String(htmlThread.id);
-    const anchorUpdate = await tool("update_comment_anchor", {
+    // Anchor moves are now folded into update_thread (the dedicated
+    // update_comment_anchor tool has been removed).
+    const anchorUpdate = await tool("update_thread", {
       workspace_id: workspaceId,
       thread_id: htmlThreadId,
       anchor: {
@@ -821,10 +894,22 @@ describe("MCP route", () => {
     const deletedRecord = deletedThread.thread as Record<string, unknown>;
     expect(deletedRecord.id).toBe(htmlThreadId);
 
-    const secondThread = commentService.createThread({
+    // Seed a second thread via the comments service directly so we have a
+    // resolvable thread ready for the wait_for_review check below.
+    const { ctx: commentCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId,
+    });
+    commentCtx.actor.userId = "usr_demo_admin";
+    commentCtx.actor.email = "admin@example.com";
+    const secondThread = await comments.createThread(commentCtx, {
       pageId,
       workspaceId,
       body: "Second local MCP test comment.",
+      authorUserId: "usr_demo_admin",
+      guestName: null,
+      guestSessionId: null,
+      publicationId: null,
       anchor: {
         selectedText: "coverage",
         sourceStart: 0,
@@ -836,7 +921,7 @@ describe("MCP route", () => {
     });
     const completed = await tool("update_thread", {
       workspace_id: workspaceId,
-      thread_id: secondThread.thread.id,
+      thread_id: secondThread.data.thread.id,
       body: "Handled in local MCP coverage.",
       resolve: true,
       agent_name: "Vitest Agent",
@@ -854,14 +939,30 @@ describe("MCP route", () => {
     });
     expect(waited.status).toBe("matched");
 
-    const events = await tool("list_review_events", {
+    const events = await callTool("fetch", {
       workspace_id: workspaceId,
       page_id: pageId,
+      include: ["review_events"],
       limit: 20,
     });
     expect(Array.isArray(events.events)).toBe(true);
 
-    const publication = await tool("publication_apply", {
+    // include=['members'] on a workspace resource returns the joined member
+    // list (id, user_id, email, display_name, role, created_at). Mirrors the
+    // REST GET /api/workspaces/[id]/members endpoint.
+    const members = await callTool("fetch", {
+      workspace_id: workspaceId,
+      resource_id: workspaceId,
+      include: ["members"],
+    });
+    expect(Array.isArray(members.members)).toBe(true);
+    expect((members.members as unknown[]).length).toBeGreaterThan(0);
+    const firstMember = (members.members as Array<Record<string, unknown>>)[0];
+    expect(firstMember).toHaveProperty("user_id");
+    expect(firstMember).toHaveProperty("email");
+    expect(firstMember).toHaveProperty("role");
+
+    const publication = await tool("apply_publication", {
       workspace_id: workspaceId,
       resource_type: "page",
       resource_id: pageId,
@@ -873,7 +974,7 @@ describe("MCP route", () => {
     expect(String(publication.url)).toContain("/p/");
     const publicationId = String(publication.publication_id);
 
-    const preservedPublication = await tool("publication_apply", {
+    const preservedPublication = await tool("apply_publication", {
       workspace_id: workspaceId,
       resource_type: "page",
       resource_id: pageId,
@@ -887,11 +988,18 @@ describe("MCP route", () => {
     expect(preservedPublicationRecord.passwordHash).toBeTruthy();
     expect(preservedPublicationRecord.indexingEnabled).toBe(true);
 
-    const agentsFolder = workspaceService
-      .listFolders(workspaceId)
-      .find((folder) => folder.path === "agents");
+    const { ctx: folderCtx } = await buildServiceContext({
+      cookies: { get: () => undefined } as never,
+      workspaceId,
+    });
+    folderCtx.actor.userId = "usr_demo_admin";
+    folderCtx.actor.email = "admin@example.com";
+    const allFolders = await folders.listAll(folderCtx, { workspaceId });
+    const agentsFolder = allFolders.find(
+      (folder) => folder.path === "/agents" || folder.path === "agents",
+    );
     expect(agentsFolder).toBeDefined();
-    const folderPublication = await tool("publication_apply", {
+    const folderPublication = await tool("apply_publication", {
       workspace_id: workspaceId,
       resource_type: "folder",
       resource_id: agentsFolder!.id,
@@ -904,7 +1012,7 @@ describe("MCP route", () => {
     >;
     expect(folderPublicationRecord.permission).toBe("view");
 
-    const updatedPublication = await tool("publication_apply", {
+    const updatedPublication = await tool("apply_publication", {
       workspace_id: workspaceId,
       resource_type: "page",
       resource_id: pageId,
@@ -920,7 +1028,7 @@ describe("MCP route", () => {
     expect(updatedPublicationRecord.permission).toBe("view");
     expect(updatedPublicationRecord.passwordHash).toBeNull();
 
-    const revokedPublication = await tool("publication_delete", {
+    const revokedPublication = await tool("delete_publication", {
       workspace_id: workspaceId,
       publication_id: publicationId,
     });
@@ -930,7 +1038,7 @@ describe("MCP route", () => {
     >;
     expect(revokedPublicationRecord.revokedAt).toBeTruthy();
 
-    const search = await tool("search_workspace", {
+    const search = await tool("search", {
       workspace_id: workspaceId,
       query: `MCP All Tools Moved ${suffix}`,
       type: "page",
@@ -938,7 +1046,7 @@ describe("MCP route", () => {
     });
     expect(JSON.stringify(search.results)).toContain(pageId);
 
-    const workspaceSearch = await tool("search_workspace", {
+    const workspaceSearch = await callTool("search", {
       workspace_id: workspaceId,
       query: `MCP All Tools Moved ${suffix}`,
       type: "all",
@@ -946,15 +1054,17 @@ describe("MCP route", () => {
     });
     expect(JSON.stringify(workspaceSearch.results)).toContain(pageId);
 
-    const tree = await tool("list_workspace", {
+    const tree = await callTool("fetch", {
       workspace_id: workspaceId,
+      include: ["tree"],
     });
     expect(JSON.stringify(tree.pages)).toContain(pageId);
 
-    const templates = await tool("list_templates", {
+    const templatesResult = await callTool("fetch", {
       workspace_id: workspaceId,
+      include: ["templates"],
     });
-    expect(Array.isArray(templates.templates)).toBe(true);
+    expect(Array.isArray(templatesResult.templates)).toBe(true);
 
     const template = await tool("create_template", {
       workspace_id: workspaceId,
@@ -988,9 +1098,9 @@ describe("MCP route", () => {
     const createdTemplate = template.template as Record<string, unknown>;
     const templateId = String(createdTemplate.id);
 
-    const gotTemplate = await tool("get_template", {
+    const gotTemplate = await callTool("fetch", {
       workspace_id: workspaceId,
-      template: templateId,
+      resource_id: templateId,
     });
     expect(gotTemplate.source).toContain("## Summary");
 
@@ -1000,7 +1110,8 @@ describe("MCP route", () => {
       title: `Rendered ${suffix}`,
       properties: { owner: "Runtime" },
     });
-    expect(rendered.source).toContain("owner: Runtime");
+    expect(rendered.source).toContain(`Rendered ${suffix}`);
+    expect(rendered.frontmatter).toEqual({ owner: "Runtime" });
 
     const updatedTemplate = await tool("update_template", {
       workspace_id: workspaceId,
@@ -1012,9 +1123,12 @@ describe("MCP route", () => {
     });
     expect(updatedTemplate.source).toContain("### Updated Summary");
 
-    const templatedPage = await tool("create_page_from_template", {
+    // create_page now folds the former create_page_from_template by
+    // accepting template_id (with the alias `template` also still
+    // supported for parity with the CLI).
+    const templatedPage = await callTool("create_page", {
       workspace_id: workspaceId,
-      template: templateId,
+      template_id: templateId,
       title: `MCP Template Page ${suffix}`,
       folder_path: "guides",
       properties: { owner: "Runtime" },
@@ -1039,7 +1153,7 @@ describe("MCP route", () => {
       result?: { contents?: Array<{ text: string }> };
     };
     expect(skillBody.result?.contents?.[0]?.text).toContain(
-      "Every MCP tool call requires an explicit `workspace_id`",
+      "Every tool except `whoami` requires `workspace_id`",
     );
 
     const pageResource = await post({
@@ -1068,8 +1182,11 @@ describe("MCP route", () => {
 
     const whoami = await tool("whoami", {});
     expect(whoami.user).toBeDefined();
-    const workspaces = await tool("list_workspaces", {});
-    expect(Array.isArray(workspaces.workspaces)).toBe(true);
+    const wsList = await callTool("fetch", {
+      resource_id: "me",
+      include: ["workspaces"],
+    });
+    expect(Array.isArray(wsList.workspaces)).toBe(true);
 
     expect([...exercised].sort()).toEqual([...mcpToolNames].sort());
   });
@@ -1087,6 +1204,189 @@ describe("MCP route", () => {
     expect(JSON.stringify(result)).not.toContain(
       "/api/auth/magic-link/verify?token=",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit cycle 5 regression tests. Each pins a specific bug found during
+// the multi-agent code review so it can't silently come back.
+// ---------------------------------------------------------------------------
+
+describe("MCP audit cycle 5 regressions", () => {
+  it("rejects update_page when both `source` and `find` are present", async () => {
+    const workspaceId = "wks_demo";
+    const created = await callTool("create_page", {
+      workspace_id: workspaceId,
+      title: `mode-conflict-${crypto.randomUUID().slice(0, 8)}`,
+      source: "# Hello\n\nbody",
+    });
+    const response = await post({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "update_page",
+        arguments: {
+          workspace_id: workspaceId,
+          page_id: created.page_id,
+          base_version_id: created.version_id,
+          source: "# replaced",
+          find: "Hello",
+          replace: "Goodbye",
+        },
+      },
+    });
+    const body = (await response.json()) as JsonRpcResponse;
+    expect(body.error?.message).toMatch(/either `source`.*or `find`/i);
+  });
+
+  it("fetch with `include=['comments']` honors `status: \"open\"`", async () => {
+    const workspaceId = "wks_demo";
+    const created = await callTool("create_page", {
+      workspace_id: workspaceId,
+      title: `open-filter-${crypto.randomUUID().slice(0, 8)}`,
+      source: "# body",
+    });
+    await callTool("create_comment", {
+      workspace_id: workspaceId,
+      page_id: created.page_id,
+      body: "open-thread",
+      anchor: { selected_text: "body", anchor_kind: "text", surface: "prose" },
+    });
+    const resolved = await callTool("create_comment", {
+      workspace_id: workspaceId,
+      page_id: created.page_id,
+      body: "to-resolve",
+      anchor: { selected_text: "body", anchor_kind: "text", surface: "prose" },
+    });
+    await callTool("update_thread", {
+      workspace_id: workspaceId,
+      thread_id: (resolved.thread as Record<string, unknown>).id,
+      resolve: true,
+    });
+    const onlyOpen = await callTool("fetch", {
+      workspace_id: workspaceId,
+      resource_id: created.page_id,
+      include: ["comments"],
+      status: "open",
+    });
+    const onlyOpenThreads = onlyOpen.threads as Array<Record<string, unknown>>;
+    // Previously "open" silently coerced to "all" so this would have
+    // returned both threads. Post-fix the resolved one must be filtered.
+    expect(onlyOpenThreads.length).toBe(1);
+    const onlyOpenThread = onlyOpenThreads[0].thread as Record<string, unknown>;
+    expect(onlyOpenThread.status).toBe("open");
+  });
+
+  it("fetch unknown resource_id prefix is rejected with a clear error", async () => {
+    const response = await post({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "fetch",
+        arguments: {
+          workspace_id: "wks_demo",
+          resource_id: "tmp_unknown_prefix_12345",
+        },
+      },
+    });
+    const body = (await response.json()) as JsonRpcResponse;
+    expect(body.error?.message).toMatch(/unknown resource_id prefix/i);
+  });
+
+  it("fetch slug-id (no typed prefix) still resolves to a page", async () => {
+    const workspaceId = "wks_demo";
+    const created = await callTool("create_page", {
+      workspace_id: workspaceId,
+      title: `slug-fetch-${crypto.randomUUID().slice(0, 8)}`,
+      source: "# slug",
+    });
+    const result = await callTool("fetch", {
+      workspace_id: workspaceId,
+      resource_id: created.slug_id,
+      include: ["metadata"],
+    });
+    expect((result.page as Record<string, unknown>).id).toBe(created.page_id);
+  });
+
+  it("whoami without include does NOT enumerate workspaces", async () => {
+    const result = await callTool("whoami", {});
+    expect(result.workspaces).toBeUndefined();
+    expect(result.user).toBeTruthy();
+  });
+
+  it("whoami with include=['workspaces'] enumerates workspaces", async () => {
+    const result = await callTool("whoami", { include: ["workspaces"] });
+    expect(Array.isArray(result.workspaces)).toBe(true);
+  });
+
+  it("apply_publication rejects publication_id with mismatched resource_id", async () => {
+    const workspaceId = "wks_demo";
+    const created = await callTool("create_page", {
+      workspace_id: workspaceId,
+      title: `pub-${crypto.randomUUID().slice(0, 8)}`,
+      source: "# pub",
+    });
+    const pub = await callTool("apply_publication", {
+      workspace_id: workspaceId,
+      resource_type: "page",
+      resource_id: created.page_id,
+      permission: "view",
+    });
+    const response = await post({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "apply_publication",
+        arguments: {
+          workspace_id: workspaceId,
+          publication_id: pub.publication_id,
+          resource_type: "page",
+          resource_id: "pg_nonexistent_id_for_test_only",
+          permission: "comment",
+        },
+      },
+    });
+    const body = (await response.json()) as JsonRpcResponse;
+    expect(body.error?.message).toMatch(/resource_id does not match/i);
+  });
+
+  it("delete_thread emits a comment.deleted review event", async () => {
+    const workspaceId = "wks_demo";
+    const created = await callTool("create_page", {
+      workspace_id: workspaceId,
+      title: `delthr-${crypto.randomUUID().slice(0, 8)}`,
+      source: "# body",
+    });
+    const comment = await callTool("create_comment", {
+      workspace_id: workspaceId,
+      page_id: created.page_id,
+      body: "to-delete",
+      anchor: { selected_text: "body", anchor_kind: "text", surface: "prose" },
+    });
+    await callTool("delete_thread", {
+      workspace_id: workspaceId,
+      thread_id: (comment.thread as Record<string, unknown>).id,
+    });
+    const events = await callTool("fetch", {
+      workspace_id: workspaceId,
+      page_id: created.page_id,
+      include: ["review_events"],
+    });
+    const types = (events.events as Array<Record<string, unknown>>).map(
+      (event) => event.type,
+    );
+    expect(types).toContain("comment.deleted");
+  });
+
+  it("empty JSON-RPC batch returns a -32600 Invalid Request envelope", async () => {
+    const response = await post([]);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as JsonRpcResponse;
+    expect(body.error?.code).toBe(-32600);
+    expect(body.error?.message).toMatch(/empty batch/i);
   });
 });
 

@@ -1,16 +1,17 @@
 import { AppError } from "@vegastack/pages-core";
 import type { APIRoute } from "astro";
+import { pages as pagesService } from "@vegastack/pages-services";
 import { jsonAppError, resolvePageAccess } from "../../../../lib/access";
 import { renderCachedMarkdown } from "../../../../lib/render-cache";
-import { ensureSeedData, pageService } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ cookies, params, request, url }) => {
   try {
-    await ensureSeedData();
+    const { ctx } = await buildServiceContext({ cookies, request });
     const page = params.pageId
-      ? await pageService.getPage(params.pageId)
+      ? await pagesService.get(ctx, params.pageId)
       : null;
     if (!page) throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
     await resolvePageAccess({

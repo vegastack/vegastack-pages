@@ -3,7 +3,7 @@ title: Public links
 description: Publish a page or folder outside the workspace with view, comment, or edit access.
 category: Sharing
 order: 10
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 Public publishing is the way you bring a reviewer or reader in without giving them a workspace seat.
@@ -33,18 +33,43 @@ Open the same **Share** dialog and choose **Unpublish**. Revoked or expired publ
 
 ## Agent use
 
-Agents can create and revoke publications through MCP and CLI:
+Agents create and revoke publications through MCP and CLI. `apply_publication` handles both pages and folders via `resource_type`:
 
 ```js
-await mcp.call("publication_apply", {
+// Page publication (create or update — pass publication_id to update an existing one).
+await mcp.call("apply_publication", {
   workspace_id: "wks_123",
-  page_id: "pg_123",
+  resource_type: "page",
+  resource_id: "pg_123",
   permission: "comment",
   indexing_enabled: false,
 });
+
+// Folder publication.
+await mcp.call("apply_publication", {
+  workspace_id: "wks_123",
+  resource_type: "folder",
+  resource_id: "fld_42",
+  permission: "view",
+  password: "topsecret",
+});
+
+// Revoke.
+await mcp.call("delete_publication", {
+  workspace_id: "wks_123",
+  publication_id: "pub_42",
+});
 ```
 
+From the CLI:
+
 ```sh
-vpg --workspace wks_123 publish-page pg_123 --permission comment
-vpg --workspace wks_123 revoke-publication pub_123
+vpg publish page pg_123 --permission comment
+vpg publish folder fld_42 --permission view --password topsecret
+vpg publish update pub_42 --clear-password --indexing-enabled true
+vpg publish revoke pub_42
+
+# --agent mode (--yes required for the destructive revoke):
+vpg --agent publish page pg_123 --permission comment
+vpg --agent --yes publish revoke pub_42
 ```

@@ -70,9 +70,17 @@ async function mountActions(trigger: ActionsTrigger) {
         autoOpen: true,
       }),
     );
-  } catch {
+  } catch (error) {
+    // Mirrors sidebar-create-controller + share-dialog-controller —
+    // log the underlying cause to the console so Vite optimize-dep
+    // 504s and other dynamic-import failures aren't opaque behind
+    // the generic toast.
+    console.error("[vpg-page-actions] mount failed:", error);
+    const detail = error instanceof Error && error.message ? error.message : "";
     trigger.hidden = false;
-    window.vpgToast?.error("Page actions failed to load.");
+    window.vpgToast?.error(
+      "Page actions failed to load." + (detail ? `\n${detail}` : ""),
+    );
   } finally {
     trigger.removeAttribute("aria-busy");
     loading = false;

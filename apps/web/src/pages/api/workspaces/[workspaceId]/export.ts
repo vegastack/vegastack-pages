@@ -1,16 +1,17 @@
 import { AppError } from "@vegastack/pages-core";
 import { strToU8, Zip, ZipPassThrough } from "fflate";
 import type { APIRoute } from "astro";
-import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
 import {
-  attachmentService,
-  auditService,
-  checkRateLimit,
-  ensureSeedData,
-  pageService,
-  permissionService,
-  workspaceService,
-} from "../../../../lib/runtime";
+  attachments as attachmentsService,
+  audit,
+  pages as pagesService,
+  permissions as permissionsService,
+  workspaces as workspacesService,
+  type ServiceContext,
+} from "@vegastack/pages-services";
+import { getApiRequestActor, jsonAppError } from "../../../../lib/access";
+import { checkRateLimit } from "../../../../lib/runtime";
+import { buildServiceContext } from "../../../../lib/service-context";
 
 export const prerender = false;
 
@@ -44,19 +45,25 @@ function assertExportSize(input: { byteSize: number; maxBytes: number }) {
   );
 }
 
-async function estimateExportSize(workspaceId: string, manifestBytes: number) {
+async function estimateExportSize(
+  ctx: ServiceContext,
+  workspaceId: string,
+  manifestBytes: number,
+) {
   let byteSize = manifestBytes;
   let pageCount = 0;
   let attachmentCount = 0;
   const maxBytes = exportMaxBytes();
   assertExportSize({ byteSize, maxBytes });
-  for (const page of pageService.listPages(workspaceId)) {
-    const withSource = await pageService.getPage(page.id);
+  for (const page of await pagesService.list(ctx, workspaceId)) {
+    const withSource = await pagesService.get(ctx, page.id);
     if (!withSource) continue;
     pageCount += 1;
     byteSize += strToU8(withSource.source).byteLength;
     assertExportSize({ byteSize, maxBytes });
-    for (const attachment of attachmentService.listForPage(page.id)) {
+    for (const attachment of await attachmentsService.listForPage(ctx, {
+      pageId: page.id,
+    })) {
       attachmentCount += 1;
       byteSize += attachment.byteSize;
       assertExportSize({ byteSize, maxBytes });
@@ -66,6 +73,7 @@ async function estimateExportSize(workspaceId: string, manifestBytes: number) {
 }
 
 function workspaceExportStream(input: {
+  ctx: ServiceContext;
   workspaceId: string;
   workspaceSlug: string;
   manifest: Uint8Array;
@@ -81,8 +89,11 @@ function workspaceExportStream(input: {
         if (final) controller.close();
       });
       try {
-        for (const page of pageService.listPages(input.workspaceId)) {
-          const withSource = await pageService.getPage(page.id);
+        for (const page of await pagesService.list(
+          input.ctx,
+          input.workspaceId,
+        )) {
+          const withSource = await pagesService.get(input.ctx, page.id);
           if (!withSource) continue;
           const basePath = `workspaces/${input.workspaceSlug}/pages/${page.folderPath ? `${page.folderPath}/` : ""}${page.slugId}`;
           const source = new ZipPassThrough(
@@ -91,14 +102,19 @@ function workspaceExportStream(input: {
           zip.add(source);
           source.push(strToU8(withSource.source), true);
 
-          for (const attachment of attachmentService.listForPage(page.id)) {
-            const stored = await attachmentService.get(attachment.id);
+          for (const attachment of await attachmentsService.listForPage(
+            input.ctx,
+            { pageId: page.id },
+          )) {
+            const stored = await input.ctx.objectStore?.get(
+              attachment.objectKey,
+            );
             if (!stored) continue;
             const file = new ZipPassThrough(
               `${basePath}/attachments/${attachment.id}/${attachment.filename}`,
             );
             zip.add(file);
-            file.push(decodeBase64(stored.base64Body), true);
+            file.push(decodeBase64(stored.body), true);
           }
         }
         const manifest = new ZipPassThrough(
@@ -117,9 +133,18 @@ function workspaceExportStream(input: {
 
 export const GET: APIRoute = async ({ cookies, params, request }) => {
   try {
-    await ensureSeedData();
     const workspaceId = params.workspaceId ?? "";
-    const workspace = workspaceService.getWorkspace(workspaceId);
+    const { ctx } = await buildServiceContext({
+      cookies,
+      request,
+      workspaceId,
+    });
+    let workspace;
+    try {
+      workspace = await workspacesService.get(ctx, { workspaceId });
+    } catch {
+      workspace = null;
+    }
     if (!workspace)
       throw new AppError(
         "WORKSPACE_NOT_FOUND",
@@ -132,17 +157,23 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
       );
     const actor = await getApiRequestActor(cookies, request);
     const member = actor.user
-      ? workspaceService.getMember(workspaceId, actor.user.id)
+      ? await workspacesService.getMember(ctx, {
+          workspaceId,
+          userId: actor.user.id,
+        })
       : null;
     const permission =
       actor.workspaceId && actor.workspaceId !== workspaceId
         ? "none"
-        : permissionService.resolve({
-            user: actor.user,
-            member,
+        : await permissionsService.resolve(ctx, {
             workspaceId,
+            userId: actor.user?.id ?? "",
+            scope: "workspace",
+            targetId: workspaceId,
+            memberRole: member?.role ?? null,
+            instanceRole: actor.user?.role,
           });
-    permissionService.assert({ actual: permission, required: "admin" });
+    permissionsService.assertLevel({ actual: permission, required: "admin" });
 
     await checkRateLimit({
       key: `workspace-export:${workspaceId}`,
@@ -150,7 +181,7 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
       windowMs: 60 * 60_000,
     });
 
-    const pages = pageService.listPages(workspaceId);
+    const pages = await pagesService.list(ctx, workspaceId);
     const manifest = strToU8(
       JSON.stringify(
         {
@@ -163,10 +194,11 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
       ),
     );
     const estimated = await estimateExportSize(
+      ctx,
       workspaceId,
       manifest.byteLength,
     );
-    auditService.record({
+    await audit.record(ctx, {
       workspaceId,
       actorUserId: actor.user?.id ?? null,
       action: "workspace.exported",
@@ -182,6 +214,7 @@ export const GET: APIRoute = async ({ cookies, params, request }) => {
 
     return new Response(
       workspaceExportStream({
+        ctx,
         workspaceId,
         workspaceSlug: workspace.slug,
         manifest,

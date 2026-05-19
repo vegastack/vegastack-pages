@@ -15,6 +15,10 @@ export type PageRecord = {
   objectKeyCurrent: string;
   contentHash: string;
   versionId: string;
+  // R2 key of the latest baked HTML; null until the first save-time
+  // render lands. Updated by pages.service.ts.updateSource after the
+  // renderer writes the artifact to pages/{ws}/{pg}/rendered-{hash}.html.
+  renderedArtifactKey: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -122,6 +126,7 @@ export class PageService {
       objectKeyCurrent,
       contentHash,
       versionId,
+      renderedArtifactKey: null,
       createdAt: now,
       updatedAt: now,
     };

@@ -3,7 +3,7 @@ title: Pages and folders
 description: How the content tree, page IDs, and folder permissions work.
 category: Pages
 order: 10
-lastUpdated: 2026-05-14
+lastUpdated: 2026-05-20
 ---
 
 The left sidebar in the app is a tree of folders and pages. Folders are containers. Pages are documents.
@@ -42,3 +42,40 @@ Users can favorite pages. Favorites are stored server-side and appear in the sid
 ## Exports and Git backup
 
 Workspace exports and Backup to Git both preserve source-first content. Backup to Git also includes templates and optional assets when configured.
+
+## Agent surface
+
+The full content tree is reachable through MCP `fetch` (with workspace-level `include=["tree"]`) and the CLI's noun-first groups:
+
+```sh
+vpg workspaces tree
+vpg pages get plan-abc123 --include source,edit_tokens,comments,publication
+vpg pages move pg_123 --folder-path /design/2026
+vpg pages versions pg_123
+vpg pages restore pg_123 ver_old
+vpg pages create --template prd --title "Plan" --set owner=platform
+vpg attachments upload pg_123 --filename diagram.png --content-type image/png --base64-file ./diagram.b64
+
+# --agent mode:
+vpg --agent pages get pg_123 --include source,edit_tokens
+vpg --agent workspaces tree
+```
+
+From MCP:
+
+```js
+await mcp.call("fetch", {
+  workspace_id: "wks_123",
+  resource_id: "wks_123",
+  include: ["tree"],
+  depth: 3,
+});
+
+await mcp.call("move_page", {
+  workspace_id: "wks_123",
+  page_id: "pg_123",
+  folder_path: "/design/2026",
+});
+```
+
+See [MCP and CLI](mcp-and-cli.md) for the full tool reference.

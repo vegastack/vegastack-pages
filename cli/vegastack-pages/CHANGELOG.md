@@ -1,5 +1,23 @@
 # @vegastack/pages
 
+## Unreleased
+
+### Minor changes
+
+- **Noun-first command tree (pure cutover).** `vpg` reorganized to match `gh` and `wrangler`. Hot-path verbs stay top-level (`login`, `logout`, `whoami`, `use`, `search`, `events`, `validate`, `deploy`, `doctor`, `update`, `completions`). Resource CRUD moves under noun groups: `vpg pages`, `vpg comments`, `vpg publish`, `vpg templates`, `vpg workspaces`, `vpg attachments`, `vpg skills`. Removed: `vpg create`, `vpg comment`, `vpg reply`, `vpg resolve`, `vpg unresolve`, `vpg update-anchor`, `vpg delete-thread`, `vpg complete-thread`, `vpg publish-page`, `vpg publish-folder`, `vpg revoke-publication`, `vpg update-publication`, `vpg pages prepare-edit` (now `vpg pages get --include edit_tokens`), `vpg pages patch` and `vpg pages update-source` (now `vpg pages update`), `vpg pages restore-version` (now `vpg pages restore`).
+- **`--agent` on every command.** Compact JSON envelopes on stdout, structured error JSON on stderr (`{ error: { code, message, hint, details } }`), NDJSON for streaming commands. Destructive ops require `--yes` under `--agent`.
+- **Exit codes 0–8.** `0` ok, `1` generic, `2` validation, `3` auth, `4` not found, `5` permission, `6` conflict, `7` network, `8` rate limited.
+- **`vpg pages update` 3-mode dispatch.** Full source / find-replace / checkpoint-only, with body fields omitted-when-unset.
+- **`vpg completions <shell>`.** Generated shell completions for bash, zsh, fish, and PowerShell.
+- **Slug resolution everywhere.** `vpg pages get`, `update`, `move`, `restore`, `versions`, `wait`; `vpg comments *`; `vpg publish page`; and `vpg attachments upload` all accept a slug or `pg_…` id.
+
+### Patch changes
+
+- Bearer-authenticated requests are now exempt from CSRF, so `vpg` writes against `/api/*` work cleanly.
+- `vpg use` only persists `--base-url` when explicitly passed (no silent overwrite of a stored custom origin).
+- `vpg workspaces export` sanitizes the workspace id when interpolating into a default output filename.
+- `vpg comments reply` / `complete` omit absent optional fields instead of sending `agent_name: null` (which strict server validators rejected).
+
 ## 0.1.13
 
 ### Patch Changes
