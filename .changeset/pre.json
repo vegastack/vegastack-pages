@@ -12,5 +12,5 @@
     "@vegastack/pages-services": "0.1.13",
     "@vegastack/pages-ui": "0.1.13"
   },
-  "changesets": ["clean-slate-rebuild"]
+  "changesets": ["clean-slate-rebuild", "suppress-session-kv"]
 }
