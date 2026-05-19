@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.1.14-next.3
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Surface Cloudflare `send_email` binding failures as structured log
+  events instead of silently swallowing them. Until now, when SES fell
+  back to Cloudflare and Cloudflare also rejected the send (e.g.,
+  destination not verified, sender not on the allowlist), the only
+  operator-visible signal was a generic 500 from `/api/auth/signup`. Both
+  binding code paths now emit `vpg.email.cloudflare.*_failed` events with
+  the upstream error message.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.3
+
+### @vegastack/pages-services
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.3
+  - @vegastack/pages-db@0.1.14-next.3
+  - @vegastack/pages-renderer@0.1.14-next.3
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.3
+  - @vegastack/pages-mcp@0.1.14-next.3
+  - @vegastack/pages-renderer@0.1.14-next.3
+  - @vegastack/pages-services@0.1.14-next.3
+  - @vegastack/pages-ui@0.1.14-next.3
+
 ## 0.1.14-next.2
 
 ### @vegastack/pages

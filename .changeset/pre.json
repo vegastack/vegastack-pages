@@ -13,6 +13,7 @@
     "@vegastack/pages-ui": "0.1.13"
   },
   "changesets": [
+    "cf-email-error-logging",
     "clean-slate-rebuild",
     "signup-form-and-docs",
     "suppress-session-kv"
