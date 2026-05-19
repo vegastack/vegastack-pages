@@ -1,6 +1,6 @@
 # Contributing
 
-Use the local Node backend for normal development. It is persistent, fast, and does not touch Cloudflare D1, R2, KV, or production data.
+Use the local Node backend for normal development. It is persistent, fast, and does not touch Cloudflare D1, R2, or production data.
 
 ## Requirements
 

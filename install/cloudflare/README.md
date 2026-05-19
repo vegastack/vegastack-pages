@@ -1,6 +1,6 @@
 # Cloudflare Install
 
-This path deploys `apps/web` to Cloudflare Workers with D1, KV, R2, Workers Assets, a cron trigger for Backup to Git, and optional email through Cloudflare Email Service or AWS SES.
+This path deploys `apps/web` to Cloudflare Workers with D1 (including session storage), R2, Workers Assets, a cron trigger for Backup to Git, and optional email through Cloudflare Email Service or AWS SES.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ export CLOUDFLARE_ACCOUNT_ID=<account-id>
 export CLOUDFLARE_API_TOKEN=<token>
 ```
 
-The token must be able to run the Wrangler operations used by `install/cloudflare/bootstrap.mjs`: `whoami`, D1 list/create/migrations, KV namespace list/create, R2 bucket create, Worker secret writes, and Worker deploy. Custom-domain installs also need permission to create the Worker route.
+The token must be able to run the Wrangler operations used by `install/cloudflare/bootstrap.mjs`: `whoami`, D1 list/create/migrations, R2 bucket create, Worker secret writes, and Worker deploy. Custom-domain installs also need permission to create the Worker route.
 
 ## Deploy
 
@@ -84,8 +84,6 @@ Environment variables override `vegastack-pages.yaml`.
 | `VPG_DEPLOYMENT_MODE`          | `self_hosted`               | Set `managed` only for the VegaStack-operated managed app.                                      |
 | `VPG_D1_DATABASE_NAME`         | `vegastack_pages`           | D1 database name.                                                                               |
 | `VPG_D1_DATABASE_ID`           | empty                       | Reuse an existing D1 database.                                                                  |
-| `VPG_KV_NAMESPACE_NAME`        | `<worker-name>-sessions`    | KV namespace name for sessions.                                                                 |
-| `VPG_KV_NAMESPACE_ID`          | empty                       | Reuse an existing KV namespace.                                                                 |
 | `VPG_R2_BUCKET_NAME`           | `vegastack-pages-content`   | R2 bucket for page source, attachments, versions, and exports.                                  |
 | `VPG_EMAIL_PROVIDER`           | `auto`                      | Email provider selector: `auto`, `console`, `cloudflare`, `cloudflare_email_service`, or `ses`. |
 | `VPG_ENABLE_CLOUDFLARE_EMAIL`  | `false`                     | Add the `EMAIL` send binding when `true`.                                                       |
@@ -109,7 +107,6 @@ The generated `apps/web/wrangler.jsonc` binds:
 - Worker script for `apps/web`.
 - Workers Assets as `ASSETS`.
 - D1 database as `DB`.
-- KV namespace as `SESSION`.
 - R2 bucket as `CONTENT`.
 - Cron trigger for GitHub backup sync.
 - Optional Cloudflare Email Service binding as `EMAIL`.
@@ -150,7 +147,7 @@ Local debugging against remote Cloudflare bindings is an explicit opt-in:
 pnpm dev:prod-data -- --port 4322
 ```
 
-This marks D1, R2, and KV bindings as `remote: true`. Any local write changes the configured Cloudflare data. Use the normal `pnpm dev` local Node backend for feature work.
+This marks D1 and R2 bindings as `remote: true`. Any local write changes the configured Cloudflare data. Use the normal `pnpm dev` local Node backend for feature work.
 
 ## References
 
@@ -159,5 +156,4 @@ This marks D1, R2, and KV bindings as `remote: true`. Any local write changes th
 - [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/)
 - [D1](https://developers.cloudflare.com/d1/)
 - [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-usage/)
-- [KV](https://developers.cloudflare.com/kv/)
 - [Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/)

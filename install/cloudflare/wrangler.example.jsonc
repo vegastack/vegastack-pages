@@ -59,8 +59,7 @@
 // bound. Inbound delivery (e.g., replies to magic-link emails landing
 // in support@) is handled by Cloudflare Email Routing rules — configure
 // them in the Cloudflare dashboard or in this Worker's `email()` export.
-// Sessions: Astro's KV-backed sessions API is not used; auth lives in
-// the D1 `auth_sessions` table.
+// Sessions: auth lives in the D1 `auth_sessions` table.
 
 {
   "$schema": "node_modules/wrangler/config-schema.json",

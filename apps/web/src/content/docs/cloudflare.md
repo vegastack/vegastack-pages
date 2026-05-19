@@ -1,12 +1,12 @@
 ---
 title: Self-host on Cloudflare
-description: Deploy VegaStack Pages on Cloudflare Workers with D1, KV, R2, Wrangler, AWS SES or Cloudflare Email Service, and Backup to Git.
+description: Deploy VegaStack Pages on Cloudflare Workers with D1, R2, Wrangler, AWS SES or Cloudflare Email Service, and Backup to Git.
 category: Self-host
 order: 10
 lastUpdated: 2026-05-20
 ---
 
-Cloudflare Workers is the primary deployment target. The source installer creates or reuses D1, KV, and R2 resources, writes `apps/web/wrangler.jsonc`, runs the Astro build, applies migrations, and deploys the Worker.
+Cloudflare Workers is the primary deployment target. The source installer creates or reuses D1 and R2 resources, writes `apps/web/wrangler.jsonc`, runs the Astro build, applies migrations, and deploys the Worker.
 
 ## Prerequisites
 
@@ -35,15 +35,14 @@ The MCP endpoint for agents is `https://pages.example.com/mcp`.
 
 ## What the installer does
 
-1. Creates or reuses the D1 database.
-2. Creates or reuses the KV namespace for sessions.
-3. Creates the R2 bucket for source, attachments, versions, and exports.
-4. Writes `apps/web/wrangler.jsonc`.
-5. Builds the Astro SSR Worker.
-6. Applies D1 migrations when `--apply-migrations` is set.
-7. Writes `VPG_SETUP_TOKEN` as a Worker secret for self-hosted deployments.
-8. Adds the daily GitHub backup cron trigger.
-9. Deploys the Worker when `--deploy` is set.
+1. Creates or reuses the D1 database (sessions, pages, comments, audit log).
+2. Creates the R2 bucket for source, attachments, versions, and exports.
+3. Writes `apps/web/wrangler.jsonc`.
+4. Builds the Astro SSR Worker.
+5. Applies D1 migrations when `--apply-migrations` is set.
+6. Writes `VPG_SETUP_TOKEN` as a Worker secret for self-hosted deployments.
+7. Adds the daily GitHub backup cron trigger.
+8. Deploys the Worker when `--deploy` is set.
 
 ## Optional features
 
@@ -71,7 +70,7 @@ Re-run the deploy command from the updated source checkout:
 VPG_BASE_URL=https://pages.example.com VPG_SETUP_TOKEN="$VPG_SETUP_TOKEN" pnpm deploy:cloudflare -- --apply-migrations --deploy
 ```
 
-State is preserved unless you explicitly delete the D1 database, KV namespace, R2 bucket, or Worker.
+State is preserved unless you explicitly delete the D1 database, R2 bucket, or Worker.
 
 ## Reference
 

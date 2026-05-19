@@ -66,7 +66,7 @@ Expected fields: `runtime=node`, `adapter=node`, `prod_data_dev=false`.
 
 ## Self-Host
 
-Cloudflare Workers is the primary deployment target. The source install creates D1, KV, and R2 resources, writes `apps/web/wrangler.jsonc`, applies migrations, and deploys the Worker:
+Cloudflare Workers is the primary deployment target. The source install creates D1 and R2 resources, writes `apps/web/wrangler.jsonc`, applies migrations, and deploys the Worker:
 
 ```sh
 corepack enable
@@ -192,7 +192,6 @@ pnpm format
 - [Wrangler](https://developers.cloudflare.com/workers/wrangler/)
 - [Cloudflare D1](https://developers.cloudflare.com/d1/)
 - [Cloudflare R2](https://developers.cloudflare.com/r2/)
-- [Cloudflare KV](https://developers.cloudflare.com/kv/)
 
 ## Security
 

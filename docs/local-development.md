@@ -8,7 +8,7 @@ routes and persistence services without Cloudflare remote bindings.
 | Mode                   | Command                             | Storage             | Use case                        |
 | ---------------------- | ----------------------------------- | ------------------- | ------------------------------- |
 | Local Node             | `pnpm dev -- --port 4322`           | SQLite + filesystem | Default local product testing   |
-| Production-data Worker | `pnpm dev:prod-data -- --port 4322` | Remote D1/R2/KV     | Debugging production state only |
+| Production-data Worker | `pnpm dev:prod-data -- --port 4322` | Remote D1 + R2      | Debugging production state only |
 
 ## Fresh Local Instance
 

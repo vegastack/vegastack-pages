@@ -13,8 +13,7 @@ Docker runs the same Astro app through the Node adapter. D1 becomes SQLite and R
 | Cloudflare          | Node / Docker                                         |
 | ------------------- | ----------------------------------------------------- |
 | Workers + Astro SSR | Node process running the same Astro SSR build         |
-| D1                  | SQLite                                                |
-| KV sessions         | SQLite-backed app sessions                            |
+| D1                  | SQLite (includes app sessions)                        |
 | R2                  | Local filesystem object storage under `/data/objects` |
 | Email               | Console by default; AWS SES when configured           |
 

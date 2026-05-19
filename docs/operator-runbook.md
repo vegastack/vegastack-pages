@@ -7,10 +7,10 @@ infrastructure cutover** that must precede the first deploy, plus the
 ongoing operational tasks (secrets, monitoring, rate limits, email
 domain verification).
 
-> ⚠️ The destructive steps in §3 truncate the live D1, delete KV
-> namespaces, and purge R2 prefixes. They assume the **no-production-
-> users premise** in CLAUDE.md. Do not run them against a database with
-> real workspace data.
+> ⚠️ The destructive steps in §3 truncate the live D1 and purge R2
+> prefixes. They assume the **no-production-users premise** in
+> CLAUDE.md. Do not run them against a database with real workspace
+> data.
 
 ## 1. One-time bootstrap (do this once per environment)
 
@@ -35,12 +35,11 @@ so the team has a record of what was present before the cutover.
 
 Expected post-bootstrap state:
 
-| Resource      | Count                                          |
-| ------------- | ---------------------------------------------- |
-| D1 database   | 1 (`vegastack-pages-db`)                       |
-| R2 bucket     | 1 (`vegastack-pages-content`)                  |
-| KV namespaces | 0 (the old SESSION KV is deleted in §3.2)      |
-| Workers       | 1 (`vegastack-pages` on `pages.vegastack.com`) |
+| Resource    | Count                                          |
+| ----------- | ---------------------------------------------- |
+| D1 database | 1 (`vegastack-pages-db`)                       |
+| R2 bucket   | 1 (`vegastack-pages-content`)                  |
+| Workers     | 1 (`vegastack-pages` on `pages.vegastack.com`) |
 
 ### 1.3 Secrets
 
@@ -117,7 +116,6 @@ Before the deploy, eyeball `apps/web/wrangler.jsonc`. Required state:
 - `triggers.crons`: `["0 3 * * *", "30 3 * * *"]`
 - `vars`: `VPG_RUNTIME=cloudflare`, `VPG_DEPLOYMENT_MODE=managed`,
   `VPG_EMAIL_PROVIDER=auto`, `VPG_BASE_URL=https://pages.vegastack.com`
-- **NO** `kv_namespaces` block
 - **NO** `images` block
 
 ## 3. Destructive cutover (production only — needs maintainer approval)
@@ -142,16 +140,7 @@ wrangler d1 execute vegastack-pages-db --remote --command \
 # Expect: empty (or just sqlite_* internal tables)
 ```
 
-### 3.2 Delete legacy KV namespaces
-
-```sh
-# The legacy build auto-created a SESSION namespace (Astro v13). It's
-# unused now, but stale namespaces look like leakage in inventory.
-wrangler kv namespace list   # find any vegastack-pages-* SESSION ids
-wrangler kv namespace delete --namespace-id <id>
-```
-
-### 3.3 Purge stale R2 prefixes (optional)
+### 3.2 Purge stale R2 prefixes (optional)
 
 Only if you previously had pre-rebuild content under `pub/*` or
 `pages/*`. Keep the bucket itself — just empty old prefixes:
@@ -168,7 +157,7 @@ wrangler r2 object list vegastack-pages-content --prefix pub/ \
   | xargs -I{} wrangler r2 object delete "vegastack-pages-content/{}" --remote
 ```
 
-### 3.4 Apply the canonical schema
+### 3.3 Apply the canonical schema
 
 ```sh
 wrangler d1 migrations apply vegastack-pages-db --remote

@@ -76,6 +76,11 @@ export default defineConfig({
           imageService: { build: "compile", runtime: "passthrough" },
           prerenderEnvironment: "node",
         }),
+  // `Astro.session` is unused — auth lives in the D1 `auth_sessions`
+  // table behind the `vpg_session` cookie. An explicit in-memory driver
+  // keeps the adapter from auto-provisioning any external storage
+  // binding for session data.
+  session: { driver: "memory" },
   integrations: [react()],
   // Disable Astro's dev toolbar widget. Its bundled chunk frequently
   // 504s after HMR ("Outdated Optimize Dep"), flooding the console.

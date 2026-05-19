@@ -37,8 +37,6 @@ const workerName =
   process.env.VPG_WORKER_NAME ??
   fileConfig.cloudflare?.worker_name ??
   "vegastack-pages";
-const kvNamespaceName =
-  process.env.VPG_KV_NAMESPACE_NAME ?? `${workerName}-sessions`;
 const setupToken =
   process.env.VPG_SETUP_TOKEN ?? randomBytes(24).toString("base64url");
 const customDomain =
@@ -174,55 +172,7 @@ function parseJsonOutput(output, fallback) {
   }
 }
 
-function createKV() {
-  if (process.env.VPG_KV_NAMESPACE_ID) {
-    console.log(
-      `Using existing KV namespace ${process.env.VPG_KV_NAMESPACE_ID}.`,
-    );
-    return process.env.VPG_KV_NAMESPACE_ID;
-  }
-
-  const listOutput = wrangler(["kv", "namespace", "list"], { capture: true });
-  const namespaces = parseJsonOutput(listOutput, []);
-  const existing = Array.isArray(namespaces)
-    ? namespaces.find(
-        (namespace) =>
-          namespace.title === kvNamespaceName ||
-          namespace.name === kvNamespaceName,
-      )
-    : null;
-  if (existing?.id) {
-    console.log(`Using existing KV namespace ${kvNamespaceName}.`);
-    return existing.id;
-  }
-
-  const output = wrangler(
-    ["kv", "namespace", "create", kvNamespaceName, "--binding", "SESSION"],
-    { capture: true },
-  );
-  const parsed = parseJsonOutput(output, null);
-  let namespaceId =
-    parsed?.id ??
-    parsed?.[0]?.id ??
-    /id\s*=\s*"([^"]+)"/.exec(output)?.[1] ??
-    /id\s*[:=]\s*"?([0-9a-f]{32})"?/i.exec(output)?.[1];
-  if (!namespaceId) {
-    const refreshed = parseJsonOutput(
-      wrangler(["kv", "namespace", "list"], { capture: true }),
-      [],
-    );
-    namespaceId = refreshed.find?.(
-      (namespace) =>
-        namespace.title === kvNamespaceName ||
-        namespace.name === kvNamespaceName,
-    )?.id;
-  }
-  if (!namespaceId)
-    throw new Error("Wrangler did not return a KV namespace id.");
-  return namespaceId;
-}
-
-function writeWranglerConfig(databaseId, kvNamespaceId) {
+function writeWranglerConfig(databaseId) {
   const emailFrom = process.env.VPG_EMAIL_FROM ?? "";
   const vars = {
     VPG_RUNTIME: "cloudflare",
@@ -280,12 +230,6 @@ function writeWranglerConfig(databaseId, kvNamespaceId) {
         migrations_dir: "../../packages/db/migrations",
       },
     ],
-    kv_namespaces: [
-      {
-        binding: "SESSION",
-        id: kvNamespaceId,
-      },
-    ],
     r2_buckets: [
       {
         binding: "CONTENT",
@@ -326,10 +270,6 @@ function assertGeneratedWranglerConfig() {
   if (!generated.r2_buckets?.some?.((binding) => binding.binding === "CONTENT"))
     missing.push("R2 binding CONTENT");
   if (
-    !generated.kv_namespaces?.some?.((binding) => binding.binding === "SESSION")
-  )
-    missing.push("KV binding SESSION");
-  if (
     cloudflareEmailEnabled &&
     !generated.send_email?.some?.((binding) => binding.name === "EMAIL")
   )
@@ -354,9 +294,8 @@ wrangler(["whoami"]);
 
 console.log("Creating Cloudflare resources...");
 const databaseId = process.env.VPG_D1_DATABASE_ID ?? createD1();
-const kvNamespaceId = createKV();
 createR2();
-writeWranglerConfig(databaseId, kvNamespaceId);
+writeWranglerConfig(databaseId);
 
 console.log("Building Astro app...");
 run("pnpm", ["--filter", "@vegastack/pages-web", "build"]);
