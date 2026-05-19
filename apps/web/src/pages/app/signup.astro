@@ -32,7 +32,13 @@ const initialTheme = readInitialTheme(Astro.cookies);
               Set up a workspace for reviewable, agent-authored docs. We will
               email you a link to confirm.
             </p>
-            <form class="login-form" data-signup-form>
+            <form
+              class="login-form"
+              data-signup-form
+              method="post"
+              action="/api/auth/signup"
+              onsubmit="event.preventDefault();return false;"
+            >
               <div class="form-group">
                 <label>
                   Your name

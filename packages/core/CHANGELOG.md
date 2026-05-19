@@ -1,5 +1,7 @@
 # @vegastack/pages-core
 
+## 0.1.14-next.2
+
 ## 0.1.14-next.1
 
 ## 0.1.13

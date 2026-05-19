@@ -362,7 +362,7 @@ The bundle is embedded into the Rust binary at build time, so installed npm bina
 
 ### Deploy helper
 
-`vpg deploy` shells out to the repository's `pnpm deploy:cloudflare`. Run it from a source checkout. See [Self-host on Cloudflare](cloudflare.md) for the full install flow.
+`vpg deploy` shells out to the repository's `pnpm deploy:cloudflare`. Run it from a source checkout. See [Self-host on Cloudflare](/docs/cloudflare) for the full install flow.
 
 ## Active sessions
 
@@ -372,9 +372,9 @@ Each row shows the recognized vendor (Claude, ChatGPT, Cursor, Windsurf, Continu
 
 ## Related docs
 
-- [Quickstart](quickstart.md) — first page, first share, first agent connect
-- [Templates](templates.md) — typed properties and structured builders
-- [Comments and threads](comments-and-threads.md) — anchoring and review surface
-- [Wait conditions](wait-conditions.md) — `wait_for_review` semantics
-- [Public links](public-links.md) — `apply_publication` for pages and folders
-- [Permissions](permissions.md) — what each role can do
+- [Quickstart](/docs/quickstart) — first page, first share, first agent connect
+- [Templates](/docs/templates) — typed properties and structured builders
+- [Comments and threads](/docs/comments-and-threads) — anchoring and review surface
+- [Wait conditions](/docs/wait-conditions) — `wait_for_review` semantics
+- [Public links](/docs/public-links) — `apply_publication` for pages and folders
+- [Permissions](/docs/permissions) — what each role can do

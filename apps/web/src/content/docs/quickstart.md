@@ -108,4 +108,4 @@ vpg pages wait pg_123 --until first-response --timeout 600
 vpg --agent pages wait pg_123 --until first-response --timeout 600
 ```
 
-When the reviewer comments, the agent can read the thread via `fetch` with `include=["comments","edit_tokens"]`, write a `update_page` find/replace with a current `base_version_id`, reply through `update_thread`, and wait again. See [MCP and CLI](mcp-and-cli.md) for the full reference.
+When the reviewer comments, the agent can read the thread via `fetch` with `include=["comments","edit_tokens"]`, write a `update_page` find/replace with a current `base_version_id`, reply through `update_thread`, and wait again. See [MCP and CLI](/docs/mcp-and-cli) for the full reference.

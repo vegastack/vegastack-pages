@@ -35,7 +35,13 @@ const initialTheme = readInitialTheme(Astro.cookies);
           )
         }
       </p>
-      <form class="login-form" data-login-form>
+      <form
+        class="login-form"
+        data-login-form
+        method="post"
+        action="/api/auth/magic-link/request"
+        onsubmit="event.preventDefault();return false;"
+      >
         <label>
           Email address
           <input

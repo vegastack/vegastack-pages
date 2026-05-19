@@ -95,7 +95,7 @@
   "send_email": [
     {
       "name": "EMAIL",
-      "allowed_sender_addresses": ["login@pages.vegastack.com"],
+      "allowed_sender_addresses": ["pages@vegastack.com"],
     },
   ],
 
@@ -127,7 +127,7 @@
     "VPG_PUBLIC_SIGNUP": "true",
     "VPG_HOME_MODE": "landing",
     "VPG_BASE_URL": "https://pages.vegastack.com",
-    "VPG_EMAIL_FROM": "login@pages.vegastack.com",
+    "VPG_EMAIL_FROM": "pages@vegastack.com",
     "VPG_EMAIL_FROM_NAME": "VegaStack Pages",
     // `auto` picks AWS SES when AWS_* secrets are present, falls back
     // to the Cloudflare send_email binding, then to console/dev mode.

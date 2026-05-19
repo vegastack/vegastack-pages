@@ -1,6 +1,6 @@
 [package]
 name = "vegastack-pages"
-version = "0.1.14-next.1"
+version = "0.1.14-next.2"
 edition = "2021"
 license = "MIT"
 

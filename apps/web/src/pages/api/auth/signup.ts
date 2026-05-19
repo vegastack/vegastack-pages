@@ -45,8 +45,8 @@ export const POST: APIRoute = async ({ cookies, request, url }) => {
     const { ctx } = await buildServiceContext({ cookies, request });
     const rl = await rateLimit.check(ctx, {
       key: `signup:${email}`,
-      limit: 4,
-      windowMs: 30 * 60_000,
+      limit: 1,
+      windowMs: 60_000,
     });
     if (!rl.ok) {
       throw new AppError(

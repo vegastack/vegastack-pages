@@ -78,4 +78,4 @@ await mcp.call("move_page", {
 });
 ```
 
-See [MCP and CLI](mcp-and-cli.md) for the full tool reference.
+See [MCP and CLI](/docs/mcp-and-cli) for the full tool reference.

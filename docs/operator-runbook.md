@@ -85,8 +85,8 @@ The `send_email` binding requires a verified sender. From the Cloudflare
 dashboard:
 
 1. **Email** → **Email Sending** → **Add sender**
-2. Add `login@pages.vegastack.com`
-3. Add the DKIM record Cloudflare lists under `cf-bounce.pages.vegastack.com`
+2. Add `pages@vegastack.com`
+3. Add the DKIM record Cloudflare lists under `cf-bounce.vegastack.com`
 4. Wait for `Verified` state
 
 ### 1.5 R2 healthcheck object
