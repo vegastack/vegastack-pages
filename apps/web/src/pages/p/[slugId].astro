@@ -1,5 +1,9 @@
 ---
-import { AppError, hasPermission } from "@vegastack/pages-core";
+import {
+  AppError,
+  hasPermission,
+  humanizeFrontmatterKey,
+} from "@vegastack/pages-core";
 import { CommandPalette } from "../../components/CommandPalette";
 import { CommentsRail } from "../../components/CommentsSlideOver";
 import { SharePasswordPrompt } from "../../components/SharePasswordPrompt";
@@ -227,20 +231,50 @@ const rendered = isHtmlPage
       source: pageWithSource.source,
     });
 const frontmatter = rendered.frontmatter as Record<string, unknown>;
-const title = isHtmlPage
-  ? pageWithSource.page.title
-  : typeof frontmatter.title === "string"
-    ? frontmatter.title
-    : "Untitled";
-const description =
-  !isHtmlPage && typeof frontmatter.description === "string"
-    ? frontmatter.description
-    : null;
-const metadataEntries = isHtmlPage
+// The page row's title is the single source of truth (set on create
+// + validated to be non-empty, and the sidebar/breadcrumbs read it
+// directly). Frontmatter `title` is treated as a fallback only — it
+// used to be the primary source which caused agent-created pages
+// (no YAML frontmatter) to render the breadcrumb and document title
+// as "Untitled" even though the row title was set correctly.
+const title =
+  pageWithSource.page.title?.trim() ||
+  (typeof frontmatter.title === "string" && frontmatter.title.trim()
+    ? frontmatter.title.trim()
+    : "Untitled");
+// `summary` is the user/agent-supplied concise description we
+// document in the skills + templates; `description` is kept as a
+// legacy alias for already-published pages that wrote that key.
+const description = isHtmlPage
+  ? null
+  : typeof frontmatter.summary === "string" && frontmatter.summary.trim()
+    ? frontmatter.summary
+    : typeof frontmatter.description === "string"
+      ? frontmatter.description
+      : null;
+// System-managed metadata is sourced from the page row (so editing
+// the source body never churns the timestamp). We prepend it to
+// the user-frontmatter list so reviewers always see when a page
+// was first created and last touched.
+const managedMetadataEntries: Array<[string, string]> = isHtmlPage
   ? []
-  : Object.entries(frontmatter).filter(
-      ([key]) => key !== "title" && key !== "description",
-    );
+  : [
+      ["created_at", pageWithSource.page.createdAt],
+      ["updated_at", pageWithSource.page.updatedAt],
+    ];
+const metadataEntries: Array<[string, unknown]> = isHtmlPage
+  ? []
+  : [
+      ...managedMetadataEntries,
+      ...Object.entries(frontmatter).filter(
+        ([key]) =>
+          key !== "title" &&
+          key !== "description" &&
+          key !== "summary" &&
+          key !== "created_at" &&
+          key !== "updated_at",
+      ),
+    ];
 
 const workspaceFolders = await foldersService.listAll(pageCtx, {
   workspaceId: pageWithSource.page.workspaceId,
@@ -1278,7 +1312,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                     >
                       {metadataEntries.map(([key, value]) => (
                         <div>
-                          <dt>{key}</dt>
+                          <dt>{humanizeFrontmatterKey(key)}</dt>
                           <dd>
                             {typeof value === "string"
                               ? value

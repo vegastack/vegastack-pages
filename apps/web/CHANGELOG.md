@@ -1,5 +1,27 @@
 # @vegastack/pages-web
 
+## 0.1.14-next.10
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.10
+  - @vegastack/pages-mcp@0.1.14-next.10
+  - @vegastack/pages-renderer@0.1.14-next.10
+  - @vegastack/pages-services@0.1.14-next.10
+  - @vegastack/pages-ui@0.1.14-next.10
+
+## 0.1.14-next.9
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.9
+  - @vegastack/pages-mcp@0.1.14-next.9
+  - @vegastack/pages-renderer@0.1.14-next.9
+  - @vegastack/pages-services@0.1.14-next.9
+  - @vegastack/pages-ui@0.1.14-next.9
+
 ## 0.1.14-next.8
 
 ### Patch Changes

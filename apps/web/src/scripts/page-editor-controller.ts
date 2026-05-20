@@ -244,23 +244,30 @@ async function refreshStaticSurface(
 
 function updateTitle(
   root: HTMLElement,
-  frontmatter: Record<string, unknown> | undefined,
+  _frontmatter: Record<string, unknown> | undefined,
 ) {
+  // The page row's title is the single source of truth. The editor
+  // surface keeps whatever the SSR rendered into `.prose-title` and
+  // does not let the frontmatter shadow it — older pages with
+  // `title:` in YAML used to override here, which is exactly the
+  // duplication we just removed.
   const titleEl = root.querySelector<HTMLElement>(".prose-title");
-  const title =
-    typeof frontmatter?.title === "string" && frontmatter.title.trim()
-      ? frontmatter.title
-      : titleEl?.textContent?.trim() || "";
-  if (titleEl && title) titleEl.textContent = title;
-  return title;
+  return titleEl?.textContent?.trim() || "";
 }
 
 function updateDescription(
   root: HTMLElement,
   frontmatter: Record<string, unknown> | undefined,
 ) {
+  // `summary` is the new convention (documented in the skill +
+  // initialSource); `description` is kept as a legacy fallback for
+  // pre-existing pages that wrote that key.
   const description =
-    typeof frontmatter?.description === "string" ? frontmatter.description : "";
+    typeof frontmatter?.summary === "string" && frontmatter.summary.trim()
+      ? frontmatter.summary
+      : typeof frontmatter?.description === "string"
+        ? frontmatter.description
+        : "";
   let element = root.querySelector<HTMLElement>(
     "[data-vpg-description-static]",
   );

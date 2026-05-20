@@ -99,6 +99,8 @@ No input. Returns `user_id`, `email`, session kind (`manual | cli | oauth`), cli
 
 `title` is required and becomes the persisted page title — every surface (public /p view, editor header, search snippets, breadcrumbs) reads it from the row. Do NOT also write the title as a leading `# Title` (markdown/mdx) or `<h1>Title</h1>` (html) in `source` — the server strips a matching leading heading on persist so the title is never displayed twice.
 
+**Frontmatter convention:** snake_case keys, sentence-cased for display (so `for_audience` shows as "For audience"). Pass a short `summary:` field if you have one — it's used as the page description in /p/ rendering + SEO. Do NOT pass `title`, `created_at`, or `updated_at` in frontmatter; the title field on the row is the source of truth, and `created_at` / `updated_at` are auto-managed from the row timestamps (displayed in the metadata area without you having to set them).
+
 ```json
 {
   "workspace_id": "wks_abc123",

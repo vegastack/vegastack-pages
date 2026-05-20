@@ -1,6 +1,6 @@
 {
   "name": "@vegastack/pages-mcp",
-  "version": "0.1.14-next.8",
+  "version": "0.1.14-next.10",
   "private": true,
   "type": "module",
   "exports": {

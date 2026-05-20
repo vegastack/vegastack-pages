@@ -18,8 +18,10 @@
     "create-page-source-precedence",
     "csp-unified-profile",
     "edge-case-hardening",
+    "frontmatter-convention",
     "mcp-text-content-payload",
     "page-title-strip-and-session-ttl",
+    "publication-title-fallback",
     "signup-form-and-docs",
     "suppress-session-kv"
   ]

@@ -655,41 +655,28 @@ function PropertyField({
   }
 }
 
-function initialSource(title: string, sourceType: SourceType) {
-  const safeTitle = title.trim();
+function initialSource(_title: string, sourceType: SourceType) {
+  // The page row carries the title + created/updated timestamps; the
+  // body intentionally starts blank so agents and humans aren't
+  // copy-pasting a dead `title:`/`type:`/`updated:` block. A leading
+  // `summary` is the only convention we suggest because it doubles
+  // as the description in /p/ rendering and is genuinely read by SEO.
   if (sourceType === "html") {
     return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(safeTitle)}</title>
   </head>
   <body>
-    <h1>${escapeHtml(safeTitle)}</h1>
   </body>
 </html>
 `;
   }
   return `---
-title: ${safeTitle}
-type: note
-updated: ${new Date().toISOString().slice(0, 10)}
+summary:
 ---
 
-# ${safeTitle}
 `;
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => {
-    const entities: Record<string, string> = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    };
-    return entities[character] ?? character;
-  });
-}
