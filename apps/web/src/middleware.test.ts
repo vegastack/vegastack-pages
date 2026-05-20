@@ -41,7 +41,10 @@ describe("security headers", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("base-uri 'self'");
-    expect(csp).toContain("form-action 'self'");
+    // OAuth authorize/consent POSTs need to redirect to third-party
+    // redirect_uri values (claude.ai etc.). Chrome enforces form-action
+    // across redirect chains, so we allow any HTTPS target.
+    expect(csp).toContain("form-action 'self' https:");
     // App pages hydrate so inline scripts + styles are allowed; the
     // public publication profile below tightens this further.
     expect(csp).toContain("script-src 'self' 'unsafe-inline'");
@@ -51,55 +54,44 @@ describe("security headers", () => {
     expect(config).not.toContain("styleDirective");
   });
 
-  it("uses a stricter HTML CSP on public publication paths", () => {
-    // Public published pages don't hydrate React islands, so they don't
-    // need `'unsafe-inline'` on script-src. The tighter CSP defends
-    // against arbitrary inline-script injection through user content.
+  it("uses the same permissive HTML CSP on public publication paths", () => {
+    // Public published pages share AppLayout (theme detect, CSRF wrapper,
+    // ClientRouter view-transitions boot) which emits inline scripts.
+    // They must use the same `'unsafe-inline'` profile as the app shell —
+    // otherwise inline boot scripts get killed and any subsequent
+    // ClientRouter navigation carries the strict CSP into /app/* DOM
+    // swaps, breaking dropdowns and modals on the swapped-in content.
     const csp = contentSecurityPolicyForResponse({
       contentType: "text/html; charset=utf-8",
       pathname: "/p/get-started-a8f31c",
     });
-    expect(csp).toContain("script-src 'self'");
-    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("script-src 'self' 'unsafe-inline'");
     expect(csp).toContain("frame-ancestors 'none'");
   });
 
   it("declares worker-src so app code can spawn blob: workers", () => {
     // The Astro dev toolbar and a handful of hydration helpers
     // (sonner, comments island) construct Web Workers from blob: URLs.
-    // Browsers fall back to script-src when worker-src is unset; our
-    // strict script-src then blocks the blob and the worker silently
-    // never starts. Declaring worker-src explicitly fixes that AND
-    // documents what's expected.
+    // Browsers fall back to script-src when worker-src is unset, so the
+    // blob load silently fails and the worker never starts. Declaring
+    // worker-src explicitly fixes that AND documents what's expected.
     const appCsp = contentSecurityPolicyForResponse({
       contentType: "text/html; charset=utf-8",
       pathname: "/app",
     });
     expect(appCsp).toContain("worker-src 'self' blob:");
 
-    const publicProdCsp = contentSecurityPolicyForResponse({
+    const publicCsp = contentSecurityPolicyForResponse({
       contentType: "text/html; charset=utf-8",
       pathname: "/p/get-started-a8f31c",
     });
-    expect(publicProdCsp).toContain("worker-src 'self'");
-    expect(publicProdCsp).not.toContain("worker-src 'self' blob:");
-
-    const publicDevCsp = contentSecurityPolicyForResponse({
-      contentType: "text/html; charset=utf-8",
-      pathname: "/p/get-started-a8f31c",
-      dev: true,
-    });
-    expect(publicDevCsp).toContain("worker-src 'self' blob:");
+    expect(publicCsp).toContain("worker-src 'self' blob:");
   });
 
-  it("relaxes script-src and connect-src on public paths under dev for Vite HMR", () => {
-    // Vite's React plugin injects an inline HMR preamble that must run
-    // before any React import; the strict production CSP blocks that
-    // injection silently and `@vitejs/plugin-react can't detect
-    // preamble` surfaces. In dev only, we allow inline scripts AND
-    // ws:/wss: connections so the HMR socket can attach. Production
-    // builds bundle the preamble into a `self`-served file, so the
-    // strict CSP above stands.
+  it("relaxes connect-src under dev for Vite HMR sockets", () => {
+    // Vite's HMR socket needs ws:/wss:. The script-src already permits
+    // inline content in both prod and dev, so no extra relax needed
+    // there.
     const csp = contentSecurityPolicyForResponse({
       contentType: "text/html; charset=utf-8",
       pathname: "/p/get-started-a8f31c",
@@ -107,6 +99,14 @@ describe("security headers", () => {
     });
     expect(csp).toContain("script-src 'self' 'unsafe-inline'");
     expect(csp).toContain("connect-src 'self' ws: wss:");
+  });
+
+  it("whitelists the Cloudflare Web Analytics beacon host on script-src", () => {
+    const csp = contentSecurityPolicyForResponse({
+      contentType: "text/html; charset=utf-8",
+      pathname: "/app",
+    });
+    expect(csp).toContain("https://static.cloudflareinsights.com");
   });
 
   it("keeps Astro's global form-origin check disabled for OAuth form posts", () => {

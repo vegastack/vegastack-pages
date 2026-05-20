@@ -17,14 +17,6 @@
 //      ignore CSP entirely; this is defense-in-depth for the edge case
 //      where a JSON body is misrendered as HTML by a buggy proxy.
 
-const PUBLIC_PUBLICATION_PREFIXES = ["/p/", "/f/"];
-
-function isPublicPublicationPath(pathname: string) {
-  return PUBLIC_PUBLICATION_PREFIXES.some((prefix) =>
-    pathname.startsWith(prefix),
-  );
-}
-
 export function contentSecurityPolicyForResponse(input: {
   contentType: string | null;
   pathname: string;
@@ -39,30 +31,19 @@ export function contentSecurityPolicyForResponse(input: {
   // ONLY when running under `astro dev`.
   const dev = input.dev ?? false;
   if (isHtml) {
-    // Browser-facing HTML.
-    const strict = isPublicPublicationPath(input.pathname);
-    // Astro emits hydration scripts and small pre-paint inline scripts
-    // (theme, comments-rail width, csrf fetch interceptor) in
-    // AppLayout.astro. Until we attach a per-request nonce to every
-    // emitted <script>, we must allow 'unsafe-inline' on script-src
-    // for routes that hydrate. Public publications stay strict in
-    // production; in dev they relax for Vite's HMR preamble.
-    // SEC-04 (deferred): Astro 6 SSR doesn't support per-request CSP
-    // nonces — its experimental CSP support generates build-time
-    // hashes only. A partial migration where our own `<script
-    // is:inline>` blocks carry nonces but Astro's auto-emitted
-    // hydration scripts don't would force `'unsafe-inline'` back in
-    // anyway, defeating the benefit. Revisit once Astro supports
-    // runtime nonces (tracked at astro#11941). Until then, app-shell
-    // HTML pays the `'unsafe-inline'` cost and public publication
-    // HTML stays strict (it doesn't hydrate).
+    // Browser-facing HTML. Astro emits hydration scripts and pre-paint
+    // inline scripts (theme, comments-rail width, csrf fetch interceptor,
+    // ClientRouter view-transitions boot) from the shared layout —
+    // including on public publication pages. Until Astro supports
+    // per-request CSP nonces (tracked at astro#11941), we allow
+    // 'unsafe-inline' uniformly. `static.cloudflareinsights.com` is
+    // whitelisted for the Cloudflare Web Analytics beacon injected on
+    // the worker edge.
     const scriptSrc =
-      strict && !dev
-        ? "script-src 'self'"
-        : "script-src 'self' 'unsafe-inline'";
+      "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com";
     const connectSrc = dev
-      ? "connect-src 'self' ws: wss:"
-      : "connect-src 'self'";
+      ? "connect-src 'self' ws: wss: https://static.cloudflareinsights.com https://cloudflareinsights.com"
+      : "connect-src 'self' https://static.cloudflareinsights.com https://cloudflareinsights.com";
     return [
       "default-src 'self'",
       "base-uri 'self'",
@@ -70,7 +51,13 @@ export function contentSecurityPolicyForResponse(input: {
       // No external frames; `frame-ancestors 'none'` blocks clickjacking
       // by refusing to be embedded anywhere.
       "frame-ancestors 'none'",
-      "form-action 'self'",
+      // OAuth authorize/consent posts to /oauth/authorize/consent (self)
+      // and then 302s the user-agent to the client's redirect_uri,
+      // which can be any HTTPS origin (claude.ai, cursor.sh, …).
+      // Chrome enforces form-action across the full redirect chain, so
+      // 'self' alone kills "Allow Claude" / "Allow Cursor" buttons.
+      // Allow any HTTPS form target.
+      "form-action 'self' https:",
       scriptSrc,
       // Tailwind + Astro inject inline styles; allow them.
       "style-src 'self' 'unsafe-inline'",
@@ -85,9 +72,8 @@ export function contentSecurityPolicyForResponse(input: {
       // and some hydration helpers (sonner, comments island) construct
       // workers via `new Worker(URL.createObjectURL(new Blob([...])))`.
       // Without an explicit `worker-src`, browsers fall back to
-      // `script-src` which blocks `blob:`. Production app paths need
-      // this too — public publications stay tight (no inline workers).
-      strict && !dev ? "worker-src 'self'" : "worker-src 'self' blob:",
+      // `script-src` which blocks `blob:`.
+      "worker-src 'self' blob:",
     ].join("; ");
   }
 

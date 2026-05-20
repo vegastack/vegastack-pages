@@ -1,5 +1,7 @@
 # @vegastack/pages-config
 
+## 0.1.14-next.4
+
 ## 0.1.14-next.3
 
 ## 0.1.14-next.2

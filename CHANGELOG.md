@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.1.14-next.4
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Unify the HTML Content-Security-Policy profile across the app shell and
+  public publication routes (`/p/*`, `/f/*`). Previously, publications
+  used a strict `script-src 'self'` while the app shell used
+  `script-src 'self' 'unsafe-inline'`. The strict branch was wrong in
+  practice: publications still render `AppLayout`, which emits Astro
+  view-transition + theme-detect + CSRF-wrapper inline scripts, and a
+  ClientRouter navigation from `/p/...` into `/app/*` carries the
+  originating document's CSP into the swapped-in DOM — breaking
+  dropdowns, the command palette, and settings modals on the destination
+  route. Both routes now share the permissive profile and whitelist the
+  Cloudflare Web Analytics beacon host (`static.cloudflareinsights.com`)
+  on `script-src` + `connect-src`. Also widens `form-action` from
+  `'self'` to `'self' https:` so OAuth authorize/consent flows can
+  redirect to third-party MCP clients (claude.ai, cursor.sh, etc.) —
+  Chrome enforces `form-action` across the full redirect chain, so the
+  narrower policy was silently killing the "Allow Claude" button. The
+  signup rate limit also moves from 1/min to 10/min to match
+  real-world burst behavior during onboarding.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.4
+
+### @vegastack/pages-services
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.4
+  - @vegastack/pages-db@0.1.14-next.4
+  - @vegastack/pages-renderer@0.1.14-next.4
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.4
+  - @vegastack/pages-mcp@0.1.14-next.4
+  - @vegastack/pages-renderer@0.1.14-next.4
+  - @vegastack/pages-services@0.1.14-next.4
+  - @vegastack/pages-ui@0.1.14-next.4
+
 ## 0.1.14-next.3
 
 ### @vegastack/pages

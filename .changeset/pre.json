@@ -15,6 +15,7 @@
   "changesets": [
     "cf-email-error-logging",
     "clean-slate-rebuild",
+    "csp-unified-profile",
     "signup-form-and-docs",
     "suppress-session-kv"
   ]
