@@ -25,6 +25,7 @@
     "signup-form-and-docs",
     "suppress-session-kv",
     "trash-audit-fixups",
-    "trash-restore-backend"
+    "trash-restore-backend",
+    "trash-ui-and-migration-split"
   ]
 }

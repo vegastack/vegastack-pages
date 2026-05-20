@@ -1,0 +1,62 @@
+---
+// User's trash. Shows pages this user soft-deleted; supports restore.
+// Permanent-delete is hidden — workspace admins handle that from
+// /app/settings/recovery.
+import SettingsLayout from "../../layouts/SettingsLayout.astro";
+import { pages as pagesService } from "@vegastack/pages-services";
+import { TrashList } from "../../components/TrashList";
+import { loadSettings } from "../../lib/settings-data";
+import { buildServiceContext } from "../../lib/service-context";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace, currentUser } = result.context;
+
+// loadSettings hands us a thin read-only ctx; listTrashed accepts it,
+// but we re-derive a fuller ctx so background tasks (audit etc.) wire
+// correctly should we extend the trash page later.
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+});
+
+const items = await pagesService.listTrashed(ctx, {
+  workspaceId: workspace.id,
+  scope: "mine",
+  userId: currentUser.id,
+});
+---
+
+<SettingsLayout
+  title={`Trash · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="trash"
+  sectionLabel="Trash"
+  description="Pages you've moved to the trash. They are permanently deleted 30 days after they were trashed."
+>
+  <section class="settings-card" aria-labelledby="trash-list-h">
+    <header class="settings-card-header">
+      <h2 id="trash-list-h">Your trashed pages</h2>
+      <p>
+        Restore any page within 30 days. After that they're permanently purged
+        by the nightly cleanup. Workspace admins can also recover items other
+        people deleted from <a href="/app/settings/recovery"> Recovery</a>.
+      </p>
+    </header>
+    <TrashList
+      client:load
+      scope="mine"
+      workspaceId={workspace.id}
+      items={items.map((entry) => ({
+        page_id: entry.pageId,
+        title: entry.title,
+        folder_path: entry.folderPath,
+        slug_id: entry.slugId,
+        deleted_at: entry.deletedAt,
+      }))}
+      canHardDelete={false}
+    />
+  </section>
+</SettingsLayout>

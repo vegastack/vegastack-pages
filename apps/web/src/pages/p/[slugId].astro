@@ -1277,19 +1277,25 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
 
         <div class="vpg-shell-right">
           {inTrash && (
-            <div class="page-trash-banner" role="status">
+            <div
+              class="page-trash-banner"
+              role="status"
+              data-vpg-trash-banner
+              data-page-id={pageWithSource.page.id}
+              data-workspace-id={pageWithSource.page.workspaceId}
+              data-slug-id={pageWithSource.page.slugId}
+            >
               <p>
                 This page is in the trash. It will be permanently deleted 30
                 days after it was moved.
               </p>
-              <form
-                method="post"
-                action={`/api/pages/${pageWithSource.page.id}/restore`}
+              <button
+                type="button"
+                class="page-trash-banner-cta"
+                data-vpg-trash-restore
               >
-                <button type="submit" class="page-trash-banner-cta">
-                  Restore page
-                </button>
-              </form>
+                Restore page
+              </button>
             </div>
           )}
           <PageHeader
@@ -1433,3 +1439,52 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
       they run uniformly on every ClientRouter view transition. */
   }
 </AppLayout>
+
+<script>
+  // Restore-from-trash banner. Uses window.fetch (which AppLayout's
+  // interceptor decorates with the x-vpg-csrf-token header) so the
+  // POST survives the middleware CSRF gate. On success, navigate to
+  // the freshly-restored page URL.
+  function wireTrashBanner() {
+    const banner = document.querySelector<HTMLElement>(
+      "[data-vpg-trash-banner]",
+    );
+    if (!banner) return;
+    const button = banner.querySelector<HTMLButtonElement>(
+      "[data-vpg-trash-restore]",
+    );
+    if (!button || button.dataset.wired === "true") return;
+    button.dataset.wired = "true";
+    const pageId = banner.dataset.pageId ?? "";
+    const workspaceId = banner.dataset.workspaceId ?? "";
+    const slugId = banner.dataset.slugId ?? "";
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      const originalLabel = button.textContent;
+      button.textContent = "Restoring…";
+      try {
+        const response = await window.fetch(
+          `/api/pages/${pageId}/restore?workspace_id=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}",
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`Restore failed (${response.status})`);
+        }
+        // Hard reload the canonical page URL so the rendered surface
+        // re-fetches and the trash banner disappears.
+        window.location.assign(`/p/${slugId}`);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = originalLabel;
+        console.error("[vpg.trash-banner]", error);
+      }
+    });
+  }
+  wireTrashBanner();
+  document.addEventListener("astro:page-load", wireTrashBanner);
+</script>

@@ -137,7 +137,6 @@ CREATE TABLE IF NOT EXISTS pages (
   has_iframe INTEGER NOT NULL DEFAULT 0,
   rendered_artifact_key TEXT,
   deleted_at TEXT,
-  deleted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

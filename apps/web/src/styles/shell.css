@@ -1663,3 +1663,221 @@
 .page-trash-banner-cta:hover {
   opacity: 0.85;
 }
+
+/* =====================================================
+   Per-page-row kebab menu + Move-to dialog
+   ===================================================== */
+
+/* Wrap that lets the kebab live next to the page row's <a>. The kebab
+   is hidden by default and appears on hover/focus-within. */
+.vpg-sidebar-row-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.vpg-sidebar-row-wrap > a {
+  flex: 1;
+}
+.vpg-row-menu {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.vpg-sidebar-row-wrap:hover .vpg-row-menu,
+.vpg-sidebar-row-wrap:focus-within .vpg-row-menu,
+.vpg-row-menu[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+.vpg-row-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--vsk-radius-control, 6px);
+  background: transparent;
+  color: var(--vsk-muted, #8a8a8a);
+  cursor: pointer;
+}
+.vpg-row-menu-trigger:hover {
+  background: var(--vsk-tint, rgba(255, 255, 255, 0.08));
+  color: var(--vsk-text);
+}
+.vpg-row-menu-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 180px;
+  background: var(--vsk-surface, #1a1a1a);
+  border: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--vsk-radius-control, 6px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+.vpg-row-menu-item {
+  display: block;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: var(--vsk-text);
+  font: inherit;
+  font-size: var(--text-small, 0.875rem);
+  cursor: pointer;
+}
+.vpg-row-menu-item:hover:not(:disabled) {
+  background: var(--vsk-tint, rgba(255, 255, 255, 0.08));
+}
+.vpg-row-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.vpg-row-menu-separator {
+  height: 1px;
+  background: var(--vsk-border, rgba(255, 255, 255, 0.08));
+  margin: 4px 0;
+}
+.vpg-row-menu-danger {
+  color: var(--vsk-danger, #f87171);
+}
+.vpg-row-menu-danger:hover:not(:disabled) {
+  background: var(--vsk-danger-tint-12, rgba(239, 68, 68, 0.15));
+}
+
+/* Move-to-folder modal + permanent-delete confirm modal share a
+   minimal modal shell. */
+.vpg-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.vpg-modal {
+  background: var(--vsk-surface, #161616);
+  border: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+  width: 100%;
+}
+.vpg-modal-md {
+  max-width: 520px;
+}
+.vpg-modal-sm {
+  max-width: 420px;
+}
+.vpg-modal-header {
+  padding: var(--space-md, 16px) var(--space-lg, 20px);
+  border-bottom: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.08));
+}
+.vpg-modal-title {
+  font-size: 1.05rem;
+  font-weight: var(--weight-medium, 500);
+  margin: 0;
+}
+.vpg-modal-body {
+  padding: var(--space-md, 16px) var(--space-lg, 20px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md, 16px);
+}
+.vpg-modal-footer {
+  padding: var(--space-md, 16px) var(--space-lg, 20px);
+  border-top: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.08));
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm, 8px);
+}
+.vpg-modal-search {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--vsk-bg, #0d0d0d);
+  border: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.1));
+  color: var(--vsk-text);
+  font: inherit;
+}
+
+.vpg-folder-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+.vpg-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.04));
+}
+.vpg-folder-item:last-child {
+  border-bottom: 0;
+}
+.vpg-folder-item:hover {
+  background: var(--vsk-tint, rgba(255, 255, 255, 0.05));
+}
+.vpg-folder-item[data-selected="true"] {
+  background: var(--vsk-accent-tint-12, rgba(99, 102, 241, 0.18));
+}
+.vpg-folder-empty {
+  padding: 12px;
+  color: var(--vsk-muted);
+  font-size: var(--text-small, 0.875rem);
+  text-align: center;
+}
+.vpg-folder-path {
+  flex: 1;
+  font-size: var(--text-small, 0.875rem);
+  color: var(--vsk-text);
+}
+
+.vpg-btn {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: var(--weight-medium, 500);
+  cursor: pointer;
+}
+.vpg-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.vpg-btn-primary {
+  background: var(--vsk-text, #fff);
+  color: var(--vsk-bg, #0d0d0d);
+}
+.vpg-btn-secondary {
+  background: transparent;
+  color: var(--vsk-text);
+  border: 1px solid var(--vsk-border, rgba(255, 255, 255, 0.15));
+}
+.vpg-btn-danger {
+  background: var(--vsk-danger, #ef4444);
+  color: #fff;
+}

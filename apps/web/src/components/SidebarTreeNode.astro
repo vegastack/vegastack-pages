@@ -1,4 +1,6 @@
 ---
+import { PageRowMenu } from "./PageRowMenu";
+
 type FolderRecord = {
   id: string;
   slugId: string;
@@ -20,14 +22,35 @@ type FolderNode = {
   pages: PageRecord[];
 };
 
+interface FolderOption {
+  id: string;
+  path: string;
+  name: string;
+}
+
 interface Props {
   node: FolderNode;
   currentPageId?: string;
   currentFolderId?: string;
   folderOverrides?: Map<string, "open" | "closed">;
+  /** Whether the user can manage pages (move/trash). Suppress the
+      kebab entirely when false. */
+  canManage?: boolean;
+  workspaceId?: string;
+  workspaceHref?: string;
+  folderOptions?: FolderOption[];
 }
 
-const { node, currentPageId, currentFolderId, folderOverrides } = Astro.props;
+const {
+  node,
+  currentPageId,
+  currentFolderId,
+  folderOverrides,
+  canManage,
+  workspaceId,
+  workspaceHref,
+  folderOptions,
+} = Astro.props;
 
 const isCurrentFolder = currentFolderId === node.folder.id;
 const containsCurrentPage = node.pages.some(
@@ -81,7 +104,7 @@ const isOpen =
     <ul class="vpg-sidebar-folder-children">
       {
         node.pages.map((page) => (
-          <li>
+          <li data-page-row-id={page.id} class="vpg-sidebar-row-wrap">
             <a
               class="vpg-sidebar-row"
               href={`/p/${page.slugId}`}
@@ -106,6 +129,18 @@ const isOpen =
               <span class="vpg-sidebar-row-label">{page.title}</span>
               <span class="vpg-sidebar-row-trail" aria-hidden="true" />
             </a>
+            {canManage && workspaceId && (
+              <PageRowMenu
+                client:load
+                pageId={page.id}
+                workspaceId={workspaceId}
+                slugId={page.slugId}
+                title={page.title}
+                folders={folderOptions ?? []}
+                workspaceHref={workspaceHref}
+                surface="sidebar"
+              />
+            )}
           </li>
         ))
       }
@@ -116,6 +151,10 @@ const isOpen =
             currentPageId={currentPageId}
             currentFolderId={currentFolderId}
             folderOverrides={folderOverrides}
+            canManage={canManage}
+            workspaceId={workspaceId}
+            workspaceHref={workspaceHref}
+            folderOptions={folderOptions}
           />
         ))
       }

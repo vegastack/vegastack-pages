@@ -1,0 +1,123 @@
+---
+// Workspace-wide Recovery view: all soft-deleted pages, with deleted-by
+// metadata. Editors+ can restore; admins additionally see
+// "Delete forever" (type-to-confirm modal).
+import SettingsLayout from "../../../layouts/SettingsLayout.astro";
+import {
+  pages as pagesService,
+  permissions as permissionsService,
+  users as usersService,
+  workspaces as workspacesService,
+} from "@vegastack/pages-services";
+import { TrashList } from "../../../components/TrashList";
+import { loadSettings } from "../../../lib/settings-data";
+import { buildServiceContext } from "../../../lib/service-context";
+
+export const prerender = false;
+
+const result = await loadSettings(Astro);
+if (result.kind === "redirect") return result.response;
+const { workspace, currentUser } = result.context;
+
+const { ctx } = await buildServiceContext({
+  cookies: Astro.cookies,
+  request: Astro.request,
+});
+
+const member = await workspacesService.getMember(ctx, {
+  workspaceId: workspace.id,
+  userId: currentUser.id,
+});
+const workspacePermission = await permissionsService.resolve(ctx, {
+  workspaceId: workspace.id,
+  userId: currentUser.id,
+  scope: "workspace",
+  targetId: workspace.id,
+  memberRole: member?.role ?? null,
+  instanceRole: currentUser.role,
+});
+
+// Editor+ can view the Recovery page (restore is editor+, delete-
+// forever is admin only — the inner TrashList hides "Delete forever"
+// based on canHardDelete).
+const canRestore =
+  workspacePermission === "write" || workspacePermission === "admin";
+if (!canRestore) {
+  return Astro.redirect("/app/trash");
+}
+const canHardDelete = workspacePermission === "admin";
+
+const trashed = await pagesService.listTrashed(ctx, {
+  workspaceId: workspace.id,
+  scope: "workspace",
+});
+
+// Hydrate display names for "deleted by". `listTrashed` returns the
+// raw user id; the row is more useful when we substitute the display
+// name + email so admins can identify who trashed each page.
+const deletedByIds = Array.from(
+  new Set(
+    trashed
+      .map((entry) => entry.deletedByUserId)
+      .filter((id): id is string => Boolean(id)),
+  ),
+);
+const userMap = new Map<
+  string,
+  { id: string; displayName: string | null; email: string }
+>();
+for (const id of deletedByIds) {
+  const user = await usersService.getById(ctx, id);
+  if (user) {
+    userMap.set(user.id, {
+      id: user.id,
+      displayName: user.displayName ?? null,
+      email: user.email,
+    });
+  }
+}
+---
+
+<SettingsLayout
+  title={`Recovery · ${workspace.name} · VegaStack Pages`}
+  context={result.context}
+  currentSection="recovery"
+  sectionLabel="Recovery"
+  description={canHardDelete
+    ? "All soft-deleted pages in this workspace. Restore or permanently delete."
+    : "All soft-deleted pages in this workspace. Restore any item; only admins can permanently delete."}
+>
+  <section class="settings-card" aria-labelledby="recovery-list-h">
+    <header class="settings-card-header">
+      <h2 id="recovery-list-h">All soft-deleted pages</h2>
+      <p>
+        Soft-deleted pages stay restorable for 30 days, then the nightly cleanup
+        permanently removes them. The list below shows every trashed page across
+        this workspace, regardless of who deleted it.
+      </p>
+    </header>
+    <TrashList
+      client:load
+      scope="workspace"
+      workspaceId={workspace.id}
+      items={trashed.map((entry) => ({
+        page_id: entry.pageId,
+        title: entry.title,
+        folder_path: entry.folderPath,
+        slug_id: entry.slugId,
+        deleted_at: entry.deletedAt,
+        deleted_by:
+          entry.deletedByUserId && userMap.has(entry.deletedByUserId)
+            ? userMap.get(entry.deletedByUserId)!
+            : entry.deletedByUserId
+              ? {
+                  id: entry.deletedByUserId,
+                  displayName: null,
+                  email: "",
+                }
+              : null,
+      }))}
+      canHardDelete={canHardDelete}
+    />
+  </section>
+</SettingsLayout>
