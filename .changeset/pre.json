@@ -24,6 +24,7 @@
     "publication-title-fallback",
     "signup-form-and-docs",
     "suppress-session-kv",
+    "trash-audit-fixups",
     "trash-restore-backend"
   ]
 }

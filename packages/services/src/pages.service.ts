@@ -1231,6 +1231,32 @@ export async function hardDelete(
     .all<{ object_key: string }>();
   const versionKeys = d1AllRows(versions).map((row) => row.object_key);
 
+  // Snapshot publication R2 artifact keys (if any) and drop the
+  // publication row. `publications.resource_id` is a plain TEXT
+  // column with no FK to pages.id, so the cascade DELETE below
+  // would otherwise leave an orphan publications row pointing at
+  // a missing page. softDelete already revoked the publication
+  // (set revoked_at and scheduled R2 cleanup), but the row itself
+  // stays until we drop it here.
+  const pubArtifactKeys: string[] = [];
+  const pubRows = await db
+    .prepare(
+      `SELECT id, latest_artifact_key FROM publications
+        WHERE workspace_id = ?1 AND resource_type = 'page' AND resource_id = ?2`,
+    )
+    .bind(existing.workspace_id, pageId)
+    .all<{ id: string; latest_artifact_key: string | null }>();
+  for (const row of d1AllRows(pubRows)) {
+    if (row.latest_artifact_key) pubArtifactKeys.push(row.latest_artifact_key);
+  }
+  await db
+    .prepare(
+      `DELETE FROM publications
+        WHERE workspace_id = ?1 AND resource_type = 'page' AND resource_id = ?2`,
+    )
+    .bind(existing.workspace_id, pageId)
+    .run();
+
   // DELETE FROM pages cascades to page_versions via FK.
   await db.prepare("DELETE FROM pages WHERE id = ?1").bind(pageId).run();
 
@@ -1242,6 +1268,7 @@ export async function hardDelete(
     keysToDrop.add(existing.rendered_artifact_key);
   }
   for (const key of versionKeys) keysToDrop.add(key);
+  for (const key of pubArtifactKeys) keysToDrop.add(key);
   for (const key of keysToDrop) {
     try {
       await objectStore.delete(key);

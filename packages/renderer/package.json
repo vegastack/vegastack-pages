@@ -1,6 +1,6 @@
 {
   "name": "@vegastack/pages-renderer",
-  "version": "0.2.0-next.11",
+  "version": "0.2.0-next.12",
   "private": true,
   "type": "module",
   "exports": {

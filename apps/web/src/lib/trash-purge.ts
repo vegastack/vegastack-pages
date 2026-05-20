@@ -8,7 +8,7 @@
 // (D1 row + page_versions FK cascade + R2 source + rendered
 // artifact cleanup) is shared.
 
-import { pages as pagesService } from "@vegastack/pages-services";
+import { audit, pages as pagesService } from "@vegastack/pages-services";
 import type { ServiceContext } from "@vegastack/pages-services";
 
 export const TRASH_TTL_DAYS = 30;
@@ -30,8 +30,41 @@ export async function runTrashAutoPurge(
   let failed = 0;
   for (const id of ids) {
     try {
-      await pagesService.hardDelete(ctx, id);
+      // Look up workspace + title BEFORE hardDelete drops the row;
+      // the audit record needs both. Read with includeDeleted because
+      // the row's already soft-deleted by definition.
+      const snapshot = await pagesService.get(ctx, id, {
+        includeDeleted: true,
+      });
+      const result = await pagesService.hardDelete(ctx, id);
       purged += 1;
+      // System-attributed audit row so admins answering "what
+      // disappeared overnight?" can trace each purge back to the
+      // cron and the original trash event.
+      try {
+        await audit.record(ctx, {
+          workspaceId: result.workspaceId,
+          actorUserId: null,
+          action: "page.hard_deleted",
+          targetType: "page",
+          targetId: result.pageId,
+          metadata: {
+            source: "cron-auto-purge",
+            ttl_days: ttlDays,
+            title: snapshot?.page.title ?? null,
+            deleted_at: snapshot?.page.deletedAt ?? null,
+            deleted_by_user_id: snapshot?.page.deletedByUserId ?? null,
+          },
+        });
+      } catch (auditError) {
+        ctx.log("warn", "trash.purge.audit_failed", {
+          page_id: id,
+          error:
+            auditError instanceof Error
+              ? auditError.message
+              : String(auditError),
+        });
+      }
     } catch (error) {
       failed += 1;
       ctx.log("warn", "trash.purge.hard_delete_failed", {

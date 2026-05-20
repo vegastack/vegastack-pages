@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.2.0-next.12
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Two audit fix-ups on top of the v0.2.0-next.11 trash backend ship:
+  - **`pages.hardDelete` drops orphan publications rows.**
+    `publications.resource_id` is a plain TEXT column with no FK to
+    `pages.id`, so hard-deleting a page would otherwise leave a
+    publications row pointing at a missing page. The fix-up also
+    collects each publication's `latest_artifact_key` into the same
+    R2-cleanup pass we already do for the page source + rendered
+    artifact + every page_versions object key.
+  - **Cron auto-purge writes an audit row per purged page.** When the
+    nightly `0 4 * * *` job hard-deletes a soft-deleted page that
+    passed its 30-day TTL, we now emit an `audit_log` entry with
+    `action: page.hard_deleted`, `actorUserId: null`, and metadata
+    recording `source: cron-auto-purge`, `ttl_days`, the original
+    `deleted_at`, and `deleted_by_user_id`. Admins answering "what
+    disappeared overnight?" can trace each purge back to both the
+    cron and the original trash event.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.2.0-next.12
+
+### @vegastack/pages-services
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.2.0-next.12
+  - @vegastack/pages-db@0.2.0-next.12
+  - @vegastack/pages-renderer@0.2.0-next.12
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.2.0-next.12
+  - @vegastack/pages-mcp@0.2.0-next.12
+  - @vegastack/pages-renderer@0.2.0-next.12
+  - @vegastack/pages-services@0.2.0-next.12
+  - @vegastack/pages-ui@0.2.0-next.12
+
 ## 0.2.0-next.11
 
 ### @vegastack/pages
