@@ -1,5 +1,16 @@
 # @vegastack/pages-web
 
+## 0.1.14-next.5
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.5
+  - @vegastack/pages-mcp@0.1.14-next.5
+  - @vegastack/pages-renderer@0.1.14-next.5
+  - @vegastack/pages-services@0.1.14-next.5
+  - @vegastack/pages-ui@0.1.14-next.5
+
 ## 0.1.14-next.4
 
 ### Patch Changes

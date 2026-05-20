@@ -350,8 +350,15 @@ async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
         asRecord(body.params?.arguments),
         context,
       );
+      // Per MCP spec (2025-11-25): tools that return structuredContent
+      // SHOULD also serialize the JSON into a TextContent block for
+      // backwards compatibility. Most clients (Claude.ai, Cursor) read
+      // from `content[0].text` and ignore `structuredContent` unless the
+      // tool declares an outputSchema. Earlier this collapsed to a
+      // one-line summary like "<tool>: ok", which left clients with no
+      // payload to parse.
       return jsonRpcResult(id, {
-        content: [{ type: "text", text: compactToolText(name, result) }],
+        content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: result,
       });
     }
@@ -363,21 +370,6 @@ async function handleMessage(body: JsonRpcMessage, context: McpToolContext) {
     }
     return jsonRpcError(id, -32603, "MCP request failed.");
   }
-}
-
-function compactToolText(name: string, result: unknown) {
-  if (!result || typeof result !== "object") return String(result ?? "");
-  const record = result as Record<string, unknown>;
-  if (typeof record.status === "string") return `${name}: ${record.status}`;
-  if (record.page_id) return `${name}: ${String(record.page_id)}`;
-  if (record.publication_id) return `${name}: ${String(record.publication_id)}`;
-  if (Array.isArray(record.results))
-    return `${name}: ${record.results.length} results`;
-  if (Array.isArray(record.threads))
-    return `${name}: ${record.threads.length} threads`;
-  if (Array.isArray(record.events))
-    return `${name}: ${record.events.length} events`;
-  return `${name}: ok`;
 }
 
 function listPrompts() {

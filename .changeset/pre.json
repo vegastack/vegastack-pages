@@ -16,6 +16,7 @@
     "cf-email-error-logging",
     "clean-slate-rebuild",
     "csp-unified-profile",
+    "mcp-text-content-payload",
     "signup-form-and-docs",
     "suppress-session-kv"
   ]
