@@ -6,7 +6,7 @@
 //
 // Actions are intentionally a small set in v1:
 //   - Copy link (clipboard the public /p/ URL)
-//   - Move to… (opens the MoveToFolderDialog — folder picker)
+//   - Move page (opens the MoveToFolderDialog — folder picker)
 //   - Move to trash (soft-delete with undo toast)
 //
 // Undo: soft-delete returns success immediately AND we register an
@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MoveToFolderDialog } from "./MoveToFolderDialog";
+import { queueTrashUndoToast } from "../lib/trash-toast-handoff";
 
 interface FolderOption {
   id: string;
@@ -103,6 +104,17 @@ export function PageRowMenu({
           : null;
       if (row) row.style.display = "none";
 
+      const onPageWeJustTrashed =
+        typeof window !== "undefined" &&
+        window.location.pathname === `/p/${slugId}`;
+      if (onPageWeJustTrashed) {
+        // Hand the toast off across the hard navigation so the 10s
+        // undo window survives. The destination SonnerHost picks it
+        // up on mount and fires the toast there.
+        queueTrashUndoToast({ pageId, workspaceId, slugId, title });
+        window.location.assign(workspaceHref ?? "/app");
+        return;
+      }
       toast(`Moved "${title}" to trash`, {
         duration: 10_000,
         action: {
@@ -114,12 +126,6 @@ export function PageRowMenu({
           },
         },
       });
-      if (
-        typeof window !== "undefined" &&
-        window.location.pathname === `/p/${slugId}`
-      ) {
-        window.location.assign(workspaceHref ?? "/app");
-      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not move the page.",
@@ -182,7 +188,7 @@ export function PageRowMenu({
                 setMoveOpen(true);
               }}
             >
-              Move to…
+              Move page
             </button>
             <button
               type="button"
@@ -196,7 +202,7 @@ export function PageRowMenu({
             <button
               type="button"
               role="menuitem"
-              className="vpg-row-menu-item vpg-row-menu-danger"
+              className="vpg-row-menu-item"
               onClick={softDelete}
               disabled={busy}
             >

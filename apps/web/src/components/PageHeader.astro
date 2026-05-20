@@ -29,6 +29,10 @@ interface Props {
     text: string;
   }>;
   updatedAt?: string;
+  /** Pre-flattened folder list passed to the page-actions Move-to
+      dialog. The controller reads this off the trigger's data
+      attribute. */
+  folderOptions?: Array<{ id: string; path: string; name: string }>;
 }
 
 const {
@@ -51,6 +55,7 @@ const {
   commentsBadge = 0,
   headings = [],
   updatedAt,
+  folderOptions = [],
 } = Astro.props;
 
 function relativeEdit(iso?: string): string | null {
@@ -122,13 +127,11 @@ const outlineItems = headings.filter(
     </span>
     {
       edited && (
-        <span
-          class="vpg-pheader-meta"
-          title={updatedAt}
-          data-updated-at={updatedAt}
-          data-vpg-pheader-edited-slot
-        >
-          Edited {edited}
+        <span class="vpg-pheader-meta">
+          Edited{" "}
+          <time datetime={updatedAt} data-vpg-pheader-edited-slot>
+            {edited}
+          </time>
         </span>
       )
     }
@@ -326,6 +329,8 @@ const outlineItems = headings.filter(
       data-initial-favorited={initialFavorited ? "true" : "false"}
       data-can-restore-versions={canEdit ? "true" : "false"}
       data-can-export-source={canExportSource ? "true" : "false"}
+      data-workspace-href={workspaceHref}
+      data-folder-options={JSON.stringify(folderOptions)}
     >
       <svg
         viewBox="0 0 24 24"
@@ -391,34 +396,12 @@ const outlineItems = headings.filter(
       }
     });
 
-    function relativeEdit(iso) {
-      if (!iso) return null;
-      const then = Date.parse(iso);
-      if (Number.isNaN(then)) return null;
-      const diff = Math.max(0, Date.now() - then);
-      const minute = 60000;
-      const hour = 60 * minute;
-      const day = 24 * hour;
-      if (diff < minute) return "Just now";
-      if (diff < hour) return `${Math.round(diff / minute)}m ago`;
-      if (diff < day) return `${Math.round(diff / hour)}h ago`;
-      if (diff < 30 * day) return `${Math.round(diff / day)}d ago`;
-      if (diff < 365 * day) return `${Math.round(diff / (30 * day))}mo ago`;
-      return `${Math.round(diff / (365 * day))}y ago`;
-    }
-
-    function renderEditedSlot() {
-      const editedSlot = document.querySelector(
-        "[data-vpg-pheader-edited-slot]",
-      );
-      if (!(editedSlot instanceof HTMLElement)) return;
-      const updatedAt = editedSlot.dataset.updatedAt;
-      const edited = relativeEdit(updatedAt);
-      if (!edited) return;
-      editedSlot.textContent = `Edited ${edited}`;
-      editedSlot.title = updatedAt || "";
-    }
-
+    // The "Edited X ago" label is just a `<time datetime>` element
+    // now — the central time-format script in
+    // apps/web/src/scripts/time-format.ts handles initial render +
+    // the 60-second refresh tick + per-user prefs. When a save
+    // bumps `updated_at` we just update the `datetime` attribute and
+    // dispatch a generic refresh event the script listens for.
     window.addEventListener("vpg:page-updated", (event) => {
       const updatedAt = /** @type {CustomEvent<{ updatedAt?: string }>} */ (
         event
@@ -427,9 +410,11 @@ const outlineItems = headings.filter(
       const editedSlot = document.querySelector(
         "[data-vpg-pheader-edited-slot]",
       );
-      if (!(editedSlot instanceof HTMLElement)) return;
-      editedSlot.dataset.updatedAt = updatedAt;
-      renderEditedSlot();
+      if (!(editedSlot instanceof HTMLTimeElement)) return;
+      editedSlot.setAttribute("datetime", updatedAt);
+      editedSlot.removeAttribute("data-vpg-time-rewritten");
+      editedSlot.removeAttribute("title");
+      window.dispatchEvent(new CustomEvent("vpg:time-refresh"));
     });
 
     window.addEventListener("vpg:comments-stats", (event) => {
@@ -462,6 +447,10 @@ const outlineItems = headings.filter(
   import { initShareDialogController } from "../scripts/share-dialog-controller";
   import { initPageActionsController } from "../scripts/page-actions-controller";
   import { initPageHeaderControls } from "../scripts/page-header-controls";
+  // Side-effect import: registers the inline-title editor on
+  // every `[data-vpg-page-title]` element and re-arms across
+  // ClientRouter view-transitions.
+  import "../scripts/page-title-editor";
 
   initShareDialogController();
   initPageActionsController();

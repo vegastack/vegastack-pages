@@ -134,11 +134,13 @@ const hasToc = showToc && tocItems.length > 0;
             lastUpdated && (
               <p class="prose-updated">
                 Last updated{" "}
-                {lastUpdated.toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                })}
+                <time datetime={lastUpdated.toISOString()}>
+                  {lastUpdated.toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </time>
               </p>
             )
           }

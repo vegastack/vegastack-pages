@@ -103,7 +103,11 @@ function actorLabel(actorUserId: string | null) {
                     <code class="settings-code-path">{log.targetId}</code>
                   </td>
                   <td>{actorLabel(log.actorUserId)}</td>
-                  <td>{formatDate(log.createdAt)}</td>
+                  <td>
+                    <time datetime={log.createdAt}>
+                      {formatDate(log.createdAt)}
+                    </time>
+                  </td>
                 </tr>
               ))
             )

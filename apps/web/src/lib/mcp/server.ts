@@ -518,6 +518,7 @@ function adoptUser(user: {
     email: user.email,
     displayName: user.displayName ?? user.email,
     role: user.role,
+    preferencesJson: null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

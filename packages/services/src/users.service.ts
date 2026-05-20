@@ -20,6 +20,7 @@ export type UserRecord = {
   email: string;
   displayName: string | null;
   role: UserRole;
+  preferencesJson: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -29,6 +30,7 @@ type UserRow = {
   email: string;
   display_name: string | null;
   role: string;
+  preferences_json: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -58,14 +60,16 @@ function rowToRecord(row: UserRow): UserRecord {
   return {
     id: row.id,
     email: row.email,
-    displayName: row.display_name,
+    displayName: row.display_name ?? row.email,
     role: normalizeRole(row.role),
+    preferencesJson: row.preferences_json ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-const SELECT_COLUMNS = "id, email, display_name, role, created_at, updated_at";
+const SELECT_COLUMNS =
+  "id, email, display_name, role, preferences_json, created_at, updated_at";
 
 // Creates or returns an existing user (lookup by email, case-insensitive).
 // Idempotent: calling again with the same email returns the same row.
@@ -104,6 +108,7 @@ export async function upsert(
     email,
     displayName,
     role,
+    preferencesJson: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -190,4 +195,28 @@ export async function setRole(
     role: input.role,
     updatedAt: now,
   };
+}
+
+// Replaces the `preferences_json` blob for a user. The route layer
+// is expected to do the merge-with-existing dance; this is a plain
+// setter so we don't accidentally clobber a sibling preference
+// when only the datetime card was edited.
+export async function setPreferences(
+  ctx: ServiceContext,
+  input: { userId: string; preferencesJson: string },
+): Promise<UserRecord> {
+  const db = requireDb(ctx);
+  const now = new Date().toISOString();
+  const updated = await db
+    .prepare(
+      `UPDATE users SET preferences_json = ?1, updated_at = ?2
+        WHERE id = ?3
+        RETURNING ${SELECT_COLUMNS}`,
+    )
+    .bind(input.preferencesJson, now, input.userId)
+    .first<UserRow>();
+  if (!updated) {
+    throw new AppError("USER_NOT_FOUND", "User was not found.", 404);
+  }
+  return rowToRecord(updated);
 }

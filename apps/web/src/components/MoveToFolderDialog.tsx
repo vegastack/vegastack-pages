@@ -1,11 +1,26 @@
-// Modal that lets the user move a page to a different folder.
-// Folder list is pre-flattened on the server (FolderOption[]). A
-// type-ahead search filters by path; selecting a row + clicking
-// Move calls POST /api/pages/:id/move with `folder_path`. "/" (root)
-// is always available as the first row.
+// Move-to-folder modal. Uses the Nova design system primitives
+// (Dialog / Input / Button) and the same Lucide icons the workspace
+// sidebar uses (Folder for folders, FileText for the page being
+// moved). Type-ahead search over a flat folder list, with "/" (root)
+// always pinned as the first option.
+//
+// On submit, POST /api/pages/:id/move with `{ folder_path }`. The
+// caller decides what to do on success (the sidebar kebab triggers a
+// full reload to resync the tree; PageActionsMenu does the same).
 
+import { Folder, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
 
 interface FolderOption {
   id: string;
@@ -35,16 +50,13 @@ export function MoveToFolderDialog({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose(false);
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    // Autofocus the search; Dialog handles the rest of the trap.
+    const id = window.setTimeout(() => inputRef.current?.focus(), 30);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const allOptions = useMemo<FolderOption[]>(
-    () => [{ id: "__root__", path: "/", name: "/ (root)" }, ...folders],
+    () => [{ id: "__root__", path: "/", name: "Workspace root" }, ...folders],
     [folders],
   );
 
@@ -89,72 +101,102 @@ export function MoveToFolderDialog({
   }
 
   return (
-    <div
-      className="vpg-modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Move ${title} to a folder`}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose(false);
-      }}
-    >
-      <div className="vpg-modal vpg-modal-md">
-        <header className="vpg-modal-header">
-          <h2 className="vpg-modal-title">Move "{title}" to…</h2>
-        </header>
-        <div className="vpg-modal-body">
-          <input
+    <Dialog open onOpenChange={(open) => !open && onClose(false)}>
+      <DialogContent className="move-folder-dialog">
+        <DialogHeader>
+          <DialogTitle>Move "{title}"</DialogTitle>
+          <DialogDescription>
+            Choose a destination folder for this page.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="move-folder-search">
+          <Search
+            size={14}
+            aria-hidden="true"
+            className="move-folder-search-icon"
+          />
+          <Input
             ref={inputRef}
-            className="vpg-modal-search"
             type="text"
             placeholder="Search folders…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            className="move-folder-search-input"
           />
-          <ul className="vpg-folder-tree" role="listbox" aria-label="Folders">
-            {filtered.length === 0 && (
-              <li className="vpg-folder-empty">No folders match "{query}".</li>
-            )}
-            {filtered.map((option) => (
-              <li
-                key={option.id}
-                role="option"
-                aria-selected={selectedPath === option.path}
-                className="vpg-folder-item"
-                data-selected={
-                  selectedPath === option.path ? "true" : undefined
-                }
-                onClick={() => setSelectedPath(option.path)}
-              >
-                <span className="vpg-folder-icon" aria-hidden="true">
-                  📁
-                </span>
-                <span className="vpg-folder-path">
-                  {option.path === "/" ? "/ (root)" : option.path}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {query && (
+            <button
+              type="button"
+              className="move-folder-search-clear"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          )}
         </div>
-        <footer className="vpg-modal-footer">
-          <button
+
+        <ul
+          className="move-folder-list"
+          role="listbox"
+          aria-label="Destination folder"
+        >
+          {filtered.length === 0 ? (
+            <li className="move-folder-empty">No folders match "{query}".</li>
+          ) : (
+            filtered.map((option) => {
+              const selected = selectedPath === option.path;
+              return (
+                <li
+                  key={option.id}
+                  role="option"
+                  aria-selected={selected}
+                  className="move-folder-item"
+                  data-selected={selected ? "true" : undefined}
+                  onClick={() => setSelectedPath(option.path)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedPath(option.path);
+                    }
+                  }}
+                  tabIndex={0}
+                >
+                  <Folder
+                    size={14}
+                    aria-hidden="true"
+                    className="move-folder-item-icon"
+                  />
+                  <span className="move-folder-item-path">
+                    {option.path === "/" ? "Workspace root" : option.path}
+                  </span>
+                </li>
+              );
+            })
+          )}
+        </ul>
+
+        <DialogFooter>
+          <Button
             type="button"
-            className="vpg-btn vpg-btn-secondary"
+            variant="subtle"
+            size="md"
             onClick={() => onClose(false)}
             disabled={busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="vpg-btn vpg-btn-primary"
+            variant="primary"
+            size="md"
             onClick={submit}
             disabled={busy}
           >
             {busy ? "Moving…" : "Move"}
-          </button>
-        </footer>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

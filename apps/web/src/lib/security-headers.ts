@@ -48,9 +48,14 @@ export function contentSecurityPolicyForResponse(input: {
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
-      // No external frames; `frame-ancestors 'none'` blocks clickjacking
-      // by refusing to be embedded anywhere.
-      "frame-ancestors 'none'",
+      // Anti-clickjacking: only allow same-origin framing. We can't use
+      // `'none'` because Astro's dev-mode ClientRouter mounts a hidden
+      // same-origin iframe to pre-hydrate `client:only` islands before
+      // the swap (see astro/dist/transitions/router.js → prepareFor
+      // ClientOnlyComponents). `'none'` blocks that iframe, the prep
+      // step aborts, and sidebar nav silently fails to update the URL.
+      // `'self'` still blocks every third-party embed.
+      "frame-ancestors 'self'",
       // OAuth authorize/consent posts to /oauth/authorize/consent (self)
       // and then 302s the user-agent to the client's redirect_uri,
       // which can be any HTTPS origin (claude.ai, cursor.sh, …).

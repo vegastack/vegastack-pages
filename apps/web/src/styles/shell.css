@@ -1749,13 +1749,6 @@
   background: var(--vsk-border, rgba(255, 255, 255, 0.08));
   margin: 4px 0;
 }
-.vpg-row-menu-danger {
-  color: var(--vsk-danger, #f87171);
-}
-.vpg-row-menu-danger:hover:not(:disabled) {
-  background: var(--vsk-danger-tint-12, rgba(239, 68, 68, 0.15));
-}
-
 /* Move-to-folder modal + permanent-delete confirm modal share a
    minimal modal shell. */
 .vpg-modal-backdrop {
@@ -1880,4 +1873,58 @@
 .vpg-btn-danger {
   background: var(--vsk-danger, #ef4444);
   color: #fff;
+}
+
+/* Inline title editor — show a subtle hover/focus affordance on the
+   page H1 when contenteditable. */
+.prose-title[contenteditable] {
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: -4px;
+  outline: none;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+.prose-title[contenteditable]:hover {
+  background: var(--vsk-tint, rgba(255, 255, 255, 0.05));
+}
+.prose-title[contenteditable]:focus {
+  background: var(--vsk-tint-2, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 0 0 1px var(--vsk-border-strong, rgba(255, 255, 255, 0.2));
+}
+
+/* Inline preview block in the Date & time settings card. Reuses
+   settings tokens so the panel reads as a member of the page, not
+   a one-off component. */
+.settings-card-datetime-preview {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--vsk-radius-control);
+  background: var(--vsk-tint);
+  border: 1px solid var(--vsk-border);
+}
+.settings-card-datetime-preview ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2xs);
+}
+.settings-card-datetime-preview li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-md);
+  font-size: var(--text-small);
+}
+.settings-card-datetime-preview-label {
+  color: var(--vsk-muted);
+}
+.settings-card-datetime-preview-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--vsk-text);
+}
+.settings-card-datetime-preview .settings-muted-line {
+  margin: var(--space-sm) 0 0;
 }

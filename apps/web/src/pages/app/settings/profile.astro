@@ -1,12 +1,22 @@
 ---
 import SettingsLayout from "../../../layouts/SettingsLayout.astro";
 import { loadSettings, formatDate } from "../../../lib/settings-data";
+import { mergeDateTimePrefs, readDateTimePrefs } from "@vegastack/pages-core";
+import { DateTimePreferencesCard } from "../../../components/settings/DateTimePreferencesCard";
 
 export const prerender = false;
 
 const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
-const { currentUser } = result.context;
+const { currentUser, workspace } = result.context;
+// Effective per-user prefs = workspace default + the user's own
+// override merged on top. The card shows the effective values as
+// the starting point; saving writes back the full effective blob.
+const workspacePrefs = readDateTimePrefs(workspace.preferencesJson);
+const userPrefs = mergeDateTimePrefs(
+  workspacePrefs,
+  currentUser.preferencesJson,
+);
 ---
 
 <SettingsLayout
@@ -104,10 +114,22 @@ const { currentUser } = result.context;
       </div>
       <div>
         <dt>Created</dt>
-        <dd>{formatDate(currentUser.createdAt)}</dd>
+        <dd>
+          <time datetime={currentUser.createdAt}>
+            {formatDate(currentUser.createdAt)}
+          </time>
+        </dd>
       </div>
     </dl>
   </section>
+
+  <DateTimePreferencesCard
+    client:load
+    scope="user"
+    initial={userPrefs}
+    endpoint="/api/me/preferences"
+    workspaceDefault={workspacePrefs}
+  />
 </SettingsLayout>
 
 <script is:inline>

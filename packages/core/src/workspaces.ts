@@ -9,6 +9,9 @@ export type UserRecord = {
   email: string;
   displayName: string;
   role: InstanceRole;
+  /** Free-form preferences (datetime today; other settings later).
+      `null`/missing means "no override — fall through to defaults". */
+  preferencesJson: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -18,6 +21,10 @@ export type WorkspaceRecord = {
   name: string;
   slug: string;
   versionRetentionDays: number | null;
+  /** Workspace-default preferences. Same shape as UserRecord but
+      applies to anyone reading the workspace who hasn't set their
+      own override. */
+  preferencesJson: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -89,6 +96,7 @@ export class WorkspaceService {
       email,
       displayName: input.displayName.trim() || email,
       role: input.role ?? "user",
+      preferencesJson: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -156,6 +164,7 @@ export class WorkspaceService {
       name,
       slug,
       versionRetentionDays: null,
+      preferencesJson: null,
       createdAt: now,
       updatedAt: now,
     };

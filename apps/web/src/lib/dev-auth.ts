@@ -47,6 +47,7 @@ export async function devAutoLoginUser(): Promise<UserRecord | null> {
     email: user.email,
     displayName: user.displayName ?? user.email,
     role: user.role,
+    preferencesJson: user.preferencesJson ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

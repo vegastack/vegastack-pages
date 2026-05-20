@@ -1,36 +1,27 @@
 // Trash list shared between /app/trash (user scope) and
-// /app/settings/recovery (workspace scope). Renders the rows we
-// already get back from GET /api/workspaces/:id/trash and exposes
-// Restore + Delete forever actions on each row.
-//
-// Permissions are enforced server-side; the UI hides
-// "Delete forever" when `canHardDelete` is false. Restore is open to
-// everyone with edit on the workspace (matches the decision in the
-// feature interview).
-//
-// Delete-forever uses a confirm modal that requires the user to type
-// the page title verbatim — matches GitHub's repo-delete pattern.
-// Skipped for the user-scope view (those rows don't expose the
-// hard-delete button at all).
+// /app/settings/recovery (workspace scope). Uses Nova primitives —
+// Button, Dialog, Input — and the standard Lucide icon set. The
+// timestamps render with the workspace + user datetime preferences
+// (browser timezone, viewer's locale); see the date pref card on
+// Settings → General.
 
+import { FileText, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-
-// Minimal browser-local rendering of the trashed-at timestamp until
-// the workspace-wide datetime preferences land. `toLocaleString()`
-// already respects the viewer's locale + timezone, so admins see
-// the time in their own zone rather than the raw UTC ISO.
-function formatDeletedAt(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import {
+  formatDateTime,
+  type DateTimePreferences,
+} from "@vegastack/pages-core";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
 
 export interface TrashItem {
   page_id: string;
@@ -50,6 +41,10 @@ export interface TrashListProps {
   workspaceId: string;
   items: TrashItem[];
   canHardDelete: boolean;
+  /** Effective datetime prefs for the viewer (workspace baseline
+      merged with the user's override). Passed down from the server
+      render. */
+  datetimePrefs: DateTimePreferences;
 }
 
 export function TrashList({
@@ -57,12 +52,14 @@ export function TrashList({
   workspaceId,
   items,
   canHardDelete,
+  datetimePrefs,
 }: TrashListProps) {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [confirmTarget, setConfirmTarget] = useState<TrashItem | null>(null);
 
   const visibleItems = items.filter((item) => !removed.has(item.page_id));
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
   function markBusy(id: string, busy: boolean) {
     setPending((prev) => {
@@ -151,10 +148,21 @@ export function TrashList({
             return (
               <tr key={item.page_id}>
                 <td>
-                  <div className="vpg-trash-title">{item.title}</div>
-                  {item.folder_path && (
-                    <div className="vpg-trash-folder">{item.folder_path}</div>
-                  )}
+                  <div className="vpg-trash-title-cell">
+                    <FileText
+                      size={14}
+                      aria-hidden="true"
+                      className="vpg-trash-icon"
+                    />
+                    <div>
+                      <div className="vpg-trash-title">{item.title}</div>
+                      {item.folder_path && (
+                        <div className="vpg-trash-folder">
+                          {item.folder_path}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 {scope === "workspace" && (
                   <td>
@@ -165,28 +173,35 @@ export function TrashList({
                 )}
                 <td>
                   <time dateTime={item.deleted_at}>
-                    {formatDeletedAt(item.deleted_at)}
+                    {formatDateTime(item.deleted_at, {
+                      prefs: datetimePrefs,
+                      timezone: tz,
+                    })}
                   </time>
                 </td>
                 <td className="settings-actions-cell">
                   <div className="settings-row-actions-group">
-                    <button
+                    <Button
                       type="button"
-                      className="vpg-btn vpg-btn-secondary"
+                      variant="subtle"
+                      size="sm"
                       disabled={busy}
                       onClick={() => restore(item)}
                     >
-                      Restore
-                    </button>
+                      <RotateCcw size={13} aria-hidden="true" />
+                      <span>Restore</span>
+                    </Button>
                     {canHardDelete && (
-                      <button
+                      <Button
                         type="button"
-                        className="vpg-btn vpg-btn-danger"
+                        variant="destructive"
+                        size="sm"
                         disabled={busy}
                         onClick={() => setConfirmTarget(item)}
                       >
-                        Delete forever
-                      </button>
+                        <Trash2 size={13} aria-hidden="true" />
+                        <span>Delete forever</span>
+                      </Button>
                     )}
                   </div>
                 </td>
@@ -223,29 +238,20 @@ function PermanentDeleteConfirm({
   const [typed, setTyped] = useState("");
   const matches = typed.trim() === item.title.trim();
   return (
-    <div
-      className="vpg-modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Permanently delete ${item.title}`}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onCancel();
-      }}
-    >
-      <div className="vpg-modal vpg-modal-sm">
-        <header className="vpg-modal-header">
-          <h2 className="vpg-modal-title">Delete "{item.title}" forever?</h2>
-        </header>
-        <div className="vpg-modal-body">
-          <p>
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="permanent-delete-dialog">
+        <DialogHeader>
+          <DialogTitle>Delete "{item.title}" forever?</DialogTitle>
+          <DialogDescription>
             This permanently removes the page, every version, and any
             attachments + publication artifacts. It cannot be undone.
-          </p>
-          <p>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="permanent-delete-body">
+          <label className="permanent-delete-label">
             Type the page title <strong>{item.title}</strong> to confirm:
-          </p>
-          <input
-            className="vpg-modal-search"
+          </label>
+          <Input
             type="text"
             autoFocus
             value={typed}
@@ -253,25 +259,27 @@ function PermanentDeleteConfirm({
             placeholder={item.title}
           />
         </div>
-        <footer className="vpg-modal-footer">
-          <button
+        <DialogFooter>
+          <Button
             type="button"
-            className="vpg-btn vpg-btn-secondary"
+            variant="subtle"
+            size="md"
             onClick={onCancel}
             disabled={busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="vpg-btn vpg-btn-danger"
+            variant="destructive"
+            size="md"
             onClick={onConfirm}
             disabled={!matches || busy}
           >
             {busy ? "Deleting…" : "Delete forever"}
-          </button>
-        </footer>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

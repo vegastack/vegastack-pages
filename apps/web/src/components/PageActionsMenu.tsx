@@ -5,12 +5,14 @@ import {
   Ellipsis,
   FileCode2,
   FileText,
+  FolderInput,
   History,
   LoaderCircle,
   MessageSquareText,
   PencilLine,
   RotateCcw,
   Star,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -52,6 +54,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "./ui/sheet";
+import { MoveToFolderDialog } from "./MoveToFolderDialog";
+import { queueTrashUndoToast } from "../lib/trash-toast-handoff";
 
 type Props = {
   workspaceId: string;
@@ -66,6 +70,12 @@ type Props = {
   canRestoreVersions: boolean;
   canExportSource: boolean;
   autoOpen?: boolean;
+  /** Pre-flattened folder list for the Move-to-folder modal. Omit
+      when the caller can't read folders (the menu hides Move when
+      empty + canEdit is false). */
+  folders?: Array<{ id: string; path: string; name: string }>;
+  /** Where to bounce after the user trashes the page they're viewing. */
+  workspaceHref?: string;
 };
 
 type PageVersion = {
@@ -100,7 +110,11 @@ export function PageActionsMenu({
   canRestoreVersions,
   canExportSource,
   autoOpen = false,
+  folders = [],
+  workspaceHref = "/app",
 }: Props) {
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [trashBusy, setTrashBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(autoOpen);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -279,6 +293,62 @@ export function PageActionsMenu({
     );
   }
 
+  async function softDeletePage() {
+    if (trashBusy) return;
+    setTrashBusy(true);
+    setMenuOpen(false);
+    try {
+      const response = await fetch(
+        `/api/pages/${pageId}/trash?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        },
+      );
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        throw new Error(
+          payload?.error?.message ?? "Could not move the page to trash.",
+        );
+      }
+      // The header trigger is always rendered ON the page being
+      // trashed, so we always cross a hard navigation. Hand the toast
+      // off via sessionStorage so the destination SonnerHost picks it
+      // up + holds the full 10s window.
+      queueTrashUndoToast({ pageId, workspaceId, slugId, title });
+      window.location.assign(workspaceHref);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Move to trash failed.",
+      );
+    } finally {
+      setTrashBusy(false);
+    }
+  }
+
+  async function restorePageFromTrash() {
+    try {
+      const response = await fetch(
+        `/api/pages/${pageId}/restore?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Could not restore the page.");
+      }
+      toast.success("Page restored");
+      window.location.assign(`/p/${slugId}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Restore failed.");
+    }
+  }
+
   async function restoreVersion(version: PageVersion) {
     setRestoring(true);
     try {
@@ -396,6 +466,31 @@ export function PageActionsMenu({
             <History size={14} aria-hidden="true" />
             <span>Version history</span>
           </DropdownMenuItem>
+
+          {canEdit ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setMoveOpen(true);
+                }}
+              >
+                <FolderInput size={14} aria-hidden="true" />
+                <span>Move page</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  void softDeletePage();
+                }}
+                disabled={trashBusy}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                <span>Move to trash</span>
+              </DropdownMenuItem>
+            </>
+          ) : null}
 
           {showExport ? (
             <>
@@ -551,6 +646,19 @@ export function PageActionsMenu({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {moveOpen ? (
+        <MoveToFolderDialog
+          pageId={pageId}
+          workspaceId={workspaceId}
+          title={title}
+          folders={folders}
+          onClose={(moved) => {
+            setMoveOpen(false);
+            if (moved) window.location.reload();
+          }}
+        />
+      ) : null}
     </>
   );
 }

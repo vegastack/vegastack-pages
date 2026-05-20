@@ -53,8 +53,11 @@ type Card = {
   ownerEmail: string;
   ownerInitials: string;
   isCurrentUser: boolean;
+  lastSeenIso: string | null;
   lastSeen: string;
+  createdIso: string;
   created: string;
+  expiresIso: string;
   expires: string;
 };
 
@@ -88,8 +91,11 @@ const cards: Card[] = await Promise.all(
       ownerEmail: email,
       ownerInitials: initialsOf(displayName),
       isCurrentUser: session.userId === currentUser.id,
+      lastSeenIso: session.lastSeenAt ?? null,
       lastSeen: session.lastSeenAt ? formatDate(session.lastSeenAt) : "Never",
+      createdIso: session.createdAt,
       created: formatDate(session.createdAt),
+      expiresIso: session.expiresAt,
       expires: formatDate(session.expiresAt),
     };
   }),
@@ -196,15 +202,25 @@ const cards: Card[] = await Promise.all(
               <dl class="connections-log-card-meta">
                 <div>
                   <dt>Last seen</dt>
-                  <dd>{card.lastSeen}</dd>
+                  <dd>
+                    {card.lastSeenIso ? (
+                      <time datetime={card.lastSeenIso}>{card.lastSeen}</time>
+                    ) : (
+                      card.lastSeen
+                    )}
+                  </dd>
                 </div>
                 <div>
                   <dt>Created</dt>
-                  <dd>{card.created}</dd>
+                  <dd>
+                    <time datetime={card.createdIso}>{card.created}</time>
+                  </dd>
                 </div>
                 <div>
                   <dt>Expires</dt>
-                  <dd>{card.expires}</dd>
+                  <dd>
+                    <time datetime={card.expiresIso}>{card.expires}</time>
+                  </dd>
                 </div>
               </dl>
             </footer>

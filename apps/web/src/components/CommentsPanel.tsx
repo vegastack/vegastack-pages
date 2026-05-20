@@ -7,6 +7,7 @@ import {
   MoreVertical,
   RotateCcw,
 } from "lucide-react";
+import { formatAbsolute, formatDateTime } from "@vegastack/pages-core";
 import {
   type ReactNode,
   useCallback,
@@ -1630,78 +1631,25 @@ function getReplyAuthorName(
   return currentUserName;
 }
 
-/**
- * Notion/Docs-style relative timestamp.
- *   < 60s          → "just now"
- *   < 60m          → "{n}m ago"
- *   < 24h          → "{n}h ago"
- *   yesterday      → "yesterday at h:mm a"
- *   < 7 days       → "{Weekday} at h:mm a"
- *   this year      → "Mon D"
- *   older          → "Mon D, YYYY"
- */
+// Initial render uses the central formatDateTime / formatAbsolute
+// helpers (workspace-default prefs, browser-local tz). After the
+// `<time datetime>` element is in the DOM, the central client
+// rewriter in apps/web/src/scripts/time-format.ts replaces the text
+// with the effective workspace + user prefs.
+function commentsTz(): string {
+  return typeof Intl !== "undefined"
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+    : "UTC";
+}
 function formatRelativeTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const now = new Date();
-  const deltaMs = now.getTime() - date.getTime();
-  const deltaSec = Math.max(0, Math.floor(deltaMs / 1000));
-
-  if (deltaSec < 60) return "just now";
-  if (deltaSec < 60 * 60) return `${Math.floor(deltaSec / 60)}m ago`;
-  if (deltaSec < 60 * 60 * 24) return `${Math.floor(deltaSec / 3600)}h ago`;
-
-  const startOfToday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  );
-  const startOfDate = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  );
-  const dayDiff = Math.round(
-    (startOfToday.getTime() - startOfDate.getTime()) / 86_400_000,
-  );
-
-  const time = date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-
-  if (dayDiff === 1) return `yesterday at ${time}`;
-  if (dayDiff > 1 && dayDiff < 7) {
-    const weekday = date.toLocaleDateString(undefined, { weekday: "long" });
-    return `${weekday} at ${time}`;
-  }
-
-  if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-  }
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  if (!value) return "";
+  return formatDateTime(value, { timezone: commentsTz() });
 }
 
 function formatAbsoluteTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(undefined, {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  if (!value) return "";
+  return formatAbsolute(value, { timezone: commentsTz() });
 }
-
 type ReplyType = ThreadPayload["replies"][number];
 
 function ReplyRow({

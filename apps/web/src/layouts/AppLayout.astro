@@ -5,12 +5,14 @@ import "../styles/global.css";
 import "../styles/shell.css";
 import { SonnerHost } from "../components/SonnerHost";
 
-// Navigation model: Astro 6 <ClientRouter /> is the canonical
-// "instant-feel" mechanism. Sidebar, PageHeader, CommandPalette,
-// CommentsRail, MobileTabBar, and this layout's SonnerHost all carry
-// `transition:persist` so they keep their DOM and island state across
-// in-app navigation. Only the main <article> body (`#vpg-document`) is
-// swapped per navigation. Plan: docs/plans/010-clean-slate-rebuild.md §1.7.
+// Navigation model: Astro 6 <ClientRouter /> for fast in-app nav.
+// Only this layout's SonnerHost uses `transition:persist` (so toasts
+// survive nav). The shell pieces on /p/* and /f/* (Sidebar, PageHeader,
+// CommentsRail, CommandPalette, MobileTabBar) used to persist too, but
+// the persist algorithm silently aborted swaps in this codebase — a
+// click on a sidebar page would fetch the destination yet never update
+// the URL or DOM. Those shell components now SSR fresh on every nav
+// (cheap — same data, fully server-rendered).
 
 interface Props {
   title?: string;
@@ -22,6 +24,11 @@ interface Props {
   // warning since the request isn't available. Server-rendered routes
   // can read the cookie themselves and forward it.
   initialTheme?: "light" | "dark" | "system";
+  /** Resolved effective datetime preferences (workspace baseline +
+      per-user override). Emitted as a `<meta>` for the client-side
+      `<time>` rewrite script in `scripts/time-format.ts`. Anonymous
+      / pre-rendered pages skip this and fall back to the defaults. */
+  datetimePrefsJson?: string | null;
 }
 
 const {
@@ -30,6 +37,7 @@ const {
   canonicalPath,
   robots = "noindex",
   initialTheme = "system",
+  datetimePrefsJson = null,
 } = Astro.props;
 const baseUrl = (process.env.VPG_BASE_URL ?? "https://pages.vegastack.com")
   .replace(/\/+$/, "")
@@ -58,6 +66,11 @@ const canonicalUrl = canonicalPath
     <meta name="robots" content={robots} />
     <meta name="description" content={description} />
     <meta name="color-scheme" content="light dark" />
+    {
+      datetimePrefsJson && (
+        <meta name="vpg-datetime-prefs" content={datetimePrefsJson} />
+      )
+    }
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
     <meta property="og:type" content="website" />
@@ -230,6 +243,10 @@ const canonicalUrl = canonicalPath
       import { initPageEditorController } from "../scripts/page-editor-controller";
       import { enhanceProse } from "../scripts/prose-enhancements";
       import { initTocRail } from "../scripts/toc-rail";
+      // Side-effect import: walks every `<time datetime="…">` on the
+      // page and rewrites the visible text in the viewer's browser
+      // timezone + workspace/user datetime prefs.
+      import "../scripts/time-format";
 
       function initHtmlPreviewResize() {
         const root = document.documentElement;

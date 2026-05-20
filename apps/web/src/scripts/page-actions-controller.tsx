@@ -13,6 +13,8 @@ type ActionsTrigger = HTMLButtonElement & {
     initialFavorited?: string;
     canRestoreVersions?: string;
     canExportSource?: string;
+    workspaceHref?: string;
+    folderOptions?: string;
   };
 };
 
@@ -68,6 +70,8 @@ async function mountActions(trigger: ActionsTrigger) {
         canRestoreVersions: trigger.dataset.canRestoreVersions === "true",
         canExportSource: trigger.dataset.canExportSource === "true",
         autoOpen: true,
+        workspaceHref: trigger.dataset.workspaceHref ?? "/app",
+        folders: parseFolderOptions(trigger.dataset.folderOptions),
       }),
     );
   } catch (error) {
@@ -84,6 +88,28 @@ async function mountActions(trigger: ActionsTrigger) {
   } finally {
     trigger.removeAttribute("aria-busy");
     loading = false;
+  }
+}
+
+function parseFolderOptions(
+  raw: string | undefined,
+): Array<{ id: string; path: string; name: string }> {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is { id: string; path: string; name: string } =>
+        Boolean(
+          entry &&
+          typeof entry === "object" &&
+          typeof entry.id === "string" &&
+          typeof entry.path === "string" &&
+          typeof entry.name === "string",
+        ),
+    );
+  } catch {
+    return [];
   }
 }
 

@@ -164,10 +164,24 @@ const rows = sessions.map((session) => {
                     </span>
                   </td>
                   <td>
-                    {session.lastSeenAt ? formatDate(session.lastSeenAt) : "—"}
+                    {session.lastSeenAt ? (
+                      <time datetime={session.lastSeenAt}>
+                        {formatDate(session.lastSeenAt)}
+                      </time>
+                    ) : (
+                      "—"
+                    )}
                   </td>
-                  <td>{formatDate(session.createdAt)}</td>
-                  <td>{formatDate(session.expiresAt)}</td>
+                  <td>
+                    <time datetime={session.createdAt}>
+                      {formatDate(session.createdAt)}
+                    </time>
+                  </td>
+                  <td>
+                    <time datetime={session.expiresAt}>
+                      {formatDate(session.expiresAt)}
+                    </time>
+                  </td>
                   <td class="settings-actions-cell">
                     <button
                       class="settings-row-action danger"

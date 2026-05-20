@@ -12,7 +12,12 @@
 // invariants only (input shape, row existence). Routes are responsible
 // for verifying the actor has permission BEFORE invoking a mutation.
 
-import { createId, idPrefixes, slugifyTitle } from "@vegastack/pages-core";
+import {
+  AppError,
+  createId,
+  idPrefixes,
+  slugifyTitle,
+} from "@vegastack/pages-core";
 import type { D1PreparedStatement } from "@vegastack/pages-db";
 import type { ServiceContext, MutationEnvelope } from "./context.ts";
 import { requireDb } from "./context.ts";
@@ -42,6 +47,7 @@ type WorkspaceRow = {
   name: string;
   slug: string;
   version_retention_days: number | null;
+  preferences_json: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -60,15 +66,17 @@ type UserRow = {
   email: string;
   display_name: string | null;
   role: string;
+  preferences_json: string | null;
   created_at: string;
   updated_at: string;
 };
 
 const WORKSPACE_COLUMNS =
-  "id, name, slug, version_retention_days, created_at, updated_at";
+  "id, name, slug, version_retention_days, preferences_json, created_at, updated_at";
 const MEMBER_COLUMNS =
   "id, workspace_id, user_id, role, created_at, updated_at";
-const USER_COLUMNS = "id, email, display_name, role, created_at, updated_at";
+const USER_COLUMNS =
+  "id, email, display_name, role, preferences_json, created_at, updated_at";
 
 function normalizeWorkspaceRole(value: string): WorkspaceRole {
   switch (value) {
@@ -88,6 +96,7 @@ function workspaceFromRow(row: WorkspaceRow): WorkspaceRecord {
     name: row.name,
     slug: row.slug,
     versionRetentionDays: row.version_retention_days,
+    preferencesJson: row.preferences_json ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -113,6 +122,7 @@ function userFromRow(row: UserRow): UserRecord {
     email: row.email,
     displayName: row.display_name ?? row.email,
     role: row.role === "instance_admin" ? "instance_admin" : "user",
+    preferencesJson: row.preferences_json ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -352,6 +362,7 @@ export async function create(
     name,
     slug,
     versionRetentionDays,
+    preferencesJson: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -794,4 +805,27 @@ function isUniqueViolation(error: unknown): boolean {
   // node:sqlite + D1 both surface unique-index failures as
   // "UNIQUE constraint failed: <table>.<col>".
   return /UNIQUE constraint failed/i.test(message);
+}
+
+// Replace the workspace's preferences_json blob. Route layer is
+// responsible for merging the partial patch into the existing JSON;
+// this is a plain setter.
+export async function setPreferences(
+  ctx: ServiceContext,
+  input: { workspaceId: string; preferencesJson: string },
+): Promise<WorkspaceRecord> {
+  const db = requireDb(ctx);
+  const now = new Date().toISOString();
+  const updated = await db
+    .prepare(
+      `UPDATE workspaces SET preferences_json = ?1, updated_at = ?2
+        WHERE id = ?3
+        RETURNING ${WORKSPACE_COLUMNS}`,
+    )
+    .bind(input.preferencesJson, now, input.workspaceId)
+    .first<WorkspaceRow>();
+  if (!updated) {
+    throw new AppError("WORKSPACE_NOT_FOUND", "Workspace was not found.", 404);
+  }
+  return workspaceFromRow(updated);
 }

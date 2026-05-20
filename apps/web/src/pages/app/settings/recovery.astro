@@ -12,6 +12,7 @@ import {
 import { TrashList } from "../../../components/TrashList";
 import { loadSettings } from "../../../lib/settings-data";
 import { buildServiceContext } from "../../../lib/service-context";
+import { mergeDateTimePrefs, readDateTimePrefs } from "@vegastack/pages-core";
 
 export const prerender = false;
 
@@ -51,6 +52,14 @@ const trashed = await pagesService.listTrashed(ctx, {
   workspaceId: workspace.id,
   scope: "workspace",
 });
+
+// Effective datetime prefs (workspace baseline merged with the
+// signed-in admin's per-user override).
+const workspacePrefs = readDateTimePrefs(workspace.preferencesJson);
+const datetimePrefs = mergeDateTimePrefs(
+  workspacePrefs,
+  currentUser.preferencesJson,
+);
 
 // Hydrate display names for "deleted by". `listTrashed` returns the
 // raw user id; the row is more useful when we substitute the display
@@ -118,6 +127,7 @@ for (const id of deletedByIds) {
               : null,
       }))}
       canHardDelete={canHardDelete}
+      datetimePrefs={datetimePrefs}
     />
   </section>
 </SettingsLayout>

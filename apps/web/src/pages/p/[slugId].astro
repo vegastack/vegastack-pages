@@ -3,6 +3,8 @@ import {
   AppError,
   hasPermission,
   humanizeFrontmatterKey,
+  mergeDateTimePrefs,
+  readDateTimePrefs,
 } from "@vegastack/pages-core";
 import { CommandPalette } from "../../components/CommandPalette";
 import { CommentsRail } from "../../components/CommentsSlideOver";
@@ -245,9 +247,24 @@ const sidebarWorkspace = workspaceRecord ?? {
   name: "Workspace",
   slug: "workspace",
   versionRetentionDays: null,
+  preferencesJson: null,
   createdAt: pageWithSource.page.createdAt,
   updatedAt: pageWithSource.page.updatedAt,
 };
+// Effective datetime prefs for the AppLayout meta tag. Anonymous
+// viewers get the workspace defaults only; signed-in members get
+// their own override layered on top. Wrapped in the same envelope
+// shape readDateTimePrefs understands.
+const workspaceDateTimePrefs = readDateTimePrefs(
+  sidebarWorkspace.preferencesJson,
+);
+const effectiveDateTimePrefs = mergeDateTimePrefs(
+  workspaceDateTimePrefs,
+  actor.user?.preferencesJson ?? null,
+);
+const datetimePrefsJson = JSON.stringify({
+  dateTime: effectiveDateTimePrefs,
+});
 const sidebarWorkspaces =
   !isPublicPublication && actor.user
     ? await listSelectableWorkspaces(actor.user)
@@ -1234,6 +1251,7 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
   title={`${title} - VegaStack Pages`}
   robots={publicIndexable ? "index,follow" : "noindex"}
   initialTheme={readInitialTheme(Astro.cookies)}
+  datetimePrefsJson={datetimePrefsJson}
 >
   {
     passwordPrompt ? (
@@ -1246,7 +1264,6 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
       <div class={shellClasses} data-vpg-workspace-id={sidebarWorkspace.id}>
         {!isPublicPublication && (
           <Sidebar
-            transition:persist="vpg-sidebar"
             workspace={{
               id: sidebarWorkspace.id,
               name: sidebarWorkspace.name,
@@ -1299,7 +1316,6 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
             </div>
           )}
           <PageHeader
-            transition:persist="vpg-page-header"
             workspaceId={sidebarWorkspace.id}
             workspaceName={sidebarWorkspace.name}
             workspaceHref={workspaceHref}
@@ -1320,6 +1336,13 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
             commentsBadge={initialCommentStats.open}
             headings={displayedHeadings}
             updatedAt={pageWithSource.page.updatedAt}
+            folderOptions={workspaceFolders.map((folder) => ({
+              id: folder.id,
+              path: folder.path.startsWith("/")
+                ? folder.path
+                : `/${folder.path}`,
+              name: folder.name,
+            }))}
           />
 
           <div class="vpg-shell-body">
@@ -1349,7 +1372,20 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                   class="vpg-document-zone"
                   data-vpg-document
                 >
-                  {!isHtmlPage && <h1 class="prose-title">{title}</h1>}
+                  {!isHtmlPage && (
+                    <h1
+                      class="prose-title"
+                      data-vpg-page-title
+                      data-page-id={pageWithSource.page.id}
+                      data-workspace-id={pageWithSource.page.workspaceId}
+                      data-slug-id={pageWithSource.page.slugId}
+                      contenteditable={canWrite ? "plaintext-only" : undefined}
+                      spellcheck="false"
+                      suppress-hydration-warning
+                    >
+                      {title}
+                    </h1>
+                  )}
                   {description && (
                     <p class="prose-description" data-vpg-description-static>
                       {description}
@@ -1362,16 +1398,32 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
                       aria-label="Page metadata"
                       data-vpg-metadata-static
                     >
-                      {metadataEntries.map(([key, value]) => (
-                        <div>
-                          <dt>{humanizeFrontmatterKey(key)}</dt>
-                          <dd>
-                            {typeof value === "string"
-                              ? value
-                              : JSON.stringify(value)}
-                          </dd>
-                        </div>
-                      ))}
+                      {metadataEntries.map(([key, value]) => {
+                        // Wrap the system-managed created_at/updated_at
+                        // values in <time datetime="…"> so the client
+                        // rewrite script can re-render them in the
+                        // viewer's tz + workspace prefs. Other keys
+                        // (user frontmatter) render plain.
+                        const isTimestamp =
+                          (key === "created_at" || key === "updated_at") &&
+                          typeof value === "string";
+                        return (
+                          <div>
+                            <dt>{humanizeFrontmatterKey(key)}</dt>
+                            <dd>
+                              {isTimestamp ? (
+                                <time datetime={value as string}>
+                                  {value as string}
+                                </time>
+                              ) : typeof value === "string" ? (
+                                value
+                              ) : (
+                                JSON.stringify(value)
+                              )}
+                            </dd>
+                          </div>
+                        );
+                      })}
                     </dl>
                   )}
 
@@ -1400,7 +1452,6 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
             {canComment && (
               <CommentsRail
                 client:idle
-                transition:persist="vpg-comments-rail"
                 workspaceId={sidebarWorkspace.id}
                 pageId={pageWithSource.page.id}
                 contentHash={pageWithSource.page.contentHash}
@@ -1415,16 +1466,11 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette
-            client:idle
-            transition:persist="vpg-command-palette"
-            workspaceId={sidebarWorkspace.id}
-          />
+          <CommandPalette client:idle workspaceId={sidebarWorkspace.id} />
         )}
 
         {!isPublicPublication && (
           <MobileTabBar
-            transition:persist="vpg-mobile-tabbar"
             pageId={pageWithSource.page.id}
             showComments={canComment}
             commentsBadge={initialCommentStats.open}

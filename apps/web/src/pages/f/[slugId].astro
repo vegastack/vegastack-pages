@@ -433,7 +433,6 @@ const publicIndexable = Boolean(
       >
         {!isPublicPublication && (
           <Sidebar
-            transition:persist="vpg-sidebar"
             workspace={{
               id: sidebarWorkspace.id,
               name: sidebarWorkspace.name,
@@ -464,7 +463,6 @@ const publicIndexable = Boolean(
 
         <div class="vpg-shell-right">
           <PageHeader
-            transition:persist="vpg-page-header"
             workspaceId={sidebarWorkspace.id}
             workspaceName={sidebarWorkspace.name}
             workspaceHref={workspaceHref}
@@ -508,16 +506,11 @@ const publicIndexable = Boolean(
         </div>
 
         {!isPublicPublication && (
-          <CommandPalette
-            client:idle
-            transition:persist="vpg-command-palette"
-            workspaceId={sidebarWorkspace.id}
-          />
+          <CommandPalette client:idle workspaceId={sidebarWorkspace.id} />
         )}
 
         {!isPublicPublication && (
           <MobileTabBar
-            transition:persist="vpg-mobile-tabbar"
             pageId={undefined}
             showComments={false}
             commentsBadge={0}

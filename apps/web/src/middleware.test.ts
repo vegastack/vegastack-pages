@@ -38,7 +38,10 @@ describe("security headers", () => {
     );
 
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("frame-ancestors 'none'");
+    // Same-origin framing only. `'none'` would block Astro dev-mode's
+    // hidden client:only hydration iframe and silently abort view-
+    // transition swaps.
+    expect(csp).toContain("frame-ancestors 'self'");
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("base-uri 'self'");
     // OAuth authorize/consent POSTs need to redirect to third-party
@@ -66,7 +69,7 @@ describe("security headers", () => {
       pathname: "/p/get-started-a8f31c",
     });
     expect(csp).toContain("script-src 'self' 'unsafe-inline'");
-    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("frame-ancestors 'self'");
   });
 
   it("declares worker-src so app code can spawn blob: workers", () => {

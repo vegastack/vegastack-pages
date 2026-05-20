@@ -6,6 +6,7 @@ export * from "./object-store";
 export * from "./page-service";
 export * from "./page-source";
 export * from "./frontmatter-labels";
+export * from "./datetime";
 export * from "./setup";
 export * from "./comments";
 export * from "./publications";

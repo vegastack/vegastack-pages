@@ -1,62 +1,178 @@
 ---
-// User's trash. Shows pages this user soft-deleted; supports restore.
-// Permanent-delete is hidden — workspace admins handle that from
-// /app/settings/recovery.
-import SettingsLayout from "../../layouts/SettingsLayout.astro";
-import { pages as pagesService } from "@vegastack/pages-services";
+// /app/trash — user's own trash. Standalone page (NOT under
+// Settings) using the regular workspace AppLayout + Sidebar shell so
+// it feels like a peer of the workspace pages, not an admin nook.
+// We import settings.css so the page header borrows the canonical
+// `.settings-pageheader` typography and divider — the only deviation
+// from the Settings shell here is the sidebar (workspace tree, not
+// the settings nav).
+import "../../styles/settings.css";
+import AppLayout from "../../layouts/AppLayout.astro";
+import Sidebar from "../../components/Sidebar.astro";
 import { TrashList } from "../../components/TrashList";
-import { loadSettings } from "../../lib/settings-data";
+import {
+  folders as foldersService,
+  pages as pagesService,
+  workspaces as workspacesService,
+} from "@vegastack/pages-services";
+import { getRequestActor } from "../../lib/access";
 import { buildServiceContext } from "../../lib/service-context";
+import { listSelectableWorkspaces } from "../../lib/workspace-visibility";
+import {
+  DEFAULT_DATETIME_PREFS,
+  mergeDateTimePrefs,
+  readDateTimePrefs,
+} from "@vegastack/pages-core";
+import { readInitialTheme } from "../../lib/theme";
 
 export const prerender = false;
 
-const result = await loadSettings(Astro);
-if (result.kind === "redirect") return result.response;
-const { workspace, currentUser } = result.context;
+const actor = await getRequestActor(Astro.cookies);
+if (!actor.user) {
+  return Astro.redirect("/app/login");
+}
+const currentUser = actor.user;
+const userWorkspaces = await listSelectableWorkspaces(currentUser);
 
-// loadSettings hands us a thin read-only ctx; listTrashed accepts it,
-// but we re-derive a fuller ctx so background tasks (audit etc.) wire
-// correctly should we extend the trash page later.
+// Resolve the active workspace the same way SettingsLayout's
+// `loadSettings` does: URL param → cookie → first available.
+const urlWorkspaceId = Astro.url.searchParams.get("workspace_id");
+const cookieWorkspaceId =
+  Astro.cookies.get("vpg-active-workspace")?.value ?? null;
+const requestedWorkspaceId = urlWorkspaceId ?? cookieWorkspaceId;
+const workspace =
+  userWorkspaces.find((w) => w.id === requestedWorkspaceId) ??
+  userWorkspaces[0] ??
+  null;
+if (!workspace) {
+  return Astro.redirect("/app");
+}
+Astro.cookies.set("vpg-active-workspace", workspace.id, {
+  path: "/",
+  sameSite: "lax",
+  maxAge: 60 * 60 * 24 * 365,
+});
+
 const { ctx } = await buildServiceContext({
   cookies: Astro.cookies,
   request: Astro.request,
 });
 
-const items = await pagesService.listTrashed(ctx, {
-  workspaceId: workspace.id,
-  scope: "mine",
-  userId: currentUser.id,
-});
+const [pages, folders, trashed] = await Promise.all([
+  pagesService.list(ctx, workspace.id),
+  foldersService.listAll(ctx, { workspaceId: workspace.id }),
+  pagesService.listTrashed(ctx, {
+    workspaceId: workspace.id,
+    scope: "mine",
+    userId: currentUser.id,
+  }),
+]);
+
+// Effective datetime prefs = workspace baseline + user override.
+const workspacePrefs = readDateTimePrefs(workspace.preferencesJson);
+const datetimePrefs = mergeDateTimePrefs(
+  workspacePrefs,
+  currentUser.preferencesJson,
+);
+
+const sidebarFoldersForTree = folders.map((folder) => ({
+  id: folder.id,
+  slugId: folder.slugId,
+  name: folder.name,
+  path: folder.path,
+  parentFolderId: folder.parentFolderId,
+}));
+const sidebarPages = pages.map((page) => ({
+  id: page.id,
+  slugId: page.slugId,
+  title: page.title,
+  folderPath: page.folderPath ?? null,
+}));
+const sidebarUser = {
+  id: currentUser.id,
+  email: currentUser.email,
+  displayName: currentUser.displayName ?? currentUser.email,
+};
+const sidebarWorkspaces = userWorkspaces.map((w) => ({
+  id: w.id,
+  name: w.name,
+  slug: w.slug,
+}));
+const canWrite = true; // gated again server-side per action
 ---
 
-<SettingsLayout
+<AppLayout
   title={`Trash · ${workspace.name} · VegaStack Pages`}
-  context={result.context}
-  currentSection="trash"
-  sectionLabel="Trash"
-  description="Pages you've moved to the trash. They are permanently deleted 30 days after they were trashed."
+  initialTheme={readInitialTheme(Astro.cookies)}
+  datetimePrefsJson={JSON.stringify({ dateTime: datetimePrefs })}
 >
-  <section class="settings-card" aria-labelledby="trash-list-h">
-    <header class="settings-card-header">
-      <h2 id="trash-list-h">Your trashed pages</h2>
-      <p>
-        Restore any page within 30 days. After that they're permanently purged
-        by the nightly cleanup. Workspace admins can also recover items other
-        people deleted from <a href="/app/settings/recovery"> Recovery</a>.
-      </p>
-    </header>
-    <TrashList
-      client:load
-      scope="mine"
-      workspaceId={workspace.id}
-      items={items.map((entry) => ({
-        page_id: entry.pageId,
-        title: entry.title,
-        folder_path: entry.folderPath,
-        slug_id: entry.slugId,
-        deleted_at: entry.deletedAt,
-      }))}
-      canHardDelete={false}
+  <div class="vpg-shell vpg-shell-app" data-vpg-workspace-id={workspace.id}>
+    <Sidebar
+      workspace={{
+        id: workspace.id,
+        name: workspace.name,
+        slug: workspace.slug,
+      }}
+      workspaces={sidebarWorkspaces}
+      currentUser={sidebarUser}
+      pages={sidebarPages}
+      folders={sidebarFoldersForTree}
+      canWrite={canWrite}
     />
-  </section>
-</SettingsLayout>
+    <div class="vpg-shell-right">
+      <main class="settings-main">
+        <header class="settings-pageheader">
+          <div class="settings-pageheader-text">
+            <h1>Trash</h1>
+            <p class="settings-description">
+              Pages you've moved to the trash. They are permanently deleted 30
+              days after they were trashed.
+            </p>
+          </div>
+        </header>
+
+        <TrashList
+          client:load
+          scope="mine"
+          workspaceId={workspace.id}
+          items={trashed.map((entry) => ({
+            page_id: entry.pageId,
+            title: entry.title,
+            folder_path: entry.folderPath,
+            slug_id: entry.slugId,
+            deleted_at: entry.deletedAt,
+          }))}
+          canHardDelete={false}
+          datetimePrefs={datetimePrefs}
+        />
+      </main>
+    </div>
+  </div>
+</AppLayout>
+
+<style is:global>
+  .vpg-trash-title-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+  }
+  .vpg-trash-icon {
+    color: var(--vsk-muted);
+    flex-shrink: 0;
+  }
+  .vpg-trash-title {
+    font-weight: var(--weight-medium, 500);
+  }
+  .vpg-trash-folder {
+    font-size: var(--text-2xs, 0.75rem);
+    color: var(--vsk-muted);
+    margin-top: 2px;
+  }
+  .vpg-trash-empty {
+    padding: var(--space-lg, 24px);
+    color: var(--vsk-muted);
+    text-align: center;
+    border: 1px dashed var(--vsk-border, rgba(255, 255, 255, 0.1));
+    border-radius: 8px;
+  }
+</style>

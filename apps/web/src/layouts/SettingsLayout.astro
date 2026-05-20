@@ -5,6 +5,7 @@ import { CommandPalette } from "../components/CommandPalette";
 import SettingsSidebar from "../components/SettingsSidebar.astro";
 import type { SettingsContext } from "../lib/settings-data";
 import { readInitialTheme } from "../lib/theme";
+import { mergeDateTimePrefs, readDateTimePrefs } from "@vegastack/pages-core";
 
 interface Props {
   title: string;
@@ -19,7 +20,6 @@ interface Props {
     | "connections_workspace"
     | "audit"
     | "profile"
-    | "trash"
     | "recovery";
   sectionLabel: string;
   description?: string;
@@ -36,6 +36,18 @@ const { title, context, currentSection, sectionLabel, description, kicker } =
 const { workspace, workspaces, pages, currentUser, effectivePermission } =
   context;
 const isAdmin = effectivePermission === "admin";
+
+// Effective datetime prefs: workspace baseline merged with the
+// signed-in user's override. Forwarded to AppLayout so the
+// `<time>` rewrite script can format every timestamp uniformly.
+const workspaceDateTimePrefs = readDateTimePrefs(workspace.preferencesJson);
+const effectiveDateTimePrefs = mergeDateTimePrefs(
+  workspaceDateTimePrefs,
+  currentUser.preferencesJson,
+);
+const datetimePrefsJson = JSON.stringify({
+  dateTime: effectiveDateTimePrefs,
+});
 
 const navItems: Array<{
   id: Props["currentSection"];
@@ -72,7 +84,11 @@ const firstPage = pages[0];
 const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
 ---
 
-<AppLayout title={title} initialTheme={readInitialTheme(Astro.cookies)}>
+<AppLayout
+  title={title}
+  initialTheme={readInitialTheme(Astro.cookies)}
+  datetimePrefsJson={datetimePrefsJson}
+>
   <div
     class="vpg-shell"
     data-workspace-id={workspace.id}

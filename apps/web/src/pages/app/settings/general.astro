@@ -1,14 +1,18 @@
 ---
 import SettingsLayout from "../../../layouts/SettingsLayout.astro";
 import { loadSettings } from "../../../lib/settings-data";
+import { readDateTimePrefs } from "@vegastack/pages-core";
+import { DateTimePreferencesCard } from "../../../components/settings/DateTimePreferencesCard";
 
 export const prerender = false;
 
 const result = await loadSettings(Astro);
 if (result.kind === "redirect") return result.response;
-const { workspace, pages } = result.context;
+const { workspace, pages, effectivePermission } = result.context;
 const firstPage = pages[0];
 const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
+const workspaceDateTimePrefs = readDateTimePrefs(workspace.preferencesJson);
+const canEditWorkspacePrefs = effectivePermission === "admin";
 ---
 
 <SettingsLayout
@@ -104,6 +108,14 @@ const openPagesHref = firstPage ? `/p/${firstPage.slugId}` : "/";
       <p class="settings-status" data-retention-status></p>
     </form>
   </section>
+
+  <DateTimePreferencesCard
+    client:load
+    scope="workspace"
+    initial={workspaceDateTimePrefs}
+    endpoint={`/api/workspaces/${workspace.id}/preferences`}
+    canEdit={canEditWorkspacePrefs}
+  />
 
   <section class="settings-card" aria-labelledby="general-backup-h">
     <header class="settings-card-header">

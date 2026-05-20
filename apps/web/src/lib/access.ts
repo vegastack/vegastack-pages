@@ -62,6 +62,7 @@ function toLegacyUser(user: NonNullable<ServiceUser>): UserRecord {
     email: user.email,
     displayName: user.displayName ?? user.email,
     role: user.role,
+    preferencesJson: user.preferencesJson ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

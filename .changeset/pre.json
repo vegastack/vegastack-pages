@@ -17,6 +17,7 @@
     "clean-slate-rebuild",
     "create-page-source-precedence",
     "csp-unified-profile",
+    "datetime-prefs-and-trash-polish",
     "edge-case-hardening",
     "frontmatter-convention",
     "mcp-text-content-payload",

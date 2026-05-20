@@ -120,7 +120,11 @@ function formatBytes(bytes: number) {
                     </code>
                   </td>
                   <td>{formatBytes(attachment.byteSize)}</td>
-                  <td>{formatDate(attachment.createdAt)}</td>
+                  <td>
+                    <time datetime={attachment.createdAt}>
+                      {formatDate(attachment.createdAt)}
+                    </time>
+                  </td>
                 </tr>
               ))
             )
