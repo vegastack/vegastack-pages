@@ -324,6 +324,27 @@
   text-align: right;
 }
 
+/* Defense-in-depth icon sizing — components also pass explicit `size={16}`
+   on lucide icons, but if a future row-action drops the prop, this CSS
+   rule keeps them from rendering at lucide's 24px default. The members
+   table regression that prompted this rule landed because the matching
+   declaration lived in docs.css, which SettingsLayout does not import. */
+.settings-row-actions-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  justify-content: flex-end;
+}
+.settings-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.settings-row-action svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 .settings-inline-select,
 .settings-inline-input {
   width: 100%;

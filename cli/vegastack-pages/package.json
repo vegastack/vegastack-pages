@@ -1,6 +1,6 @@
 {
   "name": "@vegastack/pages",
-  "version": "0.1.14-next.5",
+  "version": "0.1.14-next.8",
   "private": false,
   "license": "MIT",
   "description": "VegaStack Pages CLI — author, review, and publish agent-assisted documentation.",

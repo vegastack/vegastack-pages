@@ -106,7 +106,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
     let uploadInput: {
       filename: string;
       contentType: string;
-      body: string | ArrayBuffer;
+      body: string | ArrayBuffer | Uint8Array;
       byteSize: number;
       imageWidth: number | null;
       imageHeight: number | null;
@@ -120,12 +120,27 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
         label: "Attachment upload",
       });
       const base64Body = String(body.base64_body ?? "");
-      // base64 expands by 4/3; the underlying byte size is the source
-      // length less padding. This is what users see for storage quota.
-      const decodedBytes = Math.floor(
-        (base64Body.replace(/=+$/, "").length * 3) / 4,
-      );
-      if (decodedBytes > maxBytes) {
+      // Decode the base64 string into raw bytes before storing.
+      // Previously the base64 STRING was stored as the body and the
+      // service layer text-encoded it as UTF-8 bytes, so every
+      // non-text download returned the base64 text instead of the
+      // original binary. The decoded length is also what users see
+      // for storage quota.
+      let decoded: Uint8Array;
+      try {
+        const binary = atob(base64Body);
+        decoded = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          decoded[i] = binary.charCodeAt(i);
+        }
+      } catch {
+        throw new AppError(
+          "VALIDATION_ERROR",
+          "base64_body must be valid base64-encoded bytes.",
+          400,
+        );
+      }
+      if (decoded.byteLength > maxBytes) {
         throw new AppError(
           "PAYLOAD_TOO_LARGE",
           `Attachment exceeds maximum size of ${maxBytes} bytes.`,
@@ -135,8 +150,8 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
       uploadInput = {
         filename: String(body.filename ?? ""),
         contentType: String(body.content_type ?? ""),
-        body: base64Body,
-        byteSize: decodedBytes,
+        body: decoded,
+        byteSize: decoded.byteLength,
         imageWidth:
           typeof body.image_width === "number" ? body.image_width : null,
         imageHeight:

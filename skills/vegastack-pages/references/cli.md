@@ -97,6 +97,8 @@ vpg pages wait <page> [--until first-response|new-comment|all-threads-resolved|t
 
 `vpg pages get` accepts page slugs as well as `pg_…` ids (cycle 5). The slug is resolved server-side.
 
+`vpg pages create` requires a title — pass `--title` explicitly or derive one from `--file` (basename → human-readable). Do NOT include a duplicate `# Title` (markdown/mdx) or `<h1>Title</h1>` (html) at the top of the source file; the server strips a leading heading that matches the page title so the title is never displayed twice.
+
 `vpg pages update` has three modes (mutually exclusive, mirrors MCP):
 
 - **Full replace**: `--file` / `--stdin` / `--source`.

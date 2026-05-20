@@ -1135,6 +1135,26 @@ describe("MCP route", () => {
     });
     expect(String(templatedPage.page_id)).toMatch(/^pg_/);
 
+    // When `source` is passed alongside `template_id`, the caller's
+    // source wins for the body. The template only seeds the source_type
+    // when the caller doesn't override it.
+    const overlaidPage = await callTool("create_page", {
+      workspace_id: workspaceId,
+      template_id: templateId,
+      title: `MCP Template Override ${suffix}`,
+      folder_path: "guides",
+      properties: { owner: "Runtime" },
+      source: "# Caller body wins\n\nThis text was drafted by the agent.",
+    });
+    expect(String(overlaidPage.page_id)).toMatch(/^pg_/);
+    const overlaidFetch = await callTool("fetch", {
+      workspace_id: workspaceId,
+      resource_id: String(overlaidPage.page_id),
+      include: ["source"],
+    });
+    expect(String(overlaidFetch.source)).toContain("Caller body wins");
+    expect(String(overlaidFetch.source)).not.toContain("Updated Summary");
+
     const invited = await tool("invite_workspace_member", {
       workspace_id: workspaceId,
       email: `mcp-all-tools-${suffix}@example.test`,

@@ -404,7 +404,7 @@ export function WorkspaceMembersManager({
                             title="Edit member"
                             type="button"
                           >
-                            <UserRoundPen aria-hidden="true" />
+                            <UserRoundPen size={16} aria-hidden="true" />
                           </button>
                           {current ? (
                             <button
@@ -419,7 +419,7 @@ export function WorkspaceMembersManager({
                               }
                               type="button"
                             >
-                              <LogOut aria-hidden="true" />
+                              <LogOut size={16} aria-hidden="true" />
                             </button>
                           ) : (
                             <button
@@ -434,7 +434,7 @@ export function WorkspaceMembersManager({
                               }
                               type="button"
                             >
-                              <Trash2 aria-hidden="true" />
+                              <Trash2 size={16} aria-hidden="true" />
                             </button>
                           )}
                         </div>

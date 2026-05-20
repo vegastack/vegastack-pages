@@ -15,8 +15,11 @@
   "changesets": [
     "cf-email-error-logging",
     "clean-slate-rebuild",
+    "create-page-source-precedence",
     "csp-unified-profile",
+    "edge-case-hardening",
     "mcp-text-content-payload",
+    "page-title-strip-and-session-ttl",
     "signup-form-and-docs",
     "suppress-session-kv"
   ]

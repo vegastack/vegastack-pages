@@ -30,7 +30,12 @@
 // ctx.computeTreeVersion(workspaceId) so the envelope reflects the
 // post-write nav state.
 
-import { AppError, makePageSlugId, slugifyTitle } from "@vegastack/pages-core";
+import {
+  AppError,
+  makePageSlugId,
+  slugifyTitle,
+  stripLeadingTitleFromSource,
+} from "@vegastack/pages-core";
 import { createId, idPrefixes } from "@vegastack/pages-core";
 import {
   d1AllRows,
@@ -539,7 +544,18 @@ export async function create(
 
   const title = input.title?.trim() || "Untitled";
   const sourceType: SourceType = input.sourceType ?? "markdown";
-  const source = input.source ?? "";
+  // The page row already carries the title; strip a leading
+  // `# {title}` (markdown/mdx) or `<h1>{title}</h1>` (html) from the
+  // source so the rendered surfaces and editor don't display the
+  // title twice. Templates ship `# {{ title }}` at the top, the web
+  // "new page" dialog seeds the title into the body, and CLI users
+  // habitually paste the title as their first heading — all three
+  // paths funnel through this strip.
+  const source = stripLeadingTitleFromSource(
+    input.source ?? "",
+    title,
+    sourceType,
+  );
 
   const id = input.id ?? createId(idPrefixes.page);
   const slug = slugifyTitle(title);
@@ -709,7 +725,15 @@ export async function updateSource(
   const previousContentHash = existing.content_hash;
   const previousVersionId = existing.version_id ?? "";
 
-  const newContentHash = await sha256Hex(input.source);
+  // Strip the leading title H1 if the caller accidentally re-introduced
+  // it (templates, agent prose drafted as "# {title}\n\nbody", etc.).
+  // The row's `title` field stays the single source of truth.
+  const normalizedSource = stripLeadingTitleFromSource(
+    input.source,
+    existing.title,
+    sourceType,
+  );
+  const newContentHash = await sha256Hex(normalizedSource);
   const changed = newContentHash !== previousContentHash;
 
   // Note: we want updateSource(samesource) to still bump updated_at so
@@ -728,7 +752,7 @@ export async function updateSource(
         sourceType,
       )
     : previousObjectKey;
-  const flags = scanFlags(input.source, sourceType);
+  const flags = scanFlags(normalizedSource, sourceType);
   const now = new Date().toISOString();
 
   // Write the new blob first when the bytes changed. Same-bytes saves
@@ -737,7 +761,7 @@ export async function updateSource(
   // writer won the race), we roll back this R2 put via the catch
   // branch so we don't accumulate orphan source blobs.
   if (changed) {
-    await objectStore.put(newObjectKey, input.source, {
+    await objectStore.put(newObjectKey, normalizedSource, {
       contentType: contentTypeFor(sourceType),
     });
   }
@@ -898,7 +922,7 @@ export async function updateSource(
   if (changed) {
     const workspaceId = existing.workspace_id;
     const pageId = existing.id;
-    const sourceBytes = input.source;
+    const sourceBytes = normalizedSource;
     const contentHash = newContentHash;
     const renderedKey = `pages/${workspaceId}/${pageId}/rendered-${contentHash}.html`;
     ctx.waitUntil(

@@ -163,20 +163,24 @@ export const mcpToolSpecs = [
   {
     name: "create_page",
     description:
-      "Create a Markdown, MDX, or HTML page in the selected workspace. Pass `template_id` to render from a template; required template properties are supplied via `properties`.",
+      "Create a Markdown, MDX, or HTML page in the selected workspace. `title` is REQUIRED and becomes the persisted page title — every rendered surface (the public /p view, the editor header, search snippets) reads it directly. Do NOT duplicate the title as a top-level `# {title}` (markdown/mdx) or `<h1>{title}</h1>` (html) in `source`; the server strips a matching leading heading on persist so the title never displays twice. Pass `template_id` to render from a template; required template properties are supplied via `properties`. If you ALSO pass a non-empty `source` alongside `template_id`, `source` wins for the body and the template is used only to derive `source_type`.",
     inputSchema: {
       type: "object",
       required: ["workspace_id", "title"],
       properties: {
         workspace_id: { type: "string" },
-        title: { type: "string" },
+        title: {
+          type: "string",
+          description:
+            "Persisted page title. Required and must be a non-empty string. Do not also write it as a leading H1 in `source` — the server strips a matching leading heading on persist.",
+        },
         source: { type: "string" },
         source_type: { type: "string", enum: ["markdown", "mdx", "html"] },
         folder_path: { type: "string" },
         template_id: {
           type: "string",
           description:
-            "Template id (tpl_…) or slug. When provided, source is rendered from the template using `properties` for frontmatter fields.",
+            "Template id (tpl_…) or slug. When provided, the page body is rendered from the template using `properties` for frontmatter fields — UNLESS a non-empty `source` is also passed, in which case `source` wins for the body.",
         },
         properties: {
           type: "object",

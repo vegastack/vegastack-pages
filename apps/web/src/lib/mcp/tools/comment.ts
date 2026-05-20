@@ -101,12 +101,19 @@ export async function updateThread(
   }
 
   // `complete: true` means "post a closing reply with agent attribution
-  // and resolve the thread in one call." The agent instructions document
-  // it; the previous code accepted the flag but did nothing with it
-  // (audit cycle 5 finding). Map it onto the existing reply + resolve
-  // path by forcing agent attribution and turning resolve on.
-  if (args.resolve === undefined && args.status === undefined) {
-    if (args.complete === true && asString(args.body, "").trim()) {
+  // and resolve the thread in one call." It requires a non-empty body —
+  // previously the flag was silently ignored when body was missing,
+  // leaving the caller thinking the thread had been closed when nothing
+  // happened. Reject the combo explicitly.
+  if (args.complete === true) {
+    if (!asString(args.body, "").trim()) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "complete=true requires a non-empty body (the closing reply).",
+        400,
+      );
+    }
+    if (args.resolve === undefined && args.status === undefined) {
       (args as Record<string, unknown>).resolve = true;
       if (!args.agent_name && context.actor.user) {
         (args as Record<string, unknown>).agent_name =

@@ -488,10 +488,16 @@ export async function createMcpSession(input: {
   await ensureRuntimeReady();
   const now = new Date().toISOString();
   const rawToken = randomBearerToken();
+  // Default lifetime for personal/manual MCP tokens (the ones minted
+  // from Settings → Connections). 365 days matches the long-lived
+  // convention used by GitHub PATs / Linear API keys / Notion API
+  // keys — practitioner-friendly without abandoning the option to
+  // rotate. OAuth issuance paths always pass an explicit ttlMs/
+  // ttlSeconds so this default does not affect agent-managed sessions.
   const ttlMs =
     input.ttlMs !== undefined
       ? input.ttlMs
-      : (input.ttlDays ?? 30) * 24 * 60 * 60_000;
+      : (input.ttlDays ?? 365) * 24 * 60 * 60_000;
   const session: McpSessionRecord = {
     id: await mcpSessionIdForBearer(rawToken),
     workspaceId: input.workspaceId,

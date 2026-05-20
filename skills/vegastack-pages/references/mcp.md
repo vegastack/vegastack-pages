@@ -97,17 +97,21 @@ No input. Returns `user_id`, `email`, session kind (`manual | cli | oauth`), cli
 
 ### `create_page`
 
+`title` is required and becomes the persisted page title — every surface (public /p view, editor header, search snippets, breadcrumbs) reads it from the row. Do NOT also write the title as a leading `# Title` (markdown/mdx) or `<h1>Title</h1>` (html) in `source` — the server strips a matching leading heading on persist so the title is never displayed twice.
+
 ```json
 {
   "workspace_id": "wks_abc123",
   "title": "Q3 Plan",
   "source_type": "markdown",
-  "source": "# Q3 Plan\n",
+  "source": "Plan body starts here — no leading H1.",
   "folder_path": "guides",
   "template_id": "tpl_review",
   "properties": { "owner": "platform" }
 }
 ```
+
+When `template_id` is provided alongside a non-empty `source`, `source` wins for the body and the template is used only to derive `source_type`. Omit `source` to get a fresh template render.
 
 ### `update_page` — one verb, three mutually exclusive modes
 

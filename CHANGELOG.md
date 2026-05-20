@@ -1,5 +1,177 @@
 # Changelog
 
+## 0.1.14-next.8
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- Make the page-title row field the single source of truth and extend
+  MCP session lifetimes.
+  - **Title duplication fixed.** Templates ship `# {{ title }}` at the
+    top of their bodies, the web "new page" dialog seeds the title as a
+    leading H1 into the source, and CLI/agent users habitually paste
+    the title as their first heading. The persisted source then carried
+    the title twice (once on the row, once as the first H1) so every
+    rendered surface showed it twice. `pages.create` and
+    `pages.updateSource` now strip a leading `# {title}` (markdown/mdx)
+    or `<h1>{title}</h1>` (html) that matches the page title on
+    persist. Non-matching first headings (`# Introduction`, etc.) are
+    left untouched. The strip is exported from `@vegastack/pages-core`
+    as `stripLeadingTitleFromSource` and also applied in the unchanged-
+    source guard on `PUT /api/pages/:id/source` so the no-op check stays
+    consistent.
+  - **`title` is now required on every create path.** `create_page`
+    (MCP), `POST /api/workspaces/:id/pages` (web + CLI), and the
+    template-id branch of `create_page` all surface a
+    `VALIDATION_ERROR` when the title is missing or blank, instead of
+    silently saving the page as "Untitled".
+  - **MCP refresh token lifetime extended.** Bumped from 60 days to
+    180 days, with the access token staying at 1 hour. Aligns with the
+    OAuth 2.1 BCP + MCP SEP-2207 guidance on short access tokens +
+    long-lived rotated refresh tokens; the longer window compensates
+    for known refresh-plumbing bugs in MCP clients (Claude.ai, etc.)
+    that occasionally force re-auth even when a valid refresh token
+    exists.
+  - **Personal MCP token default lifetime extended.** Tokens minted
+    from Settings → Connections default to 365 days now (was 30) to
+    match GitHub PAT / Linear API key / Notion API key conventions.
+    OAuth-issued sessions are unaffected — they always specify an
+    explicit lifetime.
+  - **Skill docs + tool descriptions updated** in
+    `packages/mcp/src/{index,instructions}.ts` and
+    `skills/vegastack-pages/references/{mcp,cli}.md` to spell out the
+    title contract: pass it explicitly, do not duplicate it in
+    `source`.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.8
+
+### @vegastack/pages-services
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.8
+  - @vegastack/pages-db@0.1.14-next.8
+  - @vegastack/pages-renderer@0.1.14-next.8
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.8
+  - @vegastack/pages-mcp@0.1.14-next.8
+  - @vegastack/pages-renderer@0.1.14-next.8
+  - @vegastack/pages-services@0.1.14-next.8
+  - @vegastack/pages-ui@0.1.14-next.8
+
+## 0.1.14-next.7
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- End-to-end edge-case hardening across MCP, CLI, and the settings UI.
+  - **Attachment uploads via base64 actually decoded.** Both the MCP
+    `upload_attachment` tool and the JSON `POST /api/pages/:id/attachments`
+    path (used by `vpg attachments upload`) were storing the _base64
+    string_ as the object body — the service layer UTF-8-encoded it as
+    bytes, so every non-text attachment downloaded afterwards returned
+    the base64 text instead of the original binary. Both paths now
+    decode the base64 into raw bytes before storing, and surface a
+    `VALIDATION_ERROR` for malformed input.
+  - **`update_thread` with `complete: true` requires a body.** Previously
+    passing `complete: true` without a body silently dropped the
+    closing-reply intent and left the thread open. It now errors with
+    `VALIDATION_ERROR`.
+  - **`move_page` requires at least one of `title` or `folder_path`.**
+    Calling `move_page` with neither was a silent no-op that returned
+    success — confusing for agents expecting an error.
+  - **Members table action icons render at 16px.** The styling rule lived
+    in `docs.css`, which `SettingsLayout` does not import, so the icons
+    were falling back to lucide-react's 24px default and dominating the
+    row. Icons now ship with explicit `size={16}` props AND a
+    defense-in-depth CSS rule moved into `settings.css`.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.7
+
+### @vegastack/pages-services
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.7
+  - @vegastack/pages-db@0.1.14-next.7
+  - @vegastack/pages-renderer@0.1.14-next.7
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.7
+  - @vegastack/pages-mcp@0.1.14-next.7
+  - @vegastack/pages-renderer@0.1.14-next.7
+  - @vegastack/pages-services@0.1.14-next.7
+  - @vegastack/pages-ui@0.1.14-next.7
+
+## 0.1.14-next.6
+
+### @vegastack/pages
+
+#### Patch Changes
+
+- `create_page` (MCP + CLI) now respects a caller-supplied `source` when
+  `template_id` is also passed. Previously the template render
+  unconditionally won and the caller's `source` was silently discarded —
+  which broke agent workflows where Claude had already drafted prose and
+  expected the template to only contribute structure/frontmatter. The new
+  precedence: if `source` is a non-empty string, it wins for the body;
+  the template_id is then used only to derive `source_type` and to
+  validate that the supplied properties match a known schema. Omit
+  `source` (or pass an empty string) to get the previous behavior — a
+  fresh template render. Tool description and the agent-facing
+  instructions in `@vegastack/pages-mcp` are updated to spell out the
+  precedence rule explicitly.
+
+### @vegastack/pages-mcp
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.6
+
+### @vegastack/pages-services
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.6
+  - @vegastack/pages-db@0.1.14-next.6
+  - @vegastack/pages-renderer@0.1.14-next.6
+
+### @vegastack/pages-web
+
+#### Patch Changes
+
+- Updated dependencies []:
+  - @vegastack/pages-core@0.1.14-next.6
+  - @vegastack/pages-mcp@0.1.14-next.6
+  - @vegastack/pages-renderer@0.1.14-next.6
+  - @vegastack/pages-services@0.1.14-next.6
+  - @vegastack/pages-ui@0.1.14-next.6
+
 ## 0.1.14-next.5
 
 ### @vegastack/pages

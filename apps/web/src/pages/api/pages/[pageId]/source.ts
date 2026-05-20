@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { stripLeadingTitleFromSource } from "@vegastack/pages-core";
 import { pages as pagesService, reviewEvents } from "@vegastack/pages-services";
 import { resolvePageAccess } from "../../../../lib/access";
 import {
@@ -76,7 +77,16 @@ export const PUT: APIRoute = async ({ cookies, params, request, url }) => {
       required: "write",
       guestName: body.guest_name ? String(body.guest_name) : null,
     });
-    const source = String(body.source ?? "");
+    // Strip a leading `# {title}` (markdown/mdx) or `<h1>{title}</h1>`
+    // (html) BEFORE the unchanged-check so callers re-sending the
+    // editor's rendered source (which never includes the title H1)
+    // still trip the no-op guard. The service layer also strips on
+    // persist; matching here keeps the comparison consistent.
+    const source = stripLeadingTitleFromSource(
+      String(body.source ?? ""),
+      page.page.title,
+      page.page.sourceType,
+    );
     if (
       body.base_content_hash &&
       page.page.contentHash !== String(body.base_content_hash)

@@ -102,7 +102,11 @@ describe("page API body limits", () => {
     expect(response.status).toBe(413);
     expect(body.error?.code).toBe("PAYLOAD_TOO_LARGE");
     const after = await pagesService.get(actorCtx, page.id);
-    expect(after?.source).toBe("# Body limit page");
+    // The leading H1 that matches the page title is stripped on
+    // persist so the title is not displayed twice. The fixture stored
+    // exactly "# Body limit page" with no body content, so the
+    // persisted source ends up empty.
+    expect(after?.source).toBe("");
   });
 
   it("rejects oversized comment bodies before creating a thread", async () => {

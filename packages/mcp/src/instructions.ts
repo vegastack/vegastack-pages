@@ -55,7 +55,7 @@ Use \`update_page\` with \`checkpoint: true\` before risky edits if you may need
 - \`fetch\` with a workspace_id and \`include: ["templates"]\` lists templates. Use \`fetch tpl_…\` to inspect a specific template's builder + property spec.
 - \`create_template\` / \`update_template\` accept \`builder.sections\` with level 2/3/4 headings plus a typed \`properties\` array (text, longtext, number, date, datetime, boolean, select, tags) and required/default/options.
 - \`render_template\` previews resolved Markdown without creating a page.
-- \`create_page\` with \`template_id\` materializes a page from a template (this is the old \`create_page_from_template\`). Required properties must be supplied.
+- \`create_page\` with \`template_id\` materializes a page from a template (this is the old \`create_page_from_template\`). Required properties must be supplied. If you have already drafted the body prose, pass it as \`source\` alongside \`template_id\` — \`source\` wins for the body and the template only seeds \`source_type\`. Omit \`source\` to get a fresh template render.
 
 ## Publishing
 

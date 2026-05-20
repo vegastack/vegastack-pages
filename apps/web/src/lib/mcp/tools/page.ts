@@ -31,12 +31,21 @@ export async function createPage(
   await assertWorkspacePermission(context, workspaceId, "write");
 
   // template_id branch: render the template into Markdown + create the page.
+  // If the caller ALSO provides a non-empty `source`, that wins for the body
+  // (the template render is only used to seed properties/source_type). This
+  // matches caller intent: when an agent has already drafted the prose, the
+  // template should not silently overwrite it. To force a fresh template
+  // render, omit `source` (or pass an empty string).
   const templateIdentifier =
     args.template_id !== undefined
       ? String(args.template_id)
       : args.template !== undefined
         ? String(args.template)
         : "";
+  const callerSource =
+    typeof args.source === "string" && args.source.length > 0
+      ? args.source
+      : "";
 
   if (templateIdentifier) {
     const template = await resolveTemplate(
@@ -44,7 +53,14 @@ export async function createPage(
       workspaceId,
       templateIdentifier,
     );
-    const title = asString(args.title);
+    const title = asString(args.title).trim();
+    if (!title) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "title is required and must be a non-empty string.",
+        400,
+      );
+    }
     const properties =
       args.properties && typeof args.properties === "object"
         ? (args.properties as Record<string, unknown>)
@@ -53,12 +69,19 @@ export async function createPage(
       templateId: template.id,
       values: { title, ...properties },
     });
+    const body = callerSource !== "" ? callerSource : rendered.body;
+    const sourceType =
+      args.source_type === "mdx" || args.source_type === "html"
+        ? args.source_type
+        : rendered.sourceType === "mdx"
+          ? "mdx"
+          : "markdown";
     const created = await pages.create(ctx, {
       workspaceId,
       folderPath: args.folder_path ? String(args.folder_path) : "",
       title,
-      sourceType: rendered.sourceType === "mdx" ? "mdx" : "markdown",
-      source: rendered.body,
+      sourceType,
+      source: body,
     });
     ctx.waitUntil(search.scheduleIndexPage(ctx, created.data.page.id));
     await audit.record(ctx, {
@@ -90,10 +113,21 @@ export async function createPage(
     return pageMutationResult(created.data.page, context);
   }
 
+  // Title is required; the row's title field is what every surface
+  // displays. The service layer would silently fall back to "Untitled"
+  // — better to surface the gap to the caller.
+  const titleArg = asString(args.title).trim();
+  if (!titleArg) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "title is required and must be a non-empty string.",
+      400,
+    );
+  }
   const created = await pages.create(ctx, {
     workspaceId,
     folderPath: args.folder_path ? String(args.folder_path) : "",
-    title: asString(args.title, "Untitled"),
+    title: titleArg,
     sourceType:
       args.source_type === "mdx" || args.source_type === "html"
         ? args.source_type
@@ -278,6 +312,14 @@ export async function movePage(
     args.folder_path === undefined
       ? undefined
       : String(args.folder_path).replace(/^\/+|\/+$/g, "");
+  const titleProvided = args.title !== undefined;
+  if (!titleProvided && args.folder_path === undefined) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "move_page requires at least one of `title` or `folder_path`.",
+      400,
+    );
+  }
   if (folderPath) {
     const allFolders = await folders.listAll(ctx, {
       workspaceId: page.page.workspaceId,

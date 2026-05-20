@@ -6,8 +6,19 @@ import {
   sha256Hex,
 } from "../runtime";
 
-export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
-export const REFRESH_TOKEN_TTL_MS = 60 * 24 * 60 * 60 * 1000;
+// OAuth token lifetimes. Per OAuth 2.1 BCP + MCP SEP-2207 (Feb 2026),
+// access tokens stay short-lived (≤1 hour) and refresh tokens are
+// long-lived but single-use (rotated on every redemption). Notion's
+// MCP server uses ~1h access tokens; we match that. Refresh TTL is
+// pushed to 180 days because Claude.ai and other MCP clients today
+// have known refresh-token plumbing bugs where they fail to use a
+// valid refresh token and prompt the user to re-auth; a longer
+// refresh window means even when refresh succeeds rarely the user
+// rarely sees a forced reconnect. Rotation on every redemption (see
+// /oauth/token refresh_token branch) means a stolen refresh token
+// invalidates on first legitimate use.
+export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+export const REFRESH_TOKEN_TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days
 export const AUTH_CODE_TTL_MS = 60 * 1000;
 export const DEVICE_CODE_TTL_MS = 10 * 60 * 1000;
 export const DEVICE_POLL_INTERVAL_S = 5;

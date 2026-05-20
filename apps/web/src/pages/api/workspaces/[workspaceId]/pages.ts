@@ -76,12 +76,20 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
         404,
       );
     }
+    const titleInput = String(body.title ?? "").trim();
+    if (!titleInput) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "title is required and must be a non-empty string.",
+        400,
+      );
+    }
     const result = await pagesService.create(ctx, {
       workspaceId,
       folderPath:
         folder?.path ??
         (typeof body.folder_path === "string" ? body.folder_path : ""),
-      title: String(body.title ?? "Untitled"),
+      title: titleInput,
       sourceType:
         body.source_type === "mdx" || body.source_type === "html"
           ? body.source_type

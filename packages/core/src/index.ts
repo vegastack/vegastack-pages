@@ -4,6 +4,7 @@ export * from "./errors";
 export * from "./anchors";
 export * from "./object-store";
 export * from "./page-service";
+export * from "./page-source";
 export * from "./setup";
 export * from "./comments";
 export * from "./publications";

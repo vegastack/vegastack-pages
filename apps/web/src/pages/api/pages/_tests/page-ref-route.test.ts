@@ -72,7 +72,9 @@ async function fixture() {
     folderPath: "",
     title: "Published internals",
     sourceType: "markdown",
-    source: "# Published internals",
+    // Non-title body so the leading-H1-strip doesn't reduce this
+    // fixture to empty string.
+    source: "Confidential body content for Published internals.",
   });
   const page = created.data.page;
   await publications.upsert(adminCtx, {
