@@ -20,6 +20,12 @@ pub enum PagesCommand {
     Restore(RestoreArgs),
     Versions(VersionsArgs),
     Wait(WaitArgs),
+    /// Soft-delete (move to trash) or hard-delete a page.
+    Delete(DeleteArgs),
+    /// Restore a soft-deleted page from the trash.
+    Undelete(UndeleteArgs),
+    /// List soft-deleted pages.
+    Trash(TrashArgs),
 }
 
 #[derive(Args, Debug)]
@@ -112,6 +118,28 @@ pub struct WaitArgs {
     pub after_id: Option<String>,
 }
 
+#[derive(Args, Debug)]
+pub struct DeleteArgs {
+    pub page: String,
+    /// Skip the trash window and hard-delete immediately. Requires
+    /// workspace admin. Defaults to soft-delete.
+    #[arg(long)]
+    pub permanent: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct UndeleteArgs {
+    pub page: String,
+}
+
+#[derive(Args, Debug)]
+pub struct TrashArgs {
+    /// "mine" returns just the pages this user trashed (default);
+    /// "workspace" returns the workspace-wide trash (editor+).
+    #[arg(long, default_value = "mine")]
+    pub scope: String,
+}
+
 pub async fn dispatch(
     cli: &Cli,
     writer: &Writer,
@@ -125,6 +153,9 @@ pub async fn dispatch(
         PagesCommand::Restore(args) => restore(cli, writer, args).await,
         PagesCommand::Versions(args) => versions(cli, writer, args).await,
         PagesCommand::Wait(args) => wait(cli, writer, args).await,
+        PagesCommand::Delete(args) => delete_page(cli, writer, args).await,
+        PagesCommand::Undelete(args) => undelete_page(cli, writer, args).await,
+        PagesCommand::Trash(args) => trash_list(cli, writer, args).await,
     }
 }
 
@@ -425,3 +456,54 @@ async fn wait(cli: &Cli, writer: &Writer, args: &WaitArgs) -> Result<(), VpgErro
         tokio::time::sleep(poll).await;
     }
 }
+
+async fn delete_page(cli: &Cli, writer: &Writer, args: &DeleteArgs) -> Result<(), VpgError> {
+    let workspace = resolved_workspace(cli)?;
+    let api = Api::new(cli)?;
+    let page_id = resolve_page_id(&api, &args.page, &workspace).await?;
+    let value = if args.permanent {
+        api
+            .delete(&with_workspace_query(
+                &format!("/api/pages/{page_id}/trash"),
+                &workspace,
+            ))
+            .await?
+    } else {
+        api
+            .post(
+                &with_workspace_query(&format!("/api/pages/{page_id}/trash"), &workspace),
+                &json!({}),
+            )
+            .await?
+    };
+    writer.emit_value(&value);
+    Ok(())
+}
+
+async fn undelete_page(cli: &Cli, writer: &Writer, args: &UndeleteArgs) -> Result<(), VpgError> {
+    let workspace = resolved_workspace(cli)?;
+    let api = Api::new(cli)?;
+    let page_id = resolve_page_id(&api, &args.page, &workspace).await?;
+    let value = api
+        .post(
+            &with_workspace_query(&format!("/api/pages/{page_id}/restore"), &workspace),
+            &json!({}),
+        )
+        .await?;
+    writer.emit_value(&value);
+    Ok(())
+}
+
+async fn trash_list(cli: &Cli, writer: &Writer, args: &TrashArgs) -> Result<(), VpgError> {
+    let workspace = resolved_workspace(cli)?;
+    let api = Api::new(cli)?;
+    let value = api
+        .get(
+            &format!("/api/workspaces/{workspace}/trash"),
+            &[("scope", args.scope.clone())],
+        )
+        .await?;
+    writer.emit_value(&value);
+    Ok(())
+}
+

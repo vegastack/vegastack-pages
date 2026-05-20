@@ -19,6 +19,7 @@ import { handle } from "@astrojs/cloudflare/handler";
 import { runWithWaitUntil, setCloudflareWaitUntil } from "./lib/background";
 import { runDueGitHubBackupSyncs } from "./lib/github-backup";
 import { runSearchReconciler } from "./lib/search-reconciler";
+import { runTrashAutoPurge } from "./lib/trash-purge";
 import { buildServiceContext } from "./lib/service-context";
 
 type WaitUntilCtx = { waitUntil(promise: Promise<unknown>): void };
@@ -41,8 +42,44 @@ export default {
       (controller as { cron?: string } | null)?.cron ?? "(unknown)";
     setCloudflareWaitUntil((promise) => ctx.waitUntil(promise));
 
-    // Two crons share this handler — dispatch by expression so the
-    // reconciler at 03:30 UTC doesn't run the GitHub backup at 03:00.
+    // Three crons share this handler — dispatch by expression so the
+    // reconciler at 03:30 UTC doesn't run the GitHub backup at 03:00,
+    // and the trash auto-purge at 04:00 runs on its own track.
+    if (cronExpr === "0 4 * * *") {
+      ctx.waitUntil(
+        (async () => {
+          const seedCookies = { get: () => undefined } as never;
+          const { ctx: serviceCtx } = await buildServiceContext({
+            cookies: seedCookies,
+          });
+          return runTrashAutoPurge(serviceCtx);
+        })()
+          .then((result) => {
+            console.log(
+              JSON.stringify({
+                event: "vpg.cron.completed",
+                job: "trash-auto-purge",
+                cron: cronExpr,
+                duration_ms: Date.now() - startedAt,
+                purged: result.purged,
+                failed: result.failed,
+              }),
+            );
+          })
+          .catch((error) => {
+            console.error(
+              JSON.stringify({
+                event: "vpg.cron.failed",
+                job: "trash-auto-purge",
+                cron: cronExpr,
+                duration_ms: Date.now() - startedAt,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          }),
+      );
+      return;
+    }
     if (cronExpr === "30 3 * * *") {
       ctx.waitUntil(
         runSearchReconciler()

@@ -23,6 +23,7 @@
     "page-title-strip-and-session-ttl",
     "publication-title-fallback",
     "signup-form-and-docs",
-    "suppress-session-kv"
+    "suppress-session-kv",
+    "trash-restore-backend"
   ]
 }

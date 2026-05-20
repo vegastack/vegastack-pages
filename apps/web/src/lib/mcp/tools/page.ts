@@ -357,3 +357,140 @@ export async function movePage(
     url: absoluteUrl(context, `/p/${updated.slugId}`),
   };
 }
+
+// Soft-delete (move to trash). The page row stays in D1 with
+// `deleted_at` set; restorable via restore_page within 30 days, then
+// the auto-purge cron hard-deletes. Pass `permanent: true` to skip
+// trash and hard-delete immediately (admin-only). Trashed pages stop
+// showing up in fetch/search/list responses for everyone.
+export async function deletePage(
+  args: Record<string, unknown>,
+  context: McpToolContext,
+) {
+  const ctx = context.ctx;
+  const permanent = Boolean(args.permanent);
+  const page = await getExistingPage(
+    context,
+    asString(args.page_id),
+    permanent ? "admin" : "write",
+    args.workspace_id,
+  );
+  if (permanent) {
+    // hardDelete requires the page to already be soft-deleted. Walk
+    // through the trash if the caller asks for immediate purge.
+    if (!page.page.deletedAt) {
+      await pages.softDelete(ctx, page.page.id);
+    }
+    const result = await pages.hardDelete(ctx, page.page.id);
+    await audit.record(ctx, {
+      workspaceId: result.workspaceId,
+      actorUserId: context.actor.user?.id ?? null,
+      action: "page.hard_deleted",
+      targetType: "page",
+      targetId: result.pageId,
+      metadata: { title: page.page.title, source: "mcp" },
+    });
+    return { ok: true, page_id: result.pageId, permanent: true };
+  }
+  const deleted = await pages.softDelete(ctx, page.page.id);
+  await audit.record(ctx, {
+    workspaceId: deleted.data.workspaceId,
+    actorUserId: context.actor.user?.id ?? null,
+    action: "page.soft_deleted",
+    targetType: "page",
+    targetId: deleted.data.id,
+    metadata: { title: page.page.title, source: "mcp" },
+  });
+  await reviewEvents.emit(ctx, {
+    workspaceId: deleted.data.workspaceId,
+    pageId: deleted.data.id,
+    type: "page.deleted",
+    actorUserId: context.actor.user?.id ?? null,
+    payload: {
+      page_id: deleted.data.id,
+      title: deleted.data.title,
+      source: "mcp",
+    },
+  });
+  return {
+    ok: true,
+    page_id: deleted.data.id,
+    deleted_at: deleted.data.deletedAt,
+    permanent: false,
+  };
+}
+
+// Restore a soft-deleted page. Editor+ on the workspace.
+export async function restorePage(
+  args: Record<string, unknown>,
+  context: McpToolContext,
+) {
+  const ctx = context.ctx;
+  const pageId = asString(args.page_id);
+  const existing = await pages.get(ctx, pageId, { includeDeleted: true });
+  if (!existing) {
+    throw new AppError("PAGE_NOT_FOUND", "Page was not found.", 404);
+  }
+  if (!existing.page.deletedAt) {
+    throw new AppError("VALIDATION_ERROR", "Page is not in the trash.", 400);
+  }
+  await assertWorkspacePermission(context, existing.page.workspaceId, "write");
+  const restored = await pages.restore(ctx, pageId);
+  await audit.record(ctx, {
+    workspaceId: restored.data.workspaceId,
+    actorUserId: context.actor.user?.id ?? null,
+    action: "page.restored",
+    targetType: "page",
+    targetId: restored.data.id,
+    metadata: { title: restored.data.title, source: "mcp" },
+  });
+  await reviewEvents.emit(ctx, {
+    workspaceId: restored.data.workspaceId,
+    pageId: restored.data.id,
+    type: "page.restored",
+    actorUserId: context.actor.user?.id ?? null,
+    payload: {
+      page_id: restored.data.id,
+      title: restored.data.title,
+      source: "mcp",
+    },
+  });
+  return { ok: true, page: restored.data };
+}
+
+// List trashed pages in a workspace. scope=mine returns just the
+// pages the caller deleted; scope=workspace returns all (editor+).
+export async function listTrash(
+  args: Record<string, unknown>,
+  context: McpToolContext,
+) {
+  const ctx = context.ctx;
+  const workspaceId = String(args.workspace_id ?? "");
+  if (!workspaceId) {
+    throw new AppError("WORKSPACE_REQUIRED", "workspace_id is required.", 400);
+  }
+  const scope: "mine" | "workspace" =
+    args.scope === "workspace" ? "workspace" : "mine";
+  await assertWorkspacePermission(
+    context,
+    workspaceId,
+    scope === "workspace" ? "write" : "read",
+  );
+  const items = await pages.listTrashed(ctx, {
+    workspaceId,
+    scope,
+    userId: context.actor.user?.id ?? null,
+  });
+  return {
+    scope,
+    items: items.map((entry) => ({
+      page_id: entry.pageId,
+      title: entry.title,
+      folder_path: entry.folderPath,
+      slug_id: entry.slugId,
+      source_type: entry.sourceType,
+      deleted_at: entry.deletedAt,
+      deleted_by_user_id: entry.deletedByUserId,
+    })),
+  };
+}

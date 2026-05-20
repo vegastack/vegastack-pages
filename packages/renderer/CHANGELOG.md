@@ -1,5 +1,7 @@
 # @vegastack/pages-renderer
 
+## 0.2.0-next.11
+
 ## 0.1.14-next.10
 
 ## 0.1.14-next.9

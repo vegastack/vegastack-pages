@@ -4,7 +4,10 @@ import { createComment, deleteThread, updateThread } from "./tools/comment";
 import { fetchResource } from "./tools/fetch";
 import {
   createPage,
+  deletePage,
+  listTrash,
   movePage,
+  restorePage,
   restorePageVersion,
   updatePage,
 } from "./tools/page";
@@ -34,6 +37,9 @@ export const toolHandlers: Record<McpToolName, ToolHandler> = {
   update_page: updatePage,
   restore_page_version: restorePageVersion,
   move_page: movePage,
+  delete_page: deletePage,
+  restore_page: restorePage,
+  list_trash: listTrash,
   create_comment: createComment,
   update_thread: updateThread,
   delete_thread: deleteThread,

@@ -109,13 +109,17 @@
   ],
 
   // Cron triggers:
-  //   "0 3 * * *"  — nightly GitHub backup sync (existing).
+  //   "0 3 * * *"  — nightly GitHub backup sync.
   //   "30 3 * * *" — nightly search-index reconciler (re-derives
   //                  search_documents + FTS5 entries from base tables,
   //                  heals any background-task drop that left search
   //                  stale).
+  //   "0 4 * * *"  — nightly trash auto-purge (hard-deletes pages
+  //                  whose deleted_at is older than 30 days, dropping
+  //                  the D1 row + page_versions cascade + R2 source
+  //                  + rendered artifact objects).
   "triggers": {
-    "crons": ["0 3 * * *", "30 3 * * *"],
+    "crons": ["0 3 * * *", "30 3 * * *", "0 4 * * *"],
   },
 
   // ---------------------------------------------------------------------

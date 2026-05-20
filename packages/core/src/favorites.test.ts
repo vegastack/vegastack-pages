@@ -15,6 +15,8 @@ function page(input: Partial<PageRecord> = {}): PageRecord {
     contentHash: "hash",
     versionId: "ver_1",
     renderedArtifactKey: null,
+    deletedAt: null,
+    deletedByUserId: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...input,

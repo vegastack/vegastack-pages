@@ -19,6 +19,8 @@ export type PageRecord = {
   // render lands. Updated by pages.service.ts.updateSource after the
   // renderer writes the artifact to pages/{ws}/{pg}/rendered-{hash}.html.
   renderedArtifactKey: string | null;
+  deletedAt: string | null;
+  deletedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -127,6 +129,8 @@ export class PageService {
       contentHash,
       versionId,
       renderedArtifactKey: null,
+      deletedAt: null,
+      deletedByUserId: null,
       createdAt: now,
       updatedAt: now,
     };

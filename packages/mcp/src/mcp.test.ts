@@ -9,7 +9,9 @@ import {
 
 describe("mcp tool registry", () => {
   it("keeps agreed tool names stable", () => {
-    // The post-refactor 19-tool surface (Notion-style verb_noun + mega-fetch).
+    // The post-refactor 22-tool surface (Notion-style verb_noun +
+    // mega-fetch). Bumped from 19 → 22 when the trash/restore/list_trash
+    // triple landed.
     expect(mcpToolNames).toContain("fetch");
     expect(mcpToolNames).toContain("search");
     expect(mcpToolNames).toContain("wait_for_review");
@@ -18,6 +20,9 @@ describe("mcp tool registry", () => {
     expect(mcpToolNames).toContain("update_page");
     expect(mcpToolNames).toContain("restore_page_version");
     expect(mcpToolNames).toContain("move_page");
+    expect(mcpToolNames).toContain("delete_page");
+    expect(mcpToolNames).toContain("restore_page");
+    expect(mcpToolNames).toContain("list_trash");
     expect(mcpToolNames).toContain("create_comment");
     expect(mcpToolNames).toContain("update_thread");
     expect(mcpToolNames).toContain("delete_thread");
@@ -78,8 +83,8 @@ describe("mcp tool registry", () => {
     }
   });
 
-  it("ships exactly the agreed 19-tool surface", () => {
-    expect(mcpToolNames.length).toBe(19);
-    expect(mcpToolSpecs.length).toBe(19);
+  it("ships exactly the agreed 22-tool surface", () => {
+    expect(mcpToolNames.length).toBe(22);
+    expect(mcpToolSpecs.length).toBe(22);
   });
 });

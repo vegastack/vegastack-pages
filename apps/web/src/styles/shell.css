@@ -1632,3 +1632,34 @@
     animation: none !important;
   }
 }
+
+/* "This page is in the trash" banner shown to logged-in workspace
+   editors when they navigate to a soft-deleted page. Anonymous
+   viewers get a generic 404 (see /p/[slugId].astro lookup). */
+.page-trash-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  background: var(--vsk-warning-tint-12, rgba(234, 179, 8, 0.12));
+  border-bottom: 1px solid var(--vsk-warning, #eab308);
+  padding: var(--space-sm) var(--space-lg);
+  font-size: var(--text-small);
+}
+.page-trash-banner p {
+  margin: 0;
+  color: var(--vsk-text);
+}
+.page-trash-banner-cta {
+  background: var(--vsk-text);
+  color: var(--vsk-bg, #fff);
+  border: 0;
+  border-radius: var(--vsk-radius-control, 6px);
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: var(--weight-medium, 500);
+}
+.page-trash-banner-cta:hover {
+  opacity: 0.85;
+}

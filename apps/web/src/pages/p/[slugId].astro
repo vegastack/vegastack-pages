@@ -28,6 +28,7 @@ import {
   favorites as favoritesService,
   folders as foldersService,
   pages as pagesService,
+  permissions as permissionsService,
   workspaces as workspacesService,
 } from "@vegastack/pages-services";
 import { buildServiceContext } from "../../lib/service-context";
@@ -48,10 +49,39 @@ const { ctx: lookupCtx } = await buildServiceContext({
   cookies: Astro.cookies,
   request: Astro.request,
 });
-const pageWithSource = slugId
+let pageWithSource = slugId
   ? await pagesService.getBySlugId(lookupCtx, slugId)
   : null;
+let inTrash = false;
+if (!pageWithSource && slugId) {
+  // Soft-deleted lookup. We only reveal the page exists in the trash
+  // to logged-in workspace editors; anonymous viewers fall through to
+  // the generic 404 to avoid leaking that the slug ever existed.
+  const trashedLookup = await pagesService.getBySlugId(lookupCtx, slugId, {
+    includeDeleted: true,
+  });
+  if (trashedLookup && trashedLookup.page.deletedAt && lookupCtx.actor.userId) {
+    const member = await workspacesService.getMember(lookupCtx, {
+      workspaceId: trashedLookup.page.workspaceId,
+      userId: lookupCtx.actor.userId,
+    });
+    const workspacePermission = await permissionsService.resolve(lookupCtx, {
+      workspaceId: trashedLookup.page.workspaceId,
+      userId: lookupCtx.actor.userId,
+      scope: "workspace",
+      targetId: trashedLookup.page.workspaceId,
+      memberRole: member?.role ?? null,
+    });
+    if (workspacePermission === "write" || workspacePermission === "admin") {
+      pageWithSource = trashedLookup;
+      inTrash = true;
+    }
+  }
+}
 if (!pageWithSource) {
+  // Match Google Drive's "Sorry, the file you have requested does not
+  // exist" phrasing — we never confirm/deny that the slug ever
+  // existed.
   return new Response("Page not found", { status: 404 });
 }
 
@@ -1246,6 +1276,22 @@ function withHtmlPreviewCsp(source: string, nonce: string) {
         )}
 
         <div class="vpg-shell-right">
+          {inTrash && (
+            <div class="page-trash-banner" role="status">
+              <p>
+                This page is in the trash. It will be permanently deleted 30
+                days after it was moved.
+              </p>
+              <form
+                method="post"
+                action={`/api/pages/${pageWithSource.page.id}/restore`}
+              >
+                <button type="submit" class="page-trash-banner-cta">
+                  Restore page
+                </button>
+              </form>
+            </div>
+          )}
           <PageHeader
             transition:persist="vpg-page-header"
             workspaceId={sidebarWorkspace.id}

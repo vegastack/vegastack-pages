@@ -19,6 +19,9 @@ export const mcpToolNames = [
   "update_page",
   "restore_page_version",
   "move_page",
+  "delete_page",
+  "restore_page",
+  "list_trash",
   // Comments
   "create_comment",
   "update_thread",
@@ -240,6 +243,53 @@ export const mcpToolSpecs = [
         page_id: { type: "string" },
         title: { type: "string" },
         folder_path: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "delete_page",
+    description:
+      "Soft-delete a page (move to trash). It disappears from fetch/search/list responses for everyone but stays restorable for 30 days before the auto-purge cron hard-deletes it. Pass `permanent: true` to skip the trash window and hard-delete immediately — admin-only.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id", "page_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        page_id: { type: "string" },
+        permanent: {
+          type: "boolean",
+          description:
+            "If true, hard-delete immediately (drops the D1 row, versions, R2 source + rendered objects). Requires workspace admin. Defaults to false (soft-delete).",
+        },
+      },
+    },
+  },
+  {
+    name: "restore_page",
+    description:
+      "Restore a soft-deleted page from the trash. Editor+ on the workspace. Fails with VALIDATION_ERROR if the page is not actually trashed.",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id", "page_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        page_id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "list_trash",
+    description:
+      "List soft-deleted pages in the workspace. `scope: 'mine'` (default) returns just pages the caller deleted; `scope: 'workspace'` returns all (requires editor+).",
+    inputSchema: {
+      type: "object",
+      required: ["workspace_id"],
+      properties: {
+        workspace_id: { type: "string" },
+        scope: {
+          type: "string",
+          enum: ["mine", "workspace"],
+        },
       },
     },
   },

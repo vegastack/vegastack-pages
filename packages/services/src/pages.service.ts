@@ -104,6 +104,7 @@ type PageRow = {
   has_iframe: number;
   rendered_artifact_key: string | null;
   deleted_at: string | null;
+  deleted_by_user_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -125,7 +126,7 @@ const PAGE_COLUMNS =
   "id, workspace_id, folder_id, title, slug, slug_id, source_type, " +
   "object_key_current, content_hash, version_id, position, " +
   "has_code, has_mermaid, has_math, has_wardley, has_cytoscape, has_iframe, " +
-  "rendered_artifact_key, deleted_at, created_at, updated_at";
+  "rendered_artifact_key, deleted_at, deleted_by_user_id, created_at, updated_at";
 
 const VERSION_COLUMNS =
   "id, page_id, workspace_id, object_key, source_hash, source_type, " +
@@ -249,6 +250,8 @@ async function rowToRecord(db: D1Database, row: PageRow): Promise<PageRecord> {
     contentHash: row.content_hash,
     versionId: row.version_id ?? "",
     renderedArtifactKey: row.rendered_artifact_key,
+    deletedAt: row.deleted_at,
+    deletedByUserId: row.deleted_by_user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -284,14 +287,13 @@ async function fetchPageRow(
 async function fetchPageRowBySlug(
   ctx: ServiceContext,
   slugId: string,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {},
 ): Promise<PageRow | null> {
   const db = requireDb(ctx);
-  const row = await db
-    .prepare(
-      `SELECT ${PAGE_COLUMNS} FROM pages WHERE slug_id = ?1 AND deleted_at IS NULL`,
-    )
-    .bind(slugId)
-    .first<PageRow>();
+  const sql = includeDeleted
+    ? `SELECT ${PAGE_COLUMNS} FROM pages WHERE slug_id = ?1`
+    : `SELECT ${PAGE_COLUMNS} FROM pages WHERE slug_id = ?1 AND deleted_at IS NULL`;
+  const row = await db.prepare(sql).bind(slugId).first<PageRow>();
   return row ?? null;
 }
 
@@ -354,12 +356,16 @@ export async function getByRef(
 }
 
 // Read a page by id (with source). Returns null if missing or
-// soft-deleted.
+// soft-deleted. Pass `{ includeDeleted: true }` to also load trashed
+// pages — used by the trash + restore + hardDelete routes.
 export async function get(
   ctx: ServiceContext,
   pageId: string,
+  options: { includeDeleted?: boolean } = {},
 ): Promise<PageWithSource | null> {
-  const row = await fetchPageRow(ctx, pageId);
+  const row = await fetchPageRow(ctx, pageId, {
+    includeDeleted: options.includeDeleted ?? false,
+  });
   if (!row) return null;
   const db = requireDb(ctx);
   return {
@@ -369,17 +375,23 @@ export async function get(
 }
 
 // Read a page by slug_id (with source). Returns null if missing or
-// soft-deleted.
+// soft-deleted. Pass `{ includeDeleted: true }` to also surface
+// trashed pages — the /p/:slug route uses this to render a friendly
+// "this page is in the trash" panel for logged-in workspace
+// editors while still showing a generic 404 to anonymous visitors.
 export async function getBySlugId(
   ctx: ServiceContext,
   slugId: string,
+  options: { includeDeleted?: boolean } = {},
 ): Promise<PageWithSource | null> {
-  const row = await fetchPageRowBySlug(ctx, slugId);
+  const row = await fetchPageRowBySlug(ctx, slugId, {
+    includeDeleted: options.includeDeleted ?? false,
+  });
   if (!row) return null;
   const db = requireDb(ctx);
   return {
     page: await rowToRecord(db, row),
-    source: await loadSource(ctx, row),
+    source: row.deleted_at ? "" : await loadSource(ctx, row),
   };
 }
 
@@ -437,6 +449,8 @@ async function rowsToPageRecords(
     contentHash: row.content_hash,
     versionId: row.version_id ?? "",
     renderedArtifactKey: row.rendered_artifact_key,
+    deletedAt: row.deleted_at,
+    deletedByUserId: row.deleted_by_user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -683,6 +697,8 @@ export async function create(
     contentHash,
     versionId,
     renderedArtifactKey: null,
+    deletedAt: null,
+    deletedByUserId: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -1083,6 +1099,8 @@ export async function move(
     contentHash: existing.content_hash,
     versionId: existing.version_id ?? "",
     renderedArtifactKey: existing.rendered_artifact_key,
+    deletedAt: existing.deleted_at,
+    deletedByUserId: existing.deleted_by_user_id,
     createdAt: existing.created_at,
     updatedAt: now,
   };
@@ -1122,16 +1140,18 @@ export async function softDelete(
   if (publication && !publication.revokedAt) {
     await publications.revoke(ctx, publication.id);
   }
+  const actorUserId = ctx.actor.userId || null;
   await db
     .prepare(
-      "UPDATE pages SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+      "UPDATE pages SET deleted_at = ?1, deleted_by_user_id = ?2, updated_at = ?1 WHERE id = ?3 AND deleted_at IS NULL",
     )
-    .bind(now, pageId)
+    .bind(now, actorUserId, pageId)
     .run();
 
   const page: PageRecord = await rowToRecord(db, {
     ...existing,
     deleted_at: now,
+    deleted_by_user_id: actorUserId,
     updated_at: now,
   });
   const treeVersion = await ctx.computeTreeVersion(page.workspaceId);
@@ -1160,7 +1180,7 @@ export async function restore(
   const now = new Date().toISOString();
   await db
     .prepare(
-      "UPDATE pages SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2",
+      "UPDATE pages SET deleted_at = NULL, deleted_by_user_id = NULL, updated_at = ?1 WHERE id = ?2",
     )
     .bind(now, pageId)
     .run();
@@ -1168,6 +1188,7 @@ export async function restore(
   const page = await rowToRecord(db, {
     ...existing,
     deleted_at: null,
+    deleted_by_user_id: null,
     updated_at: now,
   });
   const treeVersion = await ctx.computeTreeVersion(page.workspaceId);
@@ -1180,6 +1201,152 @@ export async function restore(
       changedResources: [`page:${page.id}`],
     }),
   };
+}
+
+// Hard-delete: only callable AFTER a soft-delete (so we never bypass the
+// trash window). Drops the D1 row (page_versions cascade via FK), the R2
+// source blob, and the rendered artifact. Audit row + review event so
+// reviewers polling wait_for_review notice the disappearance.
+export async function hardDelete(
+  ctx: ServiceContext,
+  pageId: string,
+): Promise<{ workspaceId: string; pageId: string }> {
+  const db = requireDb(ctx);
+  const objectStore = requireObjectStore(ctx);
+  const existing = await fetchPageRow(ctx, pageId, { includeDeleted: true });
+  if (!existing) {
+    throw new ServiceError("NOT_FOUND", "Page was not found.");
+  }
+  if (!existing.deleted_at) {
+    throw new ServiceError(
+      "VALIDATION",
+      "Page must be soft-deleted (in trash) before it can be permanently deleted.",
+    );
+  }
+
+  // Snapshot version object keys before the FK cascade nukes the rows.
+  const versions = await db
+    .prepare("SELECT object_key FROM page_versions WHERE page_id = ?1")
+    .bind(pageId)
+    .all<{ object_key: string }>();
+  const versionKeys = d1AllRows(versions).map((row) => row.object_key);
+
+  // DELETE FROM pages cascades to page_versions via FK.
+  await db.prepare("DELETE FROM pages WHERE id = ?1").bind(pageId).run();
+
+  // Best-effort object-store cleanup. R2 lifecycle policies are the
+  // final backstop if any of these fail.
+  const keysToDrop = new Set<string>();
+  keysToDrop.add(existing.object_key_current);
+  if (existing.rendered_artifact_key) {
+    keysToDrop.add(existing.rendered_artifact_key);
+  }
+  for (const key of versionKeys) keysToDrop.add(key);
+  for (const key of keysToDrop) {
+    try {
+      await objectStore.delete(key);
+    } catch (error) {
+      ctx.log("warn", "page.hard_delete.object_cleanup_failed", {
+        page_id: pageId,
+        key,
+        error: String(error),
+      });
+    }
+  }
+  return { workspaceId: existing.workspace_id, pageId };
+}
+
+export interface TrashedPageRecord {
+  pageId: string;
+  workspaceId: string;
+  title: string;
+  folderPath: string;
+  slug: string;
+  slugId: string;
+  sourceType: SourceType;
+  deletedAt: string;
+  deletedByUserId: string | null;
+}
+
+// List soft-deleted pages in a workspace. `scope: "mine"` filters to
+// pages the supplied userId trashed; `scope: "workspace"` returns all.
+export async function listTrashed(
+  ctx: ServiceContext,
+  input: {
+    workspaceId: string;
+    scope: "mine" | "workspace";
+    userId?: string | null;
+  },
+): Promise<TrashedPageRecord[]> {
+  const db = requireDb(ctx);
+  if (input.scope === "mine" && !input.userId) return [];
+  const sql =
+    input.scope === "mine"
+      ? `SELECT p.id, p.workspace_id, p.title, p.folder_id, p.slug, p.slug_id,
+                p.source_type, p.deleted_at, p.deleted_by_user_id,
+                f.path as folder_path
+         FROM pages p
+         LEFT JOIN folders f ON f.id = p.folder_id
+         WHERE p.workspace_id = ?1
+           AND p.deleted_at IS NOT NULL
+           AND p.deleted_by_user_id = ?2
+         ORDER BY p.deleted_at DESC`
+      : `SELECT p.id, p.workspace_id, p.title, p.folder_id, p.slug, p.slug_id,
+                p.source_type, p.deleted_at, p.deleted_by_user_id,
+                f.path as folder_path
+         FROM pages p
+         LEFT JOIN folders f ON f.id = p.folder_id
+         WHERE p.workspace_id = ?1
+           AND p.deleted_at IS NOT NULL
+         ORDER BY p.deleted_at DESC`;
+  const stmt =
+    input.scope === "mine"
+      ? db.prepare(sql).bind(input.workspaceId, input.userId)
+      : db.prepare(sql).bind(input.workspaceId);
+  const raw = await stmt.all<{
+    id: string;
+    workspace_id: string;
+    title: string;
+    folder_id: string | null;
+    slug: string;
+    slug_id: string;
+    source_type: string;
+    deleted_at: string;
+    deleted_by_user_id: string | null;
+    folder_path: string | null;
+  }>();
+  return d1AllRows(raw).map((row) => ({
+    pageId: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    folderPath: row.folder_path ?? "",
+    slug: row.slug,
+    slugId: row.slug_id,
+    sourceType: normalizeSourceType(row.source_type),
+    deletedAt: row.deleted_at,
+    deletedByUserId: row.deleted_by_user_id,
+  }));
+}
+
+// Returns the count of pages whose deleted_at is older than the cutoff
+// ISO timestamp. Used by the auto-purge cron job to know how much to
+// process; the cron then calls hardDelete for each id.
+export async function listExpiredTrashedIds(
+  ctx: ServiceContext,
+  input: { olderThan: string; limit: number },
+): Promise<string[]> {
+  const db = requireDb(ctx);
+  const raw = await db
+    .prepare(
+      `SELECT id FROM pages
+        WHERE deleted_at IS NOT NULL
+          AND deleted_at < ?1
+        ORDER BY deleted_at ASC
+        LIMIT ?2`,
+    )
+    .bind(input.olderThan, input.limit)
+    .all<{ id: string }>();
+  return d1AllRows(raw).map((row) => row.id);
 }
 
 export async function listVersions(

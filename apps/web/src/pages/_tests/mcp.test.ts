@@ -1208,6 +1208,26 @@ describe("MCP route", () => {
     });
     expect(Array.isArray(wsList.workspaces)).toBe(true);
 
+    // Exercise the trash/restore triple. Use the overlaidPage fixture
+    // created above so the assertion on every tool being touched is
+    // genuine (not just adding strings to the set).
+    const trashedId = String(overlaidPage.page_id);
+    await tool("delete_page", {
+      workspace_id: workspaceId,
+      page_id: trashedId,
+    });
+    const trashList = await tool("list_trash", {
+      workspace_id: workspaceId,
+      scope: "workspace",
+    });
+    expect(Array.isArray((trashList as { items?: unknown[] }).items)).toBe(
+      true,
+    );
+    await tool("restore_page", {
+      workspace_id: workspaceId,
+      page_id: trashedId,
+    });
+
     expect([...exercised].sort()).toEqual([...mcpToolNames].sort());
   });
 
