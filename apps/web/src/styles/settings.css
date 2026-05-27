@@ -1388,7 +1388,9 @@
   color: var(--vsk-muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 
 /* Native <dialog> modal */
