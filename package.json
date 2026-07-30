@@ -32,15 +32,15 @@
     "version-sync": "changeset version && node scripts/sync-version.mjs"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.6.0",
-    "@changesets/cli": "^2.27.1",
-    "@types/node": "^24.10.1",
-    "@vitest/coverage-v8": "^4.1.5",
-    "prettier": "^3.7.4",
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.1",
+    "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "prettier": "^3.9.6",
     "prettier-plugin-astro": "^0.14.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.5",
-    "wrangler": "^4.90.0",
-    "yaml": "^2.8.4"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.115.0",
+    "yaml": "^2.9.0"
   }
 }
